@@ -1,5 +1,5 @@
 #include <iostream>
-#include "my_class.hpp"
+#include "my_class.h"
 
 int main() {
     std::cout << "Hello, Meson + C++!" << std::endl;
