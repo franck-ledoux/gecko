@@ -142,7 +142,7 @@ namespace gmds {
             for(auto f_id:m_mesh->faces()){
                 Face f = m_mesh->get<Face>(f_id);
                 std::vector<Node> ns = f.get<Node>();
-                for(auto i=0; i<ns.size();i++){
+                for(size_t i=0; i<ns.size();i++){
                     Node ni=ns[i];
                     Node nj=ns[(i+1)%ns.size()];
                     std::vector<TCellID> fij = m_mesh->getCommonFaces(ni,nj);
@@ -840,6 +840,9 @@ namespace gmds {
     /*----------------------------------------------------------------------------*/
     void MeshDoctor::buildF2E(const MeshModel &ARefModel) const
     {
+        if(!ARefModel.has(F2N) || !ARefModel.has(E2N) || !ARefModel.has(F2E))
+            throw GMDSException("MeshDoctor::buildF2E Not yet implemented for this model");
+
         //we just have F2N and E2N
         std::map<TCellID,std::vector<TCellID> > tmp_N2E;
         for(auto e_id : m_mesh->edges()){
@@ -867,6 +870,9 @@ namespace gmds {
     /*----------------------------------------------------------------------------*/
     void MeshDoctor::buildR2E(const MeshModel &ARefModel) const
     {
+        if(!ARefModel.has(R2N) || !ARefModel.has(E2N) || !ARefModel.has(R2E))
+            throw GMDSException("MeshDoctor::buildF2E Not yet implemented for this model");
+
         //we just have R2N and E2N
         std::map<TCellID,std::vector<TCellID> > tmp_N2E;
         for(auto e_id : m_mesh->edges()){

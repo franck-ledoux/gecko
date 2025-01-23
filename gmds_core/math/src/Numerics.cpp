@@ -119,10 +119,7 @@ namespace gmds{
             double y31 = y3-y1;
             double y12 = y1-y2;
 
-            Vector3d v12=AP2-AP1;
-            Vector3d v13=AP3-AP1;
             double area2 = x1*y2 - x1*y3 - x2*y1 + x2*y3 + x3*y1 -x3*y2;
-            //      double area2 = v12.cross(v13).norm(); //value Area Triangle(AP1,AP2,AP3)
             double area4 = 2*area2;
             double inv_area4 = 1.0/area4;
             // First row
