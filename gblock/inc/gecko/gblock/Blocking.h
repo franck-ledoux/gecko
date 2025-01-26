@@ -7,8 +7,16 @@
 /*----------------------------------------------------------------------------*/
 #include <string>
 #include <tuple>
-#include <type_traits>
 
+#include <gmds/cad/GeomManager.h>
+#include <gmds/ig/Mesh.h>
+#include <gmds/io/IGMeshIOService.h>
+#include <gmds/io/VTKWriter.h>
+#include <gmds/math/Point.h>
+#include <gmds/utils/CommonTypes.h>
+#include <gmds/utils/Exception.h>
+
+using namespace gmds;
 /*----------------------------------------------------------------------------*/
 namespace gecko {
 namespace gblock {
@@ -47,7 +55,7 @@ struct CellInfo
 	/*** unique id of the topological cell */
 	int topo_id;
 	/*** link to the cad manager to have access to geometric cells */
-//	cad::GeomManager *geom_manager;
+	cad::GeomManager *geom_manager;
 	/*** link to the counter used to assign a unique id to each entity */
 	Counter *counter;
 	/*** dimension of the geometrical cell we are classified on */
@@ -134,7 +142,7 @@ struct MergeFunctor
 				ACA1.info().geom_dim = ACA2.info().geom_dim;
 			}
 			else
-				throw geckoException("Classification error!!!");
+				throw GMDSException("Classification error!!!");
 		}
 		else if (ACA1.info().geom_dim < ACA2.info().geom_dim) {
 			// the cells are classifed on the same dim geom entity
@@ -188,7 +196,7 @@ struct MergeFunctorNode
 				if (geom_cell != nullptr) ACA1.info().point = geom_cell->closestPoint(ACA1.info().point);
 			}
 			else
-				throw geckoException("Classification error!!!");
+				throw GMDSException("Classification error!!!");
 		}
 		else if (ACA1.info().geom_dim < ACA2.info().geom_dim) {
 			// the cells are classifed on the same dim geom entity
@@ -257,6 +265,8 @@ struct SplitFunctorNode
  */
 struct CellData
 {
+	//typedef CGAL::Tag_true Use_index; // CGAL::Tag_false by default
+	//typedef std::uint16_t Index_type; // std::uint32_t by default
 	template<class GMap> struct Dart_wrapper
 	{
 		using Node_attribute = CGAL::Cell_attribute<GMap, NodeInfo, CGAL::Tag_true, MergeFunctorNode, SplitFunctorNode>;
@@ -271,24 +281,24 @@ struct CellData
 /** Definition of my generalized map.*/
 using GMap3 = CGAL::Generalized_map<3, CellData>;
 /** Definition of the dart type.*/
-using Dart3 = GMap3::Dart_handle;
+using Dart3 = GMap3::Dart_descriptor;
 /*----------------------------------------------------------------------------*/
 /**@class Blocking
  * @brief Provide a curved blocking data structure using the 3-G-Map model
  * 		 as described and provided by CGAL.
  * 		 (see https://doc.cgal.org/latest/Generalized_map/index.html)
  */
-class LIB_gecko_MCTSBLOCK_API Blocking
+class  Blocking
 {
  public:
 	/** Inner type to see i-attributes as the respective block cells whe want
 	 * to handle in practice (considering a cellular view of the block structure
 	 * and not its underlying topological maps).
 	 */
-	using Block = GMap3::Attribute_handle<3>::type;
-	using Face = GMap3::Attribute_handle<2>::type;
-	using Edge = GMap3::Attribute_handle<1>::type;
-	using Node = GMap3::Attribute_handle<0>::type;
+	using Block = GMap3::Attribute_descriptor<3>::type;
+	using Face = GMap3::Attribute_descriptor<2>::type;
+	using Edge = GMap3::Attribute_descriptor<1>::type;
+	using Node = GMap3::Attribute_descriptor<0>::type;
 	/** @brief Constructor that takes a geom model as an input. A
 	 * blocking is always used for partitioning a geometric domain.
 	 * @param[in] AGeomModel the geometric model we want to block
@@ -581,7 +591,7 @@ class LIB_gecko_MCTSBLOCK_API Blocking
 	 * @return return the parameters for the cut, we get the edge (first) and the parameter included in ]0,1[ (second),
 	 * and the distance to the edge (third)
 	 */
-	std::tuple<Blocking::Edge, double, double> get_cut_info(const gecko::math::Point &APoint,
+	std::tuple<Blocking::Edge, double, double> get_cut_info(const gmds::math::Point &APoint,
 	                                                        const std::vector<Blocking::Edge> AEdges);
 
 	/**@brief Low level operation that @p TDim-sew two darts
@@ -635,7 +645,7 @@ class LIB_gecko_MCTSBLOCK_API Blocking
 	/** Removes the block @AB from the structure
 	 * @param[in] ABlockId the block id to remove
 	 */
-	void remove_block(const gecko::TCellID ABlockId);
+	void remove_block(const gmds::TCellID ABlockId);
 
 	/** Removes the block @AB from the structure
 	 * @param[in] AB the block to remove

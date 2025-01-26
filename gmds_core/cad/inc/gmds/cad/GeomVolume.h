@@ -60,7 +60,7 @@ namespace gmds{
 	          */
 	         math::Point closestPoint(const math::Point& AP) const override{
 
-		          throw GMDSException("GeomVolume::closestPoint not implemented");
+		          throw GMDSException("GeomVolume::closestPoint not implemented:");
 	         };
             /**@brief Accessor to the adjacent points. Warning, there is no
              *  assumption about the ordering

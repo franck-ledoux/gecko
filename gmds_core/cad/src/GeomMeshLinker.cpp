@@ -263,31 +263,31 @@ GeomMeshLinker::writeVTKDebugMesh(const std::string &AFileName)
 	vtkWriter.write(AFileName);
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API GeomMeshLinker::eLink
+template<>  GeomMeshLinker::eLink
 GeomMeshLinker::getGeomDim<Node>(const TCellID &AN)
 {
 	return (*m_node_classification_dim)[AN];
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API int
+template<>  int
 GeomMeshLinker::getGeomId<Node>(const TCellID &AN)
 {
 	return (*m_node_classification_id)[AN];
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API GeomMeshLinker::eLink
+template<>  GeomMeshLinker::eLink
 GeomMeshLinker::getGeomDim<Edge>(const TCellID &AN)
 {
 	return (*m_edge_classification_dim)[AN];
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API int
+template<>  int
 GeomMeshLinker::getGeomId<Edge>(const TCellID &AN)
 {
 	return (*m_edge_classification_id)[AN];
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API GeomMeshLinker::eLink
+template<>  GeomMeshLinker::eLink
 GeomMeshLinker::getGeomDim<Face>(const TCellID &AN)
 {
 	return (*m_face_classification_dim)[AN];
@@ -299,19 +299,19 @@ GeomMeshLinker::getGeomId<Face>(const TCellID &AN)
 	return (*m_face_classification_id)[AN];
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API std::pair<GeomMeshLinker::eLink, int>
+template<>  std::pair<GeomMeshLinker::eLink, int>
 GeomMeshLinker::getGeomInfo<Node>(const TCellID &AN)
 {
 	return std::make_pair((*m_node_classification_dim)[AN], (*m_node_classification_id)[AN]);
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API std::pair<GeomMeshLinker::eLink, int>
+template<>  std::pair<GeomMeshLinker::eLink, int>
 GeomMeshLinker::getGeomInfo<Edge>(const TCellID &AE)
 {
 	return std::make_pair((*m_edge_classification_dim)[AE], (*m_edge_classification_id)[AE]);
 }
 /*----------------------------------------------------------------------------*/
-template<> GMDSCad_API std::pair<GeomMeshLinker::eLink, int>
+template<>  std::pair<GeomMeshLinker::eLink, int>
 GeomMeshLinker::getGeomInfo<Face>(const TCellID &AF)
 {
 	return std::make_pair((*m_edge_classification_dim)[AF], (*m_edge_classification_id)[AF]);

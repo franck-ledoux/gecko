@@ -1,10 +1,23 @@
 inc_dir = include_directories('inc')
-lib_src = files('src/Blocking.cpp')
+lib_src = files('src/Blocking.cpp',
+                'src/BlockingClassifier.cpp',
+                'src/Graph.cpp')
 
 gblock_lib = library('gblock_lib',
                     lib_src,
                     include_directories: inc_dir,
-                     dependencies : [cgal_dep]
+                    dependencies : [cgal_dep,
+                                    boost_dep,
+                                    gmds_core_cad_lib_dep,
+                                    gmds_core_cadfac_lib_dep,
+                                    gmds_core_ig_lib_dep,
+                                    gmds_core_igalgo_lib_dep,
+                                    gmds_core_io_lib_dep,
+                                    gmds_core_math_lib_dep,
+                                    gmds_core_utils_lib_dep,
+                                    eigen3_dep]
 )
 
 gblock_lib_dep = declare_dependency(include_directories: inc_dir, link_with : gblock_lib)
+
+subdir('tst')

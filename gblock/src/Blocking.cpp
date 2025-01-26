@@ -1340,7 +1340,7 @@ Blocking::validate_pillowing_surface(std::vector<Face> &AFaces)
 }
 /*----------------------------------------------------------------------------*/
 void
-Blocking::mark_half_face(gmds::mctsblock::Dart3 ADart, int AMark)
+Blocking::mark_half_face(gecko::gblock::Dart3 ADart, int AMark)
 {
 	Dart3 d = ADart;
 	do {

@@ -1,11 +1,10 @@
-/*----------------------------------------------------------------------------*/
+#include <catch2/catch_test_macros.hpp>
+
 #include <gmds/ig/Mesh.h>
 #include <gmds/io/VTKReader.h>
 #include <gmds/io/MeditReader.h>
 #include <gmds/io/IGMeshIOService.h>
-/*----------------------------------------------------------------------------*/
-#include <iostream>
-#include <catch2/catch_test_macros.hpp>
+
 #include <unit_test_config.h>
 
 

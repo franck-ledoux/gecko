@@ -1,6 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 #include <gmds/ig/Mesh.h>
-#include <gmds/math/Point.h>
 
 TEST_CASE("BooleanMarkMesh: testNodeMarks", "[BooleanMarkMesh]") {
 	gmds::Mesh m(gmds::MeshModel(gmds::DIM3 | gmds::F | gmds::N | gmds::F2N));

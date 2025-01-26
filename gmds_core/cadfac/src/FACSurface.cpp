@@ -27,22 +27,17 @@ FACSurface::resetIdCounter()
 	m_next_id = 1;
 }
 /*----------------------------------------------------------------------------*/
-FACSurface::FACSurface(Mesh *AMesh) : m_support(AMesh), m_id(m_next_id++), m_kd_tree(nullptr) {}
+FACSurface::FACSurface(Mesh *AMesh) : m_support(AMesh), m_id(m_next_id++) {}
 /*----------------------------------------------------------------------------*/
 
 FACSurface::FACSurface(Mesh *AMesh, std::vector<TCellID> &ADiscret, const std::string &AName) :
-  GeomSurface(AName), m_support(AMesh), m_id(m_next_id++), m_mesh_faces(ADiscret), m_kd_tree(nullptr)
+  GeomSurface(AName), m_support(AMesh), m_id(m_next_id++), m_mesh_faces(ADiscret)
 {
-	buildANNTree();
 }
 /*----------------------------------------------------------------------------*/
 
 FACSurface::~FACSurface()
 {
-	// got to clean some technical attributes used by ANN
-	delete m_kd_tree;
-	annDeallocPts(m_dataPts);
-	annClose();     // done with ANN
 }
 /*----------------------------------------------------------------------------*/
 TCoord
@@ -123,14 +118,7 @@ FACSurface::closestPoint(const math::Point &AP) const
 {
 	Variable<int> *var_surf = m_support->getVariable<int, GMDS_FACE>("on_surface");
 
-	Face seed = m_support->get<Face>(getANNClosestTriangle(AP));
-	std::set<TCellID> face_ids;
-	std::vector<Node> ns = seed.get<Node>();
-	for (auto n : ns) {
-		std::vector<TCellID> f_ids = n.getIDs<Face>();
-		for (auto i : f_ids)
-			if (var_surf->value(i) == this->id()) face_ids.insert(i);
-	}
+	auto face_ids = m_support->faces();
 
 	Face f0 = m_support->get<Face>(*face_ids.begin());
 	TCoord min_dist = f0.distance(AP);
@@ -160,12 +148,6 @@ FACSurface::setMeshFaces(const std::vector<Face> &AFaces)
 		m_mesh_faces[i] = AFaces[i].id();
 	}
 
-	if (m_kd_tree != nullptr) {
-		delete m_kd_tree;
-		annDeallocPts(m_dataPts);
-	}
-
-	buildANNTree();
 }
 /*----------------------------------------------------------------------------*/
 void
@@ -330,66 +312,6 @@ std::vector<GeomVolume *> &
 FACSurface::volumes()
 {
 	return m_adjacent_volumes;
-}
-/*---------------------------------------------------------------------------*/
-void
-FACSurface::buildANNTree()
-{
-	if (m_kd_tree != nullptr) throw GMDSException("FACSurface Issue: the kd tree structure was previously initialized");
-
-	int dim = 3;                            // dimension
-	int maxPts = m_mesh_faces.size();       // maximum number of data points
-	m_dataPts = annAllocPts(maxPts, dim);     // allocate data points
-
-	//========================================================
-	// (1) Fill in the  ANN structure for storing points
-	// Important: Points in APnts and dataPnts are stored with
-	// same index.
-	//========================================================
-	int nPts = 0;     // actual number of data points
-
-	while (nPts < maxPts) {
-		math::Point p = m_support->get<Face>(m_mesh_faces[nPts]).center();
-		m_dataPts[nPts][0] = p.X();
-		m_dataPts[nPts][1] = p.Y();
-		m_dataPts[nPts][2] = p.Z();
-		nPts++;
-	};
-	//========================================================
-	// (2) Build the search structure
-	//========================================================
-	m_kd_tree = new ANNkd_tree(m_dataPts,     // the data points
-	                           nPts,        // number of points
-	                           dim);        // dimension of space
-}
-/*---------------------------------------------------------------------------*/
-TCellID
-FACSurface::getANNClosestTriangle(const math::Point &AP) const
-{
-	int k = 1;                     // max number of nearest neighbors
-	int dim = 3;                   // dimension
-
-	ANNpoint queryPt;              // query point
-	ANNidxArray nnIdx;             // near neighbor indices
-	ANNdistArray dists;            // near neighbor distances
-	queryPt = annAllocPt(dim);     // allocate 1 query point
-	nnIdx = new ANNidx[k];         // allocate near neigh indices
-	dists = new ANNdist[k];        // allocate near neighbor dists
-
-	queryPt[0] = AP.X();
-	queryPt[1] = AP.Y();
-	queryPt[2] = AP.Z();
-
-	m_kd_tree->annkSearch(     // search
-	   queryPt,                // query point
-	   k, nnIdx, dists, 0.01);
-	int idx = nnIdx[0];
-
-	annDeallocPt(queryPt);
-	delete[] nnIdx;
-	delete[] dists;
-
-	return m_mesh_faces[idx];
 }
 /*----------------------------------------------------------------------------*/
 }     // namespace cad

@@ -12,6 +12,8 @@ gmds_core_cadfac_lib = library('gmds_core_cadfac_lib',
                                      gmds_core_math_lib_dep,
                                      gmds_core_utils_lib_dep,
                                      gmds_core_ig_lib_dep,
+                                     gmds_core_igalgo_lib_dep,
+                                     gmds_core_io_lib_dep,
                                      ext_ann_lib_dep,
                                      eigen3_dep]
 )

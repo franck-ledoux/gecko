@@ -1,16 +1,9 @@
-//
-// Created by ledouxf on 1/22/19.
-//
-
-/*----------------------------------------------------------------------------*/
+#include <catch2/catch_test_macros.hpp>
 #include <gmds/ig/Mesh.h>
 #include <gmds/io/IGMeshIOService.h>
-#include <gmds/io/MeditReader.h>
 #include <gmds/io/VTKReader.h>
 #include <gmds/io/VTKWriter.h>
 #include <gmds/math/Point.h>
-#include <iostream>
-/*----------------------------------------------------------------------------*/
 using namespace gmds;
 
 TEST_CASE("MeshClass: testWriterVTK_NF", "[Mesh][VTK]") {

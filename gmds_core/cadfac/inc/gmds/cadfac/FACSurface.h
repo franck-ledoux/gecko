@@ -15,7 +15,6 @@
 #include <gmds/ig/Face.h>
 #include <gmds/math/Triangle.h>
 /*----------------------------------------------------------------------------*/
-#include <ANN/ANN.h>
 #include <tuple>
 /*----------------------------------------------------------------------------*/
 namespace gmds{
@@ -170,13 +169,6 @@ namespace gmds{
             static void resetIdCounter();
         private:
 
-            /**@brief Build a ANN tree data structure to accelerate retrieval information
-             *        in the surface.
-             */
-            void buildANNTree();
-            TCellID getANNClosestTriangle(const math::Point& AP) const;
-
-
         private:
 
             /** the global mesh the surface is built on*/
@@ -195,9 +187,6 @@ namespace gmds{
             /** volumes adjacent to this surface*/
             std::vector<GeomVolume*> m_adjacent_volumes;
 
-            /** kd tree structure used to make geometric queries faster*/
-	         ANNpointArray m_dataPts;
-            ANNkd_tree* m_kd_tree;
         };
 /*----------------------------------------------------------------------------*/
     } // namespace cad

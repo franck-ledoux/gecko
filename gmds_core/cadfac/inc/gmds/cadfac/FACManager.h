@@ -19,18 +19,9 @@
 #include "gmds/cadfac/FACVolume.h"
 
 #include "gmds/cad/GeomMeshLinker.h"
-#include "gmds/ig/Edge.h"
 #include "gmds/ig/Mesh.h"
 #include "gmds/ig/MeshDoctor.h"
-#include "gmds/ig/Node.h"
 
-/*----------------------------------------------------------------------------*/
-// avoid #include <gts.h> here by using forward declaration for
-// the GTS data structure; also requires GNode of the glib
-struct _GtsSurface;
-typedef _GtsSurface GtsSurface;
-struct _GNode;
-typedef _GNode GNode;
 /*----------------------------------------------------------------------------*/
 namespace gmds {
 /*----------------------------------------------------------------------------*/
@@ -287,10 +278,6 @@ class FACManager : public GeomManager
 	std::map<TInt, TInt> m_map_node_var_to_point;
 	std::map<TInt, TInt> m_map_edge_var_to_curve;
 	std::map<TInt, TInt> m_map_face_var_to_surf;
-
-	// GTS data structure for fast retrieval
-	GtsSurface* m_gsurf;
-	GNode* m_groot;
 };
 /*----------------------------------------------------------------------------*/
 }     // namespace cad
