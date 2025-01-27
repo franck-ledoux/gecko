@@ -1,9 +1,4 @@
 /*----------------------------------------------------------------------------*/
-/** \file    FacetedSurface.t.h
- *  \author  F. LEDOUX
- *  \date    30/05/2011
- */
-/*----------------------------------------------------------------------------*/
 #include <algorithm>
 #include <map>
 #include <set>
@@ -32,17 +27,33 @@ namespace gmds {
 		}
 
 		/*----------------------------------------------------------------------------*/
-
 		FACSurface::FACSurface(Mesh *AMesh, std::vector<TCellID> &ADiscret,
 		                       const std::string &AName) : GeomSurface(AName), m_support(AMesh), m_id(m_next_id++),
 		                                                   m_mesh_faces(ADiscret) {
+			buildResearchTree();
+		}
+		/*----------------------------------------------------------------------------*/
+		FACSurface::~FACSurface() {
 		}
 
 		/*----------------------------------------------------------------------------*/
 
-		FACSurface::~FACSurface() {
-		}
+		void FACSurface::buildResearchTree() {
+			for (auto f_id :m_mesh_faces) {
+				auto f = m_support->get<Face>(f_id);
+				std::vector<Node> ns = f.get<Node>();
+				auto p0 = ns[0].point();
+				auto p1 = ns[1].point();
+				auto p2 = ns[2].point();
+				m_CGAL_triangles.emplace_back(Point(p0.X(), p0.Y(), p0.Z()),
+					Point(p1.X(), p1.Y(), p1.Z()),
+					Point(p2.X(), p2.Y(), p2.Z()));
 
+			}
+
+			m_AABBTree =  Tree(m_CGAL_triangles.begin(), m_CGAL_triangles.end());
+			m_AABBTree.accelerate_distance_queries(); // Optimisation pour les recherches de distances
+		}
 		/*----------------------------------------------------------------------------*/
 		TCoord
 		FACSurface::computeArea() const {
@@ -116,18 +127,8 @@ namespace gmds {
 		/*----------------------------------------------------------------------------*/
 		math::Point
 		FACSurface::closestPoint(const math::Point &AP) const {
-			Variable<int> *var_surf = m_support->getVariable<int, GMDS_FACE>("on_surface");
-
-			TCoord min_dist = MAXFLOAT;
-			TCellID closest_face_id = NullID;
-			for (auto f_id: m_mesh_faces) {
-				TCoord dist = m_support->get<Face>(f_id).distance(AP);
-				if (dist < min_dist) {
-					min_dist = dist;
-					closest_face_id = f_id;
-				}
-			}
-			return m_support->get<Face>(closest_face_id).project(AP);
+			auto closest_point = m_AABBTree.closest_point(Point(AP.X(), AP.Y(), AP.Z()));
+			return {closest_point.x(), closest_point.y(), closest_point.z()};
 		}
 
 		/*----------------------------------------------------------------------------*/

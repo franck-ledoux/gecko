@@ -17,9 +17,23 @@
 /*----------------------------------------------------------------------------*/
 #include <tuple>
 /*----------------------------------------------------------------------------*/
+#include <CGAL/AABB_tree.h>
+#include <CGAL/Simple_cartesian.h>
+#include <CGAL/Triangle_3.h>
+#include <CGAL/AABB_triangle_primitive.h>
+#include <CGAL/AABB_traits.h>
+/*----------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------*/
 namespace gmds{
 /*----------------------------------------------------------------------------*/
     namespace cad{
+
+    	typedef CGAL::Simple_cartesian<double> Kernel;
+    	typedef Kernel::Point_3 Point;
+    	typedef Kernel::Triangle_3 Triangle;
+    	typedef CGAL::AABB_triangle_primitive<Kernel, std::vector<Triangle>::iterator> Primitive;
+    	typedef CGAL::AABB_traits<Kernel, Primitive> Traits;
+    	typedef CGAL::AABB_tree<Traits> Tree;
 /*----------------------------------------------------------------------------*/
         class FACCurve;
         class FACPoint;
@@ -169,6 +183,12 @@ namespace gmds{
             static void resetIdCounter();
         private:
 
+
+        	/**@brief Build a AABB tree data structure to accelerate retrieval information
+			 *        in the surface.
+			 */
+        	void buildResearchTree();
+
         private:
 
             /** the global mesh the surface is built on*/
@@ -187,6 +207,9 @@ namespace gmds{
             /** volumes adjacent to this surface*/
             std::vector<GeomVolume*> m_adjacent_volumes;
 
+        	/** Research tree to accelerate distance queries*/
+        	Tree m_AABBTree;
+        	std::vector<Triangle> m_CGAL_triangles;
         };
 /*----------------------------------------------------------------------------*/
     } // namespace cad
