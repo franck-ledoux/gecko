@@ -2,6 +2,8 @@
 #ifndef GMDS_MCTS_BLOCKING_ACTION_H
 #define GMDS_MCTS_BLOCKING_ACTION_H
 /*----------------------------------------------------------------------------*/
+#include <gmds/math/AxisAngleRotation.h>
+
 #include "mcts/IAction.h"
 #include <gmds/utils/CommonTypes.h>
 /*----------------------------------------------------------------------------*/
@@ -21,7 +23,7 @@ class EdgeCutAction : public IAction {
 	 */
 	std::shared_ptr<IState> apply_on(std::shared_ptr<IState> AState) const override;
 
-	EdgeCutAction(const gmds::TCellID AEdgeId, const double AParam);
+	EdgeCutAction(const gmds::TCellID AEdgeId, const double AParam,const gmds::math::Point APoint);
 
 	bool operator==(const IAction& other) const override;
 	std::string get_description() const override;
@@ -31,6 +33,8 @@ class EdgeCutAction : public IAction {
 	gmds::TCellID m_edge_id;
 	/** the parameter where the edge is cutted */
 	double m_cut_param;
+	/** the point that we try to capture */
+	gmds::math::Point m_capt_point;
 };
 
 /*----------------------------------------------------------------------------*/
