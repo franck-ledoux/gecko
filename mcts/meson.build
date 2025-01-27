@@ -1,4 +1,5 @@
 inc_dir = include_directories('inc', 'spam/inc')
+
 lib_src = files('src/BlockingAction.cpp',
                 'src/BlockingState.cpp',
                 'src/BlockingRewardFunction.cpp',

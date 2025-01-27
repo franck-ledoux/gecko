@@ -1074,13 +1074,13 @@ BlockingClassifier::get_closest_cell(const math::Point &AP, const std::vector<ca
 	math::Point closest_point = AGeomCells[0]->closestPoint(AP);
 	double closest_distance = AP.distance(closest_point);
 	int closest_id = AGeomCells[0]->id();
-	for (auto geom_crv : AGeomCells) {
-		math::Point current_point = geom_crv->closestPoint(AP);
+	for (auto geom_cell : AGeomCells) {
+		math::Point current_point = geom_cell->closestPoint(AP);
 		double current_dist = AP.distance(current_point);
 		if (current_dist < closest_distance) {
 			closest_distance = current_dist;
 			closest_point = current_point;
-			closest_id = geom_crv->id();
+			closest_id = geom_cell->id();
 		}
 	}
 	return {closest_distance, closest_id, closest_point};
