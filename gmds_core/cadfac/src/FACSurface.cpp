@@ -22,9 +22,6 @@ namespace gmds {
 			m_next_id = 1;
 		}
 
-		/*----------------------------------------------------------------------------*/
-		FACSurface::FACSurface(Mesh *AMesh) : m_support(AMesh), m_id(m_next_id++) {
-		}
 
 		/*----------------------------------------------------------------------------*/
 		FACSurface::FACSurface(Mesh *AMesh, std::vector<TCellID> &ADiscret,
@@ -256,7 +253,7 @@ namespace gmds {
 				remain_curves = false;
 				//we pick a non-traversed curve
 				int curve_id = -1;
-				for (auto i = 0; i < m_adjacent_curves.size() & remain_curves == false; i++) {
+				for (size_t i = 0; i < m_adjacent_curves.size() & remain_curves == false; i++) {
 					if (traversed_curves[m_adjacent_curves[i]->id()] == false) {
 						remain_curves = true;
 						curve_id = i;

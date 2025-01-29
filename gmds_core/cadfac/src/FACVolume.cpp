@@ -1,14 +1,9 @@
 /*----------------------------------------------------------------------------*/
-/** \file    FacetedVolume.t.h
- *  \author  F. LEDOUX
- *  \date    29/06/2011
- */
-/*----------------------------------------------------------------------------*/
-// GMDS File Headers
-/*----------------------------------------------------------------------------*/
 #include <algorithm>
 #include <gmds/cadfac/FACVolume.h>
-#include <set>
+#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+#include <CGAL/Polyhedron_3.h>
+#include <CGAL/Side_of_triangle_mesh.h>
 /*----------------------------------------------------------------------------*/
 namespace gmds {
 /*----------------------------------------------------------------------------*/
@@ -22,7 +17,25 @@ FACVolume::resetIdCounter()
 	m_next_id = 1;
 }
 /*----------------------------------------------------------------------------*/
-FACVolume::FACVolume(const std::string &AName) : GeomVolume(AName), m_id(m_next_id++) {}
+FACVolume::FACVolume(Mesh* AMesh,const std::string &AName)
+	: GeomVolume(AName),
+	  m_id(m_next_id++) {
+
+
+	std::map<TCellID,CGAL::SM_Vertex_index>  n2n;
+	for (auto n_id: AMesh->nodes()) {
+		auto n = AMesh->get<Node>(n_id);
+		auto p = n.point();
+		auto index = m_bnd_mesh.add_vertex({p.X(), p.Y(), p.Z()});
+		n2n.insert(std::make_pair(n_id, index));
+	}
+	//all the faces of bnd_mesh are on the boundary
+	for (auto f_id: AMesh->faces()) {
+		auto f_node_ids = AMesh->get<Face>(f_id).getIDs<Node>();
+		m_bnd_mesh.add_face(n2n[f_node_ids[0]], n2n[f_node_ids[1]],n2n[f_node_ids[2]]);
+	}
+}
+
 /*----------------------------------------------------------------------------*/
 FACVolume::~FACVolume() {}
 /*----------------------------------------------------------------------------*/
@@ -31,6 +44,17 @@ FACVolume::computeArea() const
 {
 	throw GMDSException("FACVolume::computeArea: not yet implemented");
 }
+/*----------------------------------------------------------------------------*/
+	void FACVolume::project(gmds::math::Point &AP) const {
+	throw GMDSException("FACVolume::project: not yet implemented");
+
+	}
+	/*----------------------------------------------------------------------------*/
+math::Point FACVolume::closestPoint(const math::Point &AP) const {
+	throw GMDSException("FACVolume::project: not yet implemented");
+
+}
+
 /*----------------------------------------------------------------------------*/
 void
 FACVolume::computeBoundingBox(TCoord minXYZ[3], TCoord maxXYZ[3]) const
@@ -53,7 +77,7 @@ FACVolume::BBox() const{
 	// we have at least one surface
 	TCoord minXYZ[3], maxXYZ[3];
 	m_adjacent_surfaces[0]->computeBoundingBox(minXYZ, maxXYZ);
-	for (auto s_id = 1; s_id < m_adjacent_surfaces.size(); s_id++) {
+	for (size_t s_id = 1; s_id < m_adjacent_surfaces.size(); s_id++) {
 		GeomSurface *s = m_adjacent_surfaces[s_id];
 		TCoord min_s[3], max_s[3];
 		s->computeBoundingBox(min_s, max_s);
@@ -66,9 +90,17 @@ FACVolume::BBox() const{
 	}
 	return {minXYZ[0],minXYZ[1],minXYZ[2],maxXYZ[0],maxXYZ[1],maxXYZ[2]};
 }
+	/*----------------------------------------------------------------------------*/
 
-   /*----------------------------------------------------------------------------*/
-   std::vector<GeomPoint *> &FACVolume::points()
+bool FACVolume::isIn(const math::Point &AP) const {
+
+	CGAL::Side_of_triangle_mesh<CGAL_Surface_Mesh, CGAL_Kernel> inside(m_bnd_mesh);
+
+	return inside({AP.X(),AP.Y(),AP.Z()}) == CGAL::ON_BOUNDED_SIDE;
+}
+	/*----------------------------------------------------------------------------*/
+
+	std::vector<GeomPoint *> &FACVolume::points()
 {
 	return m_adjacent_points;
 }

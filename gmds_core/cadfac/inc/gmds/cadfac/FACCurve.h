@@ -35,12 +35,6 @@ class  FACCurve : public GeomCurve
 
  public:
 	/*------------------------------------------------------------------------*/
-	/** @brief  Default Constructor
-	 *  @param AMeshSupport Mesh support for the faceted model
-	 */
-	FACCurve(Mesh *AMeshSupport);
-
-	/*------------------------------------------------------------------------*/
 	/** \brief  Constructor. A geometric curve is built as an ordered
 	 * 			collection of points.
 	 * 			The points vector must contain

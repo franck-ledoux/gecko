@@ -79,7 +79,7 @@ class GeomPoint : public GeomEntity
 	 *
 	 *  \return a numeric point
 	 */
-	math::Point point() const
+	virtual math::Point point() const
 	{
 		TCoord coordinates[3];
 		XYZ(coordinates);
@@ -103,7 +103,7 @@ class GeomPoint : public GeomEntity
 	 *  \return the closest point of APoint on the surface
 	 */
 	math::Point closestPoint(const math::Point &AP) const override{
-		return math::Point(X(),Y(),Z());
+		return {X(),Y(),Z()};
 	}
 
 	int id() const override = 0;

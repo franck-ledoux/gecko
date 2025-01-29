@@ -46,26 +46,11 @@ FACManager::initFrom3DMesh(Mesh *AFromMesh)
 
 	BoundaryExtractor3D boundary_extractor(AFromMesh, &m_mesh);
 
-	Variable<int> *node_on_pnt = nullptr;
-
-	Variable<int> *node_on_crv = nullptr;
-	Variable<int> *node_on_srf = nullptr;
-	Variable<int> *edge_on_crv = nullptr;
-	Variable<int> *face_on_srf = nullptr;
-	try {
-		node_on_pnt = m_mesh.newVariable<int, GMDS_NODE>("on_point");
-		node_on_crv = m_mesh.newVariable<int, GMDS_NODE>("on_curve");
-		node_on_srf = m_mesh.newVariable<int, GMDS_NODE>("on_surface");
-		edge_on_crv = m_mesh.newVariable<int, GMDS_EDGE>("on_curve");
-		face_on_srf = m_mesh.newVariable<int, GMDS_FACE>("on_surface");
-	}
-	catch (GMDSException &e) {
-		node_on_pnt = m_mesh.getVariable<int, GMDS_NODE>("on_point");
-		node_on_crv = m_mesh.getVariable<int, GMDS_NODE>("on_curve");
-		node_on_srf = m_mesh.getVariable<int, GMDS_NODE>("on_surface");
-		edge_on_crv = m_mesh.getVariable<int, GMDS_EDGE>("on_curve");
-		face_on_srf = m_mesh.getVariable<int, GMDS_FACE>("on_surface");
-	}
+	Variable<int> *node_on_pnt = m_mesh.getOrCreateVariable<int, GMDS_NODE>("on_point");
+	Variable<int> *node_on_crv = m_mesh.getOrCreateVariable<int, GMDS_NODE>("on_curve");
+	Variable<int> *node_on_srf = m_mesh.getOrCreateVariable<int, GMDS_NODE>("on_surface");
+	Variable<int> *edge_on_crv = m_mesh.getOrCreateVariable<int, GMDS_EDGE>("on_curve");
+	Variable<int> *face_on_srf = m_mesh.getOrCreateVariable<int, GMDS_FACE>("on_surface");
 
 	boundary_extractor.setColorOption(node_on_pnt, edge_on_crv, face_on_srf, node_on_srf, node_on_crv);
 
@@ -128,7 +113,7 @@ FACManager::initFrom3DMesh(Mesh *AFromMesh)
 	}
 
 	// We build a single volume!
-	FACVolume *v = new FACVolume();
+	FACVolume *v = new FACVolume(&m_mesh);
 	m_volumes.push_back(v);
 	buildTopologicalConnectivity();
 }
@@ -250,7 +235,7 @@ FACManager::initAndLinkFrom3DMesh(Mesh *AFromMesh, GeomMeshLinker *ALinker)
 	}
 
 	// We build a single volume!
-	FACVolume *v = new FACVolume();
+	FACVolume *v = new FACVolume(&m_mesh);
 	m_volumes.push_back(v);
 	buildTopologicalConnectivity();
 }
@@ -259,7 +244,6 @@ void
 FACManager::buildTopologicalConnectivity(const int ADim)
 {
 
-	Variable<int> *node_on_pnt = m_mesh.getVariable<int, GMDS_NODE>("on_point");
 	Variable<int> *edge_on_crv = m_mesh.getVariable<int, GMDS_EDGE>("on_curve");
 	Variable<int> *face_on_srf = nullptr;
 	if (ADim == 3) {
@@ -330,111 +314,21 @@ FACManager::buildTopologicalConnectivity(const int ADim)
 		s->volumes().push_back(single_vol);
 	}
 }
+
 /*----------------------------------------------------------------------------*/
-void
-FACManager::initAndLinkFrom2DMesh(Mesh *AFromMesh, GeomMeshLinker *ALinker)
+GeomEntity *
+FACManager::getEntity(TInt AID, TInt ADim)
 {
-
-	// the linker is updated before starting
-	ALinker->clear();
-	ALinker->setMesh(AFromMesh);
-	ALinker->setGeometry(this);
-
-	BoundaryExtractor2D boundary_extractor(AFromMesh, &m_mesh);
-	if (!boundary_extractor.isValid()) {
-		throw GMDSException("FACManager::initAndLinkFrom2DMesh: Invalid mesh models for the 2D boundary extraction");
-	}
-	Variable<int> *node_on_pnt = m_mesh.newVariable<int, GMDS_NODE>("on_point");
-	Variable<int> *node_on_crv = m_mesh.newVariable<int, GMDS_NODE>("on_curve");
-	Variable<int> *edge_on_crv = m_mesh.newVariable<int, GMDS_EDGE>("on_curve");
-
-	boundary_extractor.setColorOption(node_on_pnt, edge_on_crv, node_on_crv);
-
-	// mapping from the skin mesh to the surface mesh.
-	std::map<TCellID, TCellID> node_map_from_vol, edge_map_from_vol;
-	std::map<TCellID, TCellID> node_map_from_surf, edge_map_from_surf;
-	boundary_extractor.setMappings(&node_map_from_vol, &edge_map_from_vol, &node_map_from_surf, &edge_map_from_surf);
-	boundary_extractor.execute();
-
-	// to update the cad model from m_mesh, we have to add cell groups into m_mesh.
-
-	gmds::MeshDoctor doc(&m_mesh);
-	doc.buildEdgesAndX2E();
-	doc.updateUpwardConnectivity();
-
-	std::vector<TCellID> surface_nodes;
-	// vertices
-	for (auto n_id : m_mesh.nodes()) {
-		if (node_on_pnt->value(n_id) != 0) {
-			FACPoint *p = new FACPoint(&m_mesh, n_id, node_on_pnt->getName());
-			m_points.push_back(p);
-			m_map_node_var_to_point[node_on_pnt->value(n_id)] = p->id();
-		}
-		else if (node_on_crv->value(n_id) == 0) {
-			// means node in surface
-			surface_nodes.push_back(n_id);
-		}
-	}
-
-	// curves
-	std::map<int, std::vector<TCellID>> edges_per_curve;
-	std::map<int, std::string> curve_names;
-	for (auto e_id : m_mesh.edges()) {
-		if (edge_on_crv->value(e_id) != 0) {
-			edges_per_curve[edge_on_crv->value(e_id)].push_back(e_id);
-			curve_names[edge_on_crv->value(e_id)] = edge_on_crv->getName();
-		}
-	}
-	for (auto e2c : edges_per_curve) {
-		std::vector<TCellID> curve_edges = e2c.second;
-
-		// we get all the nodes of the edge
-		std::set<TCellID> all_ids;
-		for (auto e_id : curve_edges) {
-			Edge e = m_mesh.get<Edge>(e_id);
-			std::vector<TCellID> n_ids = e.getIDs<Node>();
-			all_ids.insert(n_ids[0]);
-			all_ids.insert(n_ids[1]);
-		}
-		std::vector<TCellID> node_ids;
-		node_ids.assign(all_ids.begin(), all_ids.end());
-		FACCurve *c = new FACCurve(&m_mesh, node_ids, curve_edges, curve_names[e2c.first]);
-		m_curves.push_back(c);
-		m_map_edge_var_to_curve[e2c.first] = c->id();
-	}
-
-	// We build a single volume, even if it is a non-sense in 2D. It is
-	// necessary for the buildTopo
-	FACVolume *v = new FACVolume();
-	m_volumes.push_back(v);
-	// we also buid a single surface without more information
-	FACSurface *s = new FACSurface(&m_mesh, surface_nodes, "single_surf");
-	for (auto n_id : surface_nodes) {
-		ALinker->linkNodeToSurface(node_map_from_surf[n_id], s->id());
-	}
-	// Now we link node on edges, then nodes on point. We do that in this way to
-	// overload face linking first, then curve linking.
-	for (auto c : m_curves) {
-		// link the volume mesh node to the new geom curve
-		std::vector<Node> cns;
-		c->getMeshNodes(cns);
-		for (auto n : cns) {
-			ALinker->linkNodeToCurve(node_map_from_surf[n.id()], c->id());
-		}
-		std::vector<Edge> ces;
-		c->getMeshEdges(ces);
-		for (auto e : ces) {
-			ALinker->linkEdgeToCurve(edge_map_from_surf[e.id()], c->id());
-		}
-	}
-	for (auto p : m_points) {
-		// link the volume mesh node to the new geom curve
-		ALinker->linkNodeToPoint(node_map_from_surf[p->getNode().id()], p->id());
-	}
-
-	buildTopologicalConnectivity(2);
+	if(ADim==0)
+		return getPoint(AID);
+	else if(ADim==1)
+		return getCurve(AID);
+	else if(ADim==2)
+		return getSurface(AID);
+	else if(ADim==3)
+		return getVolume(AID);
+	return nullptr;
 }
-
 /*----------------------------------------------------------------------------*/
 void
 FACManager::updateFromMesh()
@@ -741,50 +635,6 @@ FACManager::updateFromMesh()
 #endif     //_DEBUG_
 }
 /*----------------------------------------------------------------------------*/
-GeomVolume *
-FACManager::newVolume()
-{
-	FACVolume *v = new FACVolume();
-	m_volumes.push_back(v);
-	return v;
-}
-/*----------------------------------------------------------------------------*/
-GeomSurface *
-FACManager::newSurface()
-{
-	FACSurface *s = new FACSurface(&m_mesh);
-	m_surfaces.push_back(s);
-	return s;
-}
-/*----------------------------------------------------------------------------*/
-GeomCurve *
-FACManager::newCurve()
-{
-	FACCurve *c = new FACCurve(&m_mesh);
-	m_curves.push_back(c);
-	return c;
-}
-/*----------------------------------------------------------------------------*/
-GeomPoint *
-FACManager::newPoint()
-{
-	FACPoint *p = new FACPoint(&m_mesh);
-	m_points.push_back(p);
-	return p;
-}
-/*----------------------------------------------------------------------------*/
-Mesh &
-FACManager::getMeshView()
-{
-	return m_mesh;
-}
-/*----------------------------------------------------------------------------*/
-const Mesh *
-FACManager::getMeshView_ptr() const
-{
-	return &m_mesh;
-}
-/*----------------------------------------------------------------------------*/
 TInt
 FACManager::getNbPoints() const
 {
@@ -877,20 +727,6 @@ FACManager::getPoints() const
 	return pnts;
 }
 
-/*----------------------------------------------------------------------------*/
-GeomEntity *
-FACManager::getEntity(gmds::TInt AID, gmds::TInt ADim)
-{
-    if(ADim==0)
-        return getPoint(AID);
-    else if(ADim==1)
-        return getCurve(AID);
-    else if(ADim==2)
-        return getSurface(AID);
-    else if(ADim==3)
-        return getVolume(AID);
-    return nullptr;
-}
 /*----------------------------------------------------------------------------*/
 GeomPoint *
 FACManager::getPoint(const gmds::TInt AID)
@@ -1047,7 +883,7 @@ FACManager::write_surfaces(std::string AFilename) const
 
 		std::vector<gmds::TCellID> nodeIDs = f.getIDs<gmds::Node>();
 
-		for (int i_n = 0; i_n < nodeIDs.size(); i_n++) {
+		for (size_t i_n = 0; i_n < nodeIDs.size(); i_n++) {
 			nodeIDs[i_n] = old2NewNodes[nodeIDs[i_n]];
 		}
 
@@ -1075,23 +911,4 @@ FACManager::write_surfaces(std::string AFilename) const
 	vtkWriter.setCellOptions(gmds::N | gmds::F);
 	vtkWriter.setDataOptions(gmds::N | gmds::F);
 	vtkWriter.write(AFilename);
-}
-/*----------------------------------------------------------------------------*/
-FACSurface *
-FACManager::getFACSurface(const gmds::TInt AID)
-{
-	for (auto s : m_surfaces) {
-		if (s->id() == AID) return s;
-	}
-	return nullptr;
-}
-/*----------------------------------------------------------------------------*/
-void FACManager::buildGTSTree()
-{
-
-}
-/*----------------------------------------------------------------------------*/
-bool FACManager::is_in(gmds::math::Point APt) const
-{
-	return false;
 }

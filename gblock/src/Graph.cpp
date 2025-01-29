@@ -85,8 +85,8 @@ MinHeap::swapMinHeapNode(std::shared_ptr<MinHeapNode> *a, std::shared_ptr<MinHea
 void
 MinHeap::minHeapify(const gmds::TCellID AIdx)
 {
-	int smallest, left, right;
-	smallest = AIdx;
+	int left, right;
+	int smallest = AIdx;
 	left = 2 * AIdx + 1;
 	right = 2 * AIdx + 2;
 

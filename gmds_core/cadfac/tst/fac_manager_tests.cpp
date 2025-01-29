@@ -77,6 +77,8 @@ TEST_CASE("FACManager fromSurfMesh", "[FACManager]") {
     REQUIRE(manager.getCurves().size() == 12);
     REQUIRE(manager.getSurfaces().size() == 6);
     REQUIRE(manager.getVolumes().size() == 1);
+    cad::GeomVolume* vol = manager.getVolumes()[0];
+    REQUIRE(vol->isIn(math::Point(0,0,0)));
 }
 
 TEST_CASE("FACManager surf_projection", "[FACManager]") {
@@ -185,4 +187,31 @@ TEST_CASE("FACManager boundingbox", "[FACManager]") {
     REQUIRE(maxXYZ[0] == Catch::Approx(638.053));
     REQUIRE(maxXYZ[1] == Catch::Approx(245.405));
     REQUIRE(maxXYZ[2] == Catch::Approx(368.107));
+}
+
+TEST_CASE("is in test", "[FACManager]") {
+    gmds::Mesh vol(gmds::MeshModel(DIM3 | R | F | E | N |
+                                     R2N | R2F | R2E |
+                                     F2N | F2R | F2E |
+                                     E2F | E2N | N2E));
+    std::string dir(TEST_SAMPLES_DIR);
+    std::string vtk_file = dir + "/cube_with_holes.vtk";
+
+    gmds::IGMeshIOService ioService(&vol);
+    gmds::VTKReader vtkReader(&ioService);
+    vtkReader.setCellOptions(gmds::N | gmds::R);
+    vtkReader.read(vtk_file);
+
+    gmds::MeshDoctor doc(&vol);
+    doc.buildFacesAndR2F();
+    doc.buildEdgesAndX2E();
+    doc.updateUpwardConnectivity();
+
+    cad::FACManager manager;
+    manager.initFrom3DMesh(&vol);
+
+    cad::GeomVolume* gv = manager.getVolumes()[0];
+    REQUIRE(gv->isIn(math::Point(4,4,4)) == false);
+    REQUIRE(gv->isIn(math::Point(0,0,0)) == false);
+    REQUIRE(gv->isIn(math::Point(4,0,0)) == true);
 }
