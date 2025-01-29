@@ -49,11 +49,6 @@ namespace gmds{
 
         public:
 
-            /*------------------------------------------------------------------------*/
-            /** @brief  Default Constructor.
-             *  @param AMesh mesh support
-             */
-            FACSurface(Mesh* AMesh);
 
             /*------------------------------------------------------------------------*/
             /** \brief  Constructor.

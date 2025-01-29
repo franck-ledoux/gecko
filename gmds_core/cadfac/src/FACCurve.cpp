@@ -28,11 +28,6 @@ FACCurve::resetIdCounter()
 	m_next_id = 1;
 }
 /*----------------------------------------------------------------------------*/
-FACCurve::FACCurve(Mesh *AMeshSupport) : m_support(AMeshSupport), m_id(m_next_id)
-{
-	m_next_id++;
-}
-/*----------------------------------------------------------------------------*/
 FACCurve::FACCurve(Mesh *AMeshSupport, std::vector<TCellID> &APoints, std::vector<TCellID> &AEdges, const std::string &AName) :
   GeomCurve(AName), m_support(AMeshSupport), m_id(m_next_id++), m_mesh_nodes(APoints), m_mesh_edges(AEdges)
 {

@@ -72,18 +72,6 @@ class FACManager : public GeomManager
 	void initAndLinkFrom3DMesh(Mesh *AFromMesh, GeomMeshLinker *ALinker);
 
 	/*------------------------------------------------------------------------*/
-	/** @brief create a faceted model from a 2D mesh. There is no assumption
-	 *         about AFromMesh, we get its boundary to build the model. A linker
-	 *         given in arguments is filled up to keep the classification.
-	 *
-	 *         Warning, it means that we totally rebuild the model and we
-	 *         consider that it is made of only one single volume!
-	 *
-	 *  @param AFromMesh 2D mesh used to build the model
-	 */
-	void initAndLinkFrom2DMesh(Mesh *AFromMesh, GeomMeshLinker *ALinker);
-
-	/*------------------------------------------------------------------------*/
 	/** \brief  reinitializes the complete model from data stored in mesh_.
 	 */
 	void updateFromMesh();
@@ -92,169 +80,121 @@ class FACManager : public GeomManager
 	/** @brief reinitialize the geom model
 	 */
 	void clear();
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric volume
-	 */
-	virtual GeomVolume *newVolume();
-
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric surface
-	 */
-	virtual GeomSurface *newSurface();
-
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric curve
-	 */
-	virtual GeomCurve *newCurve();
-
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric point
-	 */
-	virtual GeomPoint *newPoint();
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the number of points of the model.
 	 *
 	 *	\return the number of points.
 	 */
-	TInt getNbPoints() const;
+	 TInt getNbPoints() const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the number of curves of the model.
 	 *
 	 *	\return the number of curves.
 	 */
-	TInt getNbCurves() const;
+	TInt getNbCurves() const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the number of surfaces of the model.
 	 *
 	 *	\return the number of surfaces.
 	 */
-	TInt getNbSurfaces() const;
+	TInt getNbSurfaces() const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the number of volumes of the model.
 	 *
 	 *	\return the number of volumes.
 	 */
-	TInt getNbVolumes() const;
+	TInt getNbVolumes() const override;
 
+	GeomEntity *getEntity(TInt AID, TInt ADim) override;
 	/*------------------------------------------------------------------------*/
 	/** \brief  Access to the points of the model.
 	 *
 	 *  \param points the points of the model.
 	 */
-	void getPoints(std::vector<GeomPoint *> &points) const;
-	std::vector<GeomPoint*> getPoints() const;
+	void getPoints(std::vector<GeomPoint *> &points) const override;
+	std::vector<GeomPoint*> getPoints() const override;
 	/*------------------------------------------------------------------------*/
 	/** \brief  Access to the curves of the model.
 	 *
 	 *  \param curves the curves of the model.
 	 */
-	void getCurves(std::vector<GeomCurve *> &curves) const;
-	std::vector<GeomCurve *> getCurves() const;
+	void getCurves(std::vector<GeomCurve *> &curves) const override;
+	std::vector<GeomCurve *> getCurves() const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Access to the surface of the model.
 	 *
 	 *  \param surfaces the surfaces of the model.
 	 */
-	void getSurfaces(std::vector<GeomSurface *> &surfaces) const;
-	std::vector<GeomSurface *> getSurfaces() const;
+	void getSurfaces(std::vector<GeomSurface *> &surfaces) const override;
+	std::vector<GeomSurface *> getSurfaces() const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Access to the volumes of the model.
 	 *
 	 *  \param volumes the volumes of the model.
 	 */
-	void getVolumes(std::vector<GeomVolume *> &volumes) const;
-	std::vector<GeomVolume *> getVolumes() const;
+	void getVolumes(std::vector<GeomVolume *> &volumes) const override;
+	std::vector<GeomVolume *> getVolumes() const override;
 
-
-    /*------------------------------------------------------------------------*/
-    /** \brief  Gives access to the entity of id @AID and dimension @p ADim.
-     *          Return NullPtr if it does not exist.
-     *  \return A point
-     */
-    virtual GeomEntity* getEntity(TInt AID, TInt ADim);
 	/*------------------------------------------------------------------------*/
 	/** \brief  Gives access to the point of id @AID, Return NullPtr if it does
 	 *          not exist.
 	 *  \return A point
 	 */
-	virtual GeomPoint *getPoint(const TInt AID);
+	GeomPoint *getPoint(TInt AID) override;
 	/*------------------------------------------------------------------------*/
 	/** \brief  Gives access to the curve of id @AID, Return NullPtr if it does
 	 *          not exist.
 	 *  \return A curve
 	 */
-	virtual GeomCurve *getCurve(const TInt AID);
+	 GeomCurve *getCurve(TInt AID) override;
 	/*------------------------------------------------------------------------*/
 	/** \brief  Gives access to the surface of id @AID, Return NullPtr if it
 	 *          does not exist.
 	 *  \return A surface
 	 */
-	virtual GeomSurface *getSurface(const TInt AID);
+	 GeomSurface *getSurface(TInt AID) override;
 	/*------------------------------------------------------------------------*/
 	/** \brief  Gives access to the volume of id @AID, Return NullPtr if it
 	 *          does not exist.
 	 *  \return A volume
 	 */
-	virtual GeomVolume *getVolume(const TInt AID);
-	/*------------------------------------------------------------------------*/
-	/** \brief  Gives access to the inner mesh view of the model.
-	 *
-	 *  Do not modify the referenced mesh content
-	 */
-	Mesh &getMeshView();
-	const Mesh *getMeshView_ptr() const;
+	GeomVolume *getVolume(TInt AID) override;
+
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the curve common to 2 points
 	 *
 	 *  \param return the id of the common curve, and -1 if it doesn't exist
 	 */
-	int getCommonCurve(GeomPoint *AP1, GeomPoint *AP2) const;
+	int getCommonCurve(GeomPoint *AP1, GeomPoint *AP2) const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the surfaces common to 2 points
+	 *  \param AP1 first point
+	 * \param AP2 second point
 	 *
-	 *  \param return the ids of the common surfaces (potentially empty)
+	 *  \return the ids of the common surfaces (potentially empty)
 	 */
-	std::vector<int> getCommonSurfaces(GeomPoint *AP1, GeomPoint *AP2) const;
+	std::vector<int> getCommonSurfaces(GeomPoint *AP1, GeomPoint *AP2) const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Get the surface common to 2 curves
-	 *
-	 *  \param return the id of the common surface, and -1 if it doesn't exist
+	 *  \param AC1 first curve
+	 * \param AC2 second curve
+	 *  \return the id of the common surface, and -1 if it doesn't exist
 	 */
-	int getCommonSurface(GeomCurve *AC1, GeomCurve *AC2) const;
+	int getCommonSurface(GeomCurve *AC1, GeomCurve *AC2) const override;
 
 	/*------------------------------------------------------------------------*/
 	/** \brief  Write the mesh representation
 	 */
 	void write_surfaces(std::string AFilename) const;
 
-	/*------------------------------------------------------------------------*/
-	/** \brief  Temporary method to get a FACSurface in order to have to geometry-to-tetmesh connectivity (Simon)
-	 */
-	FACSurface *getFACSurface(const TInt AID);
-
-	/**@brief Build a gts tree data structure to accelerate information retrieval
-    *        in the volume. It will consider the GTS surface formed of
-    *        the triangular faces of the surfaces adjacent to the volume
-    *
-    *        Warning, we consider that it is made of only one single volume!
-	 */
-	void buildGTSTree();
-
-	/**@brief Check whether a point is inside the model
-	 *        Warning, requires that the search tree was previously built
-	 *
-	 * @param APt a point
-    * @return whether the point is inside the model
-	 */
-	bool is_in(gmds::math::Point APt) const;
 
  private:
 	/*------------------------------------------------------------------------*/
