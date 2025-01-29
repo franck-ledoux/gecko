@@ -1,4 +1,4 @@
-tst_src = files('fac_manager_tests.cpp')
+tst_src = files('fac_manager_tests.cpp', 'geom_linker_tests.cpp', 'geom_topology_tests.cpp')
 tst_exe = executable('test_gmds_core_cadfac',
                       tst_src,
                       dependencies : [gmds_core_cad_lib_dep,
