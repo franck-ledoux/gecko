@@ -113,7 +113,7 @@ void BoundaryExtractor3D::setMappings(std::map<TCellID, TCellID> *ANodeMap,
 }
 
 /*----------------------------------------------------------------------------*/
-void BoundaryExtractor3D::execute(double AAngle) {
+void BoundaryExtractor3D::execute(double AAngle) const {
     TInt mark_node_on_surf = m_from_mesh->newMark<Node>();
     TInt mark_node_on_curv = m_from_mesh->newMark<Node>();
     TInt mark_node_on_pnt = m_from_mesh->newMark<Node>();

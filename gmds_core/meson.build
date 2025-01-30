@@ -16,6 +16,7 @@ gmds_core_lib = library(
                    gmds_core_io_lib_dep,
                    gmds_core_math_lib_dep,
                    gmds_core_utils_lib_dep,
+                   cgal_dep,
                    eigen3_dep]
 
 )

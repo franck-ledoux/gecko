@@ -32,26 +32,6 @@ namespace cad{
 public:
 
 	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric volume
-	 */
-	virtual GeomVolume* newVolume() =0;
-
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric surface
-	 */
-	virtual GeomSurface* newSurface() =0;
-
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric curve
-	 */
-	virtual GeomCurve* newCurve() =0;
-
-	/*------------------------------------------------------------------------*/
-	/** \brief  creation of a geometric point
-	 */
-	virtual GeomPoint* newPoint() =0;
-
-	/*------------------------------------------------------------------------*/
 	/** \brief  Get the number of points of the model.
 	 *
 	 *	\return the number of points.
@@ -110,12 +90,13 @@ public:
 		virtual void getVolumes(std::vector<GeomVolume*>& volumes) const =0;
 	   virtual  std::vector<GeomVolume*> getVolumes() const =0;
 
-        /*------------------------------------------------------------------------*/
-        /** \brief  Gives access to the entity of id @AID and dimension @p ADim.
-         *          Return NullPtr if it does not exist.
-         *  \return A point
-         */
-        virtual GeomEntity* getEntity(TInt AID, TInt ADim)=0;
+
+		/*------------------------------------------------------------------------*/
+		/** \brief  Gives access to the entity of id @AID and dimension @p ADim.
+		 *          Return NullPtr if it does not exist.
+		 *  \return A point
+		 */
+		virtual GeomEntity* getEntity(TInt AID, TInt ADim)=0;
         /*------------------------------------------------------------------------*/
         /** \brief  Gives access to the point of id @AID, Return NullPtr if it does
          *          not exist.
@@ -140,9 +121,13 @@ public:
          *  \return A volume
          */
         virtual GeomVolume* getVolume(TInt AID)=0;
+
+
 	     /*------------------------------------------------------------------------*/
 	     /** \brief  Get the curve common to 2 points
          *
+         *  \param AP1 first point
+         *  \param AP2 second point
          *  \param return the id of the common curve, and -1 if it doesn't exist
 	      */
 	     virtual int getCommonCurve(GeomPoint* AP1, GeomPoint* AP2) const =0;
@@ -160,10 +145,6 @@ public:
          */
 		virtual int getCommonSurface(GeomCurve* AC1, GeomCurve* AC2) const =0;
 
-	   /**@brief Check whether a point is inside the model
-             * @return whether the point is inside the model
-	    */
-	   virtual bool is_in(gmds::math::Point APt) const =0;
 };
 /*----------------------------------------------------------------------------*/
 } // namespace cad

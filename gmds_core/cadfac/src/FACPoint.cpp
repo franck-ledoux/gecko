@@ -23,8 +23,6 @@ FACPoint::resetIdCounter()
 	m_next_id = 1;
 }
 /*----------------------------------------------------------------------------*/
-FACPoint::FACPoint(Mesh *AMesh) : m_id(m_next_id++), m_support(AMesh), isMultiNodes_(false) {}
-/*----------------------------------------------------------------------------*/
 FACPoint::FACPoint(Mesh *AMesh, TCellID ANode, const std::string &AName) :
   GeomPoint(AName), m_id(m_next_id++), m_support(AMesh), m_node_id(ANode), isMultiNodes_(false)
 {

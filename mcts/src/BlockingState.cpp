@@ -270,8 +270,9 @@ BlockingState::get_possible_block_removals_limited(bool without_blocks_in) const
 	auto blocks = m_blocking->get_all_blocks();
 	for (auto b : blocks) {
 		gmds::math::Point pt = m_blocking->get_center_of_block(b);
-		bool is_inside = geom->is_in(pt);
-		if(is_inside && without_blocks_in) {
+
+		bool is_inside = geom->getVolume(1)->isIn(pt);
+		if(is_inside & without_blocks_in) {
 			blocks_to_keep.insert(m_blocking->get_block_id(b));
 		}
 	}

@@ -35,14 +35,8 @@ namespace gmds{
         public:
 
             /*------------------------------------------------------------------------*/
-            /** \brief  Default Constructor
-             *  @param AMesh mesh suport
-             */
-            FACPoint(Mesh* AMesh);
-
-            /*------------------------------------------------------------------------*/
             /** \brief  Constructor
-             *  @param AMesh mesh suport
+             *  @param AMesh mesh support
              *  \param ANode a mesh node id provided by the FacetedModel instance
              */
             FACPoint(Mesh* AMesh, TCellID ANode, const std::string& AName="Unknown point");
@@ -58,33 +52,33 @@ namespace gmds{
              *
              *  \return value of the X coordinate
              */
-            virtual TCoord X() const;
+            TCoord X() const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  Access to Y coordinate
              *
              *  \return value of the Y coordinate
              */
-            virtual TCoord Y() const;
+            TCoord Y() const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  Access to Z coordinate
              *
              *  \return value of the Z coordinate
              */
-            virtual TCoord Z() const;
+            TCoord Z() const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  Access to X, Y and Z coordinates
              *
              *  \param  ACoordinates will receive the value of the X, Y and Z coordinates
              */
-            virtual void XYZ(TCoord ACoordinates[3]) const;
+            void XYZ(TCoord ACoordinates[3]) const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  computes the area of the entity.
              */
-            virtual TCoord computeArea() const;
+            TCoord computeArea() const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  computes the bounding box
@@ -92,15 +86,15 @@ namespace gmds{
              *	\param minXYZ The minimum coordinate of the bounding box.
              *	\param maxXYZ The maximum coordinate of the bounding box.
              */
-            virtual void computeBoundingBox(TCoord minXYZ[3], TCoord maxXYZ[3]) const;
-	         virtual std::tuple<TCoord,TCoord,TCoord,TCoord,TCoord,TCoord>  BBox() const;
+            void computeBoundingBox(TCoord minXYZ[3], TCoord maxXYZ[3]) const override;
+            std::tuple<TCoord,TCoord,TCoord,TCoord,TCoord,TCoord>  BBox() const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  Access to the point as a NumericPoint
              *
              *  \return a numeric point
              */
-            gmds::math::Point point() const;
+            math::Point point() const override;
 
             /*------------------------------------------------------------------------*/
             /** \brief  Set the corresponding mesh node
@@ -115,7 +109,7 @@ namespace gmds{
              */
             Node getNode() const;
 
-            int id() const;
+            int id() const override;
 
             std::vector<int> getCurveIds() const;
 
@@ -124,21 +118,21 @@ namespace gmds{
                 isMultiNodes_ = true;
             }
 
-            void setMeshNodes(std::vector<Node> ANodes) {
+            void setMeshNodes(const std::vector<Node> &ANodes) {
                 pnts_.clear();
                 pnts_.resize(ANodes.size());
-                for(auto i=0; i<ANodes.size(); i++) {
+                for(size_t i=0; i<ANodes.size(); i++) {
                     pnts_[i] = ANodes[i].id();
                 }
             }
 
-            void project(gmds::math::Point& AP) const{
+            void project(gmds::math::Point& AP) const override{
                 if(isMultiNodes_) {
 
                     double dist2_max = HUGE_VALF;
                     gmds::math::Point pt_res(AP);
 
-                    for(auto i_p=0; i_p<pnts_.size(); i_p++) {
+                    for(size_t i_p=0; i_p<pnts_.size(); i_p++) {
                         gmds::math::Point pt_tmp = m_support->get<gmds::Node>(pnts_[i_p]).point();
 
                         double dist2 = AP.distance2(pt_tmp);
@@ -159,17 +153,17 @@ namespace gmds{
              *  assumption about the ordering
              * @return curves that are adjacent to this point
              */
-            virtual std::vector<GeomCurve*>& curves();
+            std::vector<GeomCurve*>& curves() override;
             /**@brief Accessor to the adjacent surfaces. Warning, there is no
              *  assumption about the ordering
              * @return surfaces that are adjacent to this point
              */
-            virtual std::vector<GeomSurface*>& surfaces();
+            std::vector<GeomSurface*>& surfaces() override;
             /**@brief Accessor to the adjacent volumes. Warning, there is no
              *  assumption about the ordering
              * @return volumes that are adjacent to this point
              */
-            virtual std::vector<GeomVolume*>& volumes();
+            std::vector<GeomVolume*>& volumes() override;
 
             /**@brief Reset the global id counter to 1.
              */

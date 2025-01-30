@@ -42,7 +42,7 @@ namespace gmds{
                  *
                  * @param AAngle surface dot angle
                  */
-                void execute(double AAngle=0.72);
+                void execute(double AAngle=0.72) const;
 
 
                 /*------------------------------------------------------------------------*/
