@@ -266,7 +266,7 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 
 	std::map<TCellID ,bool> is_captured_curves;
 	std::map<TCellID ,bool> is_captured_surfaces;
-	std::map<unsigned int,std::pair<int,std::vector<TCellID>>> captCurvesMap;
+	std::map<size_t,std::pair<int,std::vector<TCellID>>> captCurvesMap;
 
 	// TODO PROBLEME : les sommets ne sont pas numerotés de 0 à V mais on les numeros du blocking!!!!!
 
@@ -379,7 +379,6 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 							auto average_w = spw / sp.size();
 							if (average_w < 1000) {
 								// arbitrary value to avoid to classify wrong paths
-								std::cout << "Check if bug sp.size in try_and_catpure function" << std::endl;
 								captCurvesMap.insert({sp.size(),{c->id(),sp}});
 							}
 						}
