@@ -228,6 +228,22 @@ BlockingClassifier::find_aligned_edge(cad::GeomPoint *APoint, const math::Vector
 	return std::make_pair(found_aligned, aligned_edge);
 }
 /*----------------------------------------------------------------------------*/
+bool BlockingClassifier::alreadyClass(std::vector<TCellID> listElements)
+{
+
+	for (auto i = 0; i < listElements.size(); i++) {
+		auto n_id = listElements[i];
+		if (i > 0) {
+			auto m_id = listElements[i - 1];
+			auto e_mn = m_blocking->get_edge(n_id, m_id);
+			if (e_mn->info().geom_dim==1){
+				return true;
+			}
+		}
+	}
+	return false;
+}
+/*----------------------------------------------------------------------------*/
 int
 BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
                                     std::set<TCellID> &AEdgeIds,
@@ -244,13 +260,18 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 	// We get  geometric entities of the model
 	GMap3 *gm = m_blocking->gmap();
 	std::vector<cad::GeomCurve *> geom_curves;
+	std::vector<cad::GeomSurface *> geom_surfaces;
 	m_geom_model->getCurves(geom_curves);
+	m_geom_model->getSurfaces(geom_surfaces);
 
 	std::map<TCellID ,bool> is_captured_curves;
+	std::map<TCellID ,bool> is_captured_surfaces;
+	std::map<size_t,std::pair<int,std::vector<TCellID>>> captCurvesMap;
 
 	// TODO PROBLEME : les sommets ne sont pas numerotés de 0 à V mais on les numeros du blocking!!!!!
 
 	// PAS CONTINU
+	// sortir fonction creation graph en prenant entree seulement ANodesIds et AEdgesIds
 	Graph g(ANodeIds);
 	for (auto i : AEdgeIds) {
 		auto ei_nodes = m_blocking->get_nodes_of_edge(m_blocking->get_edge(i));
@@ -299,8 +320,12 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 					// First case;, the edges founded for each node are in fact the same
 					auto first_edge = info0.second;
 					auto second_edge = info1.second;
-					if (first_edge == second_edge) {
-						// same one, we asssign it to the curve
+					if (first_edge->info().geom_dim == 1 || second_edge->info().geom_dim == 1){
+						is_captured_curves[c->id()] = true;
+						continue;
+					}
+					else if (first_edge == second_edge) {
+						// same one, we assign it to the curve
 						first_edge->info().geom_dim = 1;
 						first_edge->info().geom_id = c->id();
 						is_captured_curves[c->id()]= true;
@@ -350,31 +375,48 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 							auto all_path = g.getShortestPath();
 							std::vector<TCellID> sp = all_path[dest_node->info().topo_id];
 							double spw = g.getShortestPathWeights()[dest_node->info().topo_id];
-							auto average_w = spw / sp.size();
-							if (average_w < 1000) {     // arbitrary value to avoid to classify wrong paths
-								first_edge->info().geom_dim = 1;
-								first_edge->info().geom_id = c->id();
-								second_edge->info().geom_dim = 1;
-								second_edge->info().geom_id = c->id();
-								for (auto i = 0; i < sp.size(); i++) {
-									auto n_id = sp[i];
-									m_blocking->get_node(n_id)->info().geom_dim = 1;
-									m_blocking->get_node(n_id)->info().geom_id = c->id();
-									c->project(m_blocking->get_node(n_id)->info().point);
 
-									if (i > 0) {
-										auto m_id = sp[i - 1];
-										auto e_mn = m_blocking->get_edge(n_id, m_id);
-										e_mn->info().geom_dim = 1;
-										e_mn->info().geom_id = c->id();
-									}
-								}
-								is_captured_curves[c->id()]= true;
+							auto average_w = spw / sp.size();
+							if (average_w < 1000) {
+								// arbitrary value to avoid to classify wrong paths
+								captCurvesMap.insert({sp.size(),{c->id(),sp}});
 							}
 						}
 					}
 				}
 			}
+		}
+	}
+	// TODO faire class ordre priorite
+	for(auto mapElmt : captCurvesMap){
+		if(!alreadyClass(mapElmt.second.second)){
+			auto c = m_geom_model->getCurve(mapElmt.second.first);
+			auto c_end_points = c->points();
+			auto end_point_0 = c_end_points[0];
+			auto end_point_1 = c_end_points[1];
+			auto info0 = find_aligned_edge(end_point_0, c->tangent(0), AEdgeIds);
+			auto info1 = find_aligned_edge(end_point_1, c->tangent(1), AEdgeIds);
+			auto first_edge = info0.second;
+			auto second_edge = info1.second;
+
+			first_edge->info().geom_dim = 1;
+			first_edge->info().geom_id = c->id();
+			second_edge->info().geom_dim = 1;
+			second_edge->info().geom_id = c->id();
+			for (auto i = 0; i < mapElmt.second.second.size(); i++) {
+				auto n_id = mapElmt.second.second[i];
+				m_blocking->get_node(n_id)->info().geom_dim = 1;
+				m_blocking->get_node(n_id)->info().geom_id = c->id();
+				c->project(m_blocking->get_node(n_id)->info().point);
+
+				if (i > 0) {
+					auto m_id = mapElmt.second.second[i - 1];
+					auto e_mn = m_blocking->get_edge(n_id, m_id);
+					e_mn->info().geom_dim = 1;
+					e_mn->info().geom_id = c->id();
+				}
+			}
+			is_captured_curves[c->id()]= true;
 		}
 	}
 
@@ -395,7 +437,6 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 		//we store in a map the color of boundary block faces
 		auto map_faces_colored = blocking_color_faces();
 
-		auto geom_surfaces = m_geom_model->getSurfaces();
 		// We class the faces with a surface
 		for (auto s : geom_surfaces) {
 
@@ -457,15 +498,62 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 					}
 					// And the edges
 					for (auto e : edges_f) {
-						if (e->info().geom_dim == 4) {
+						if (e->info().geom_dim == 4 || e->info().geom_dim == 3) {
 							e->info().geom_dim = s->dim();
 							e->info().geom_id = s->id();
 						}
+					}
+					is_captured_surfaces[s->id()]= true;
+				}
+			}
+		}
+	}
+
+	//===================================================================
+	// 3. WE WORK ON VOLUMES
+	//===================================================================
+	//We try and capture volumes only if all the surfaces are captured. It makes
+	// the volume capture algorithm easier to write
+	bool found_one_uncaptured_surface = false;
+	auto geom_volumes = m_geom_model->getVolumes();
+
+	for(auto s :geom_surfaces){
+		if (!is_captured_surfaces[s->id()])
+			found_one_uncaptured_surface= true;
+	}
+	if(!found_one_uncaptured_surface) {
+		// Mono volumic classification
+		if (geom_volumes.size() == 1) {
+			auto v = geom_volumes[0];
+			if (m_blocking->is_valid_connected()) {
+				for (auto n : m_blocking->get_all_nodes()) {
+					if (n->info().geom_dim == 4) {
+						n->info().geom_dim = v->dim();
+						n->info().geom_id = v->id();
+					}
+				}
+				for (auto e : m_blocking->get_all_edges()) {
+					if (e->info().geom_dim == 4) {
+						e->info().geom_dim = v->dim();
+						e->info().geom_id = v->id();
+					}
+				}
+				for (auto f : m_blocking->get_all_faces()) {
+					if (f->info().geom_dim == 4) {
+						f->info().geom_dim = v->dim();
+						f->info().geom_id = v->id();
+					}
+				}
+				for (auto b : m_blocking->get_all_blocks()) {
+					if (b->info().geom_dim == 4) {
+						b->info().geom_dim = v->dim();
+						b->info().geom_id = v->id();
 					}
 				}
 			}
 		}
 	}
+
 
 	return 0;
 }

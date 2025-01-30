@@ -314,6 +314,13 @@ class  Blocking
 	 */
 	virtual ~Blocking();
 
+	/*------------------------------------------------------------------------*/
+	/** \brief Overide operator==. It is topology-based.
+		 *
+		 * \param ABlocking a blocking
+	 */
+	bool operator==(Blocking& ABlocking);
+
 	/**================================================================
 	 *  QUERIES OPERATIONS
 	 *=================================================================*/
@@ -608,6 +615,10 @@ class  Blocking
 	 * @return true if it is valid, false otherwise
 	 */
 	bool is_valid_topology() const;
+
+	bool is_valid_connected();
+
+
 
 	Counter *getCounter()
 	{

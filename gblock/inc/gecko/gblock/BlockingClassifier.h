@@ -226,6 +226,8 @@ class BlockingClassifier
 											  const math::Vector3d& ATangent,
 											  std::set<TCellID> &AEdgeIds);
 
+	bool alreadyClass(std::vector<TCellID> listElements);
+
  private:
 
 	/*** the associated geometric model*/

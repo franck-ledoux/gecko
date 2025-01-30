@@ -60,6 +60,44 @@ void Blocking::reset_classification()
 Blocking::~Blocking() {}
 
 /*----------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------*/
+bool Blocking::operator==(Blocking &ABlocking)
+{
+	bool sameBlocking=true;
+	if(get_all_blocks().size() != ABlocking.get_all_blocks().size()){
+		sameBlocking = false;
+	}
+	else if(get_all_faces().size() != ABlocking.get_all_faces().size()){
+		sameBlocking = false;
+	}
+	else if(get_all_edges().size() != ABlocking.get_all_edges().size()){
+		sameBlocking = false;
+	}
+	else if(get_all_nodes().size() != ABlocking.get_all_nodes().size()){
+		sameBlocking = false;
+	}
+
+	auto listNodes= get_all_nodes();
+	auto listNodesComparedBlocking = ABlocking.get_all_nodes();
+
+	for(auto n1 : listNodes){
+		bool found = false;
+		for(auto n2 : listNodesComparedBlocking){
+			if(n1->info().point.X() == n2->info().point.X() &&
+				n1->info().point.Y() == n2->info().point.Y() &&
+				n1->info().point.Z() == n2->info().point.Z()){
+				found = true;
+				break;
+				}
+		}
+		if(!found){
+			sameBlocking=false;
+			break;
+		}
+	}
+	return sameBlocking;
+}
+/*----------------------------------------------------------------------------*/
 GMap3 *
 Blocking::gmap()
 {
@@ -523,7 +561,7 @@ Blocking::create_block(const math::Point &AP1,
 	for (auto it = m_gmap.one_dart_per_incident_cell<2, 3>(d1).begin(), itend = m_gmap.one_dart_per_incident_cell<2, 3>(d1).end(); it != itend; ++it) {
 		m_gmap.set_attribute<2>(it, create_face(4, NullID));
 	}
-	Block b = create_block(3, NullID);
+	Block b = create_block(4, NullID);
 	m_gmap.set_attribute<3>(d1, b);
 	return b;
 }
@@ -674,6 +712,45 @@ Blocking::is_valid_topology() const
 	return m_gmap.is_valid();
 }
 
+/*----------------------------------------------------------------------------*/
+bool
+Blocking::is_valid_connected()
+{
+	std::vector<Block> blocks;
+	blocks.push_back(get_all_blocks()[0]);
+	std::vector<Block> checked_blocks;
+	while(!blocks.empty()){//current block pas dans list checked_blocks
+		auto current_block = blocks.back();
+		if(std::find(checked_blocks.begin(), checked_blocks.end(), current_block) == checked_blocks.end()){
+			checked_blocks.push_back(current_block);
+		}
+		blocks.pop_back();
+		auto faces = get_faces_of_block(current_block);
+		for (auto current_face : faces){
+			auto blocks_current_face = get_blocks_of_face(current_face);
+
+			//si block current face pas dans check blocs : add dans blocks / sinon ignorer
+			for(auto b_curFace : blocks_current_face ){
+				bool in = false;
+				if(std::find(checked_blocks.begin(), checked_blocks.end(), b_curFace) == checked_blocks.end()){
+					blocks.push_back(b_curFace);
+				}
+				/*for(auto b : checked_blocks){
+
+					if(b->info().topo_id == b_curFace->info().topo_id){
+						in = true;
+					}
+				}
+				if(!in){
+					blocks.push_back(b_curFace);
+				}*/
+			}
+		}
+	}
+
+	if(get_all_blocks().size() == checked_blocks.size()) return true;
+	else return false;
+}
 /*----------------------------------------------------------------------------*/
 std::string
 Blocking::info() const
@@ -1110,7 +1187,7 @@ Blocking::get_cut_info(const gmds::math::Point& APoint,
                        const std::vector<Blocking::Edge> AEdges)
 {
 	std::tuple<Blocking::Edge, double,double> cut_param;
-	unsigned int min_dist = 1000;
+	double min_dist = 1000;
 
 	for (auto e : AEdges) {
 		auto proj_info = get_projection_info(APoint, e);
@@ -1291,7 +1368,6 @@ Blocking::get_projection_info(const math::Point &AP, std::vector<Blocking::Edge>
 	}
 	return dist_coord;
 }
-
 /*----------------------------------------------------------------------------*/
 bool
 Blocking::validate_pillowing_surface(std::vector<Face> &AFaces)
