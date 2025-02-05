@@ -38,4 +38,5 @@ ut_dep = declare_dependency(include_directories : '.')
 #==========================================================
 subdir('gmds_core')
 subdir('gblock')
+subdir('cblock')
 subdir('mcts')
