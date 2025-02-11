@@ -21,7 +21,7 @@ private:
 /*---------------------------------------------------------------------------*/
 struct SPUCTSelectionFunction: public ISelectionFunction
 {
-	 SPUCTSelectionFunction(const double AC = 1.42, const double AD = 100);
+	 SPUCTSelectionFunction(const double AC = 1.42, const double AD = 4000);
 	 MCTSTree* select(MCTSTree* ANode) const override ;
   private:
 	 double m_c;

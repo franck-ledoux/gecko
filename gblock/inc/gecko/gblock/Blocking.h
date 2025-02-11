@@ -618,6 +618,16 @@ class  Blocking
 
 	bool is_valid_connected();
 
+	double scaled_jacobian_quad(const math::Point &APoint0, const math::Point &APoint1, const math::Point &APoint2, const math::Point &APoint3);
+
+	double compute_scaled_jacobian();
+
+	double skew_quad(const math::Point &APoint0, const math::Point &APoint1, const math::Point &APoint2, const math::Point &APoint3);
+
+	double compute_skew();
+
+	std::tuple<double,double> compute_scaled_jacobian_and_skew();
+
 
 
 	Counter *getCounter()

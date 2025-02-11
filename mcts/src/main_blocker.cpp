@@ -79,6 +79,9 @@ display_info(std::shared_ptr<BlockingState> state)
 	std::cout << std::endl;
 	std::cout << "\t score: " << state->computeScore() << std::endl;
 	std::cout << "\t connected: " << state->get_blocking()->is_valid_connected() << std::endl;
+	auto [scaled_jacobian, skew] = state->get_blocking()->compute_scaled_jacobian_and_skew();
+	std::cout << "\t scaled Jacobian: " <<scaled_jacobian<<std::endl;
+	std::cout << "\t skew: " <<skew<<std::endl;
 }
 /*----------------------------------------------------------------------------*/
 void
@@ -161,6 +164,7 @@ int main(int argc, char* argv[])
 	 BlockingRewardFunction reward_function;
 
 	 auto init_state = std::make_shared<BlockingState>(std::make_shared<Blocking>(bl));
+	 init_state->get_blocking()->save_vtk_blocking("loop_init");
 	 auto optimal_score = init_state->get_expected_optimal_score();
 	 std::cout << "Expected optimal score: " << optimal_score << std::endl;
 	 std::cout << "=======================================" << std::endl;
@@ -176,7 +180,6 @@ int main(int argc, char* argv[])
 	 display_info(init_state);
 	 auto nb_loop_iter = params.at("nb_loop_iter");
 
-	init_state->get_blocking()->save_vtk_blocking("loop_init");
 	auto win = current_state->win();
 	auto lost = current_state->lost();
 

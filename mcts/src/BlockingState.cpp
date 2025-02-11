@@ -35,7 +35,7 @@ BlockingState::BlockingState(const BlockingState &AState) :
   m_memory_scores(AState.m_memory_scores),
   m_boundary_node_ids(AState.m_boundary_node_ids),
   m_boundary_edge_ids(AState.m_boundary_edge_ids),
-m_boundary_face_ids(AState.m_boundary_face_ids),
+  m_boundary_face_ids(AState.m_boundary_face_ids),
   m_list_actions_selection(AState.m_list_actions_selection),
   m_list_actions_simulation(AState.m_list_actions_simulation)
 

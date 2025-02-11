@@ -752,6 +752,112 @@ Blocking::is_valid_connected()
 	else return false;
 }
 /*----------------------------------------------------------------------------*/
+double Blocking::scaled_jacobian_quad(const math::Point &APoint0, const math::Point &APoint1, const math::Point &APoint2, const math::Point &APoint3) {
+	math::Vector3d L0 = APoint1-APoint0;
+	math::Vector3d L1 = APoint2-APoint1;
+	math::Vector3d L2 = APoint3-APoint2;
+	math::Vector3d L3 = APoint0-APoint3;
+
+	double l0 = L0.norm() ;
+	double l1 = L1.norm() ;
+	double l2 = L2.norm() ;
+	double l3 = L3.norm() ;
+
+	math::Vector3d N0 = L3.cross(L0) ;
+	math::Vector3d N1 = L0.cross(L1) ;
+	math::Vector3d N2 = L1.cross(L2) ;
+	math::Vector3d N3 = L2.cross(L3) ;
+
+	math::Vector3d X1 = (APoint1-APoint0) + (APoint2-APoint3) ;
+	math::Vector3d X2 = (APoint2-APoint1) + (APoint3-APoint0) ;
+
+	math::Vector3d Nc = X1.cross(X2) ;
+	math::Vector3d nc = Nc /Nc.norm() ;
+
+	double a0 = nc.dot(N0) ;
+	double a1 = nc.dot(N1) ;
+	double a2 = nc.dot(N2) ;
+	double a3 = nc.dot(N3) ;
+
+	double sj0 = a0/(l0*l3);
+	double sj1 = a1/(l0*l1);
+	double sj2 = a2/(l1*l2);
+	double sj3 = a3/(l2*l3);
+
+	return std::min( std::min(sj0, sj1), std::min(sj2, sj3) );
+}
+
+/*----------------------------------------------------------------------------*/
+double Blocking::compute_scaled_jacobian() {
+	double sum_jacobian = 0;
+	unsigned int count = 0;
+	for (auto block : get_all_blocks()){
+		auto faces = get_faces_of_block(block);
+		for(auto f : faces) {
+			count++;
+			auto nodes = get_nodes_of_face(f);
+			auto p0 = nodes[0]->info().point;
+			auto p1 = nodes[1]->info().point;
+			auto p2 = nodes[2]->info().point;
+			auto p3 = nodes[3]->info().point;
+			sum_jacobian += scaled_jacobian_quad(p0, p1, p2, p3);
+		}
+	}
+	return sum_jacobian/count;
+}
+
+
+/*----------------------------------------------------------------------------*/
+double Blocking::skew_quad(const math::Point &APoint0, const math::Point &APoint1, const math::Point &APoint2, const math::Point &APoint3) {
+	math::Vector3d X1 = (APoint1-APoint0) + (APoint2-APoint3) ;
+	math::Vector3d X2 = (APoint2-APoint1) + (APoint3-APoint0) ;
+
+	math::Vector3d x1 = X1 / X1.norm() ;
+	math::Vector3d x2 = X2 / X2.norm() ;
+
+	return abs(x1.dot(x2));
+
+}
+
+/*----------------------------------------------------------------------------*/
+double Blocking::compute_skew() {
+	double sum_skew = 0;
+	unsigned int count = 0;
+	for (auto block : get_all_blocks()){
+		auto faces = get_faces_of_block(block);
+		for(auto f : faces) {
+			count++;
+			auto nodes = get_nodes_of_face(f);
+			auto p0 = nodes[0]->info().point;
+			auto p1 = nodes[1]->info().point;
+			auto p2 = nodes[2]->info().point;
+			auto p3 = nodes[3]->info().point;
+			sum_skew += skew_quad(p0, p1, p2, p3);
+		}
+	}
+	return sum_skew/count;
+}
+/*----------------------------------------------------------------------------*/
+std::tuple<double,double> Blocking::compute_scaled_jacobian_and_skew() {
+	double sum_jacobian = 0;
+	double sum_skew=0;
+	unsigned int count = 0;
+	for (auto block : get_all_blocks()){
+		auto faces = get_faces_of_block(block);
+		for(auto f : faces) {
+			count++;
+			auto nodes = get_nodes_of_face(f);
+			auto p0 = nodes[0]->info().point;
+			auto p1 = nodes[1]->info().point;
+			auto p2 = nodes[2]->info().point;
+			auto p3 = nodes[3]->info().point;
+			sum_jacobian += scaled_jacobian_quad(p0, p1, p2, p3);
+			sum_skew += skew_quad(p0, p1, p2, p3);
+		}
+	}
+	return {sum_jacobian/count,sum_skew/count};
+}
+/*----------------------------------------------------------------------------*/
 std::string
 Blocking::info() const
 {

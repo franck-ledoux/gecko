@@ -98,7 +98,6 @@ std::pair<double,MCTSAgent::GAME_RESULT> MCTSAgent::simulate(MCTSTree* ANode) {
 				    	return std::make_pair(m_reward_function->evaluate(state),LOST);
             			//exit(55); //si cela se produit verifier qu'un etat non terminal a bien une list d'action non vide, state.lost() ordre des elements conditionnels
 
-
                 state = a->apply_on(state);
 				    if (state->win())
 					    found_win=true;
@@ -141,7 +140,8 @@ std::shared_ptr<IAction> MCTSAgent::get_random_action(std::shared_ptr<IState> AS
     std::mt19937 gen(rd()); // mersenne_twister_engine seeded with rd()
     std::uniform_int_distribution<> distrib(0, actions.size()-1);
 	 assert(!actions.empty());
-    return actions[distrib(gen)];
+
+	return actions[distrib(gen)];
 }
 /*---------------------------------------------------------------------------*/
 void MCTSAgent::activate_debug_mode(const std::string &AFileNamePrefix,

@@ -254,6 +254,8 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 	//===================================================================
 	try_and_classify_nodes(ANodeIds);
 
+	auto uncaptElmts = detect_classification_errors();
+
 	//===================================================================
 	// 2. WE WORK ON CURVES
 	//===================================================================
@@ -266,7 +268,7 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 
 	std::map<TCellID ,bool> is_captured_curves;
 	std::map<TCellID ,bool> is_captured_surfaces;
-	std::map<unsigned int,std::pair<int,std::vector<TCellID>>> captCurvesMap;
+	std::map<size_t, std::vector<std::pair<int, std::vector<TCellID> > > > captCurvesMap;
 
 	// TODO PROBLEME : les sommets ne sont pas numerotés de 0 à V mais on les numeros du blocking!!!!!
 
@@ -279,7 +281,7 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 	}
 
 	for (auto c : geom_curves) {
-		is_captured_curves[c->id()] = false;
+		is_captured_curves[c->id()] = false;\
 		// 3 cases based on the number of end points of c (0,1,2)
 		auto c_end_points = c->points();
 		if (c_end_points.size() == 0) {
@@ -379,8 +381,7 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 							auto average_w = spw / sp.size();
 							if (average_w < 1000) {
 								// arbitrary value to avoid to classify wrong paths
-								std::cout << "Check if bug sp.size in try_and_catpure function" << std::endl;
-								captCurvesMap.insert({sp.size(),{c->id(),sp}});
+								captCurvesMap[sp.size()].push_back({c->id(),sp});
 							}
 						}
 					}
@@ -388,36 +389,44 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 			}
 		}
 	}
+
 	// TODO faire class ordre priorite
-	for(auto mapElmt : captCurvesMap){
-		if(!alreadyClass(mapElmt.second.second)){
-			auto c = m_geom_model->getCurve(mapElmt.second.first);
-			auto c_end_points = c->points();
-			auto end_point_0 = c_end_points[0];
-			auto end_point_1 = c_end_points[1];
-			auto info0 = find_aligned_edge(end_point_0, c->tangent(0), AEdgeIds);
-			auto info1 = find_aligned_edge(end_point_1, c->tangent(1), AEdgeIds);
-			auto first_edge = info0.second;
-			auto second_edge = info1.second;
+	for (auto& mapElmt : captCurvesMap) {
+		for (auto& curveData : mapElmt.second) { // Iterate over the pairs (id, vector of TCellID)
+			int curveID = curveData.first;
+			std::vector<TCellID>& cellIDs = curveData.second;
 
-			first_edge->info().geom_dim = 1;
-			first_edge->info().geom_id = c->id();
-			second_edge->info().geom_dim = 1;
-			second_edge->info().geom_id = c->id();
-			for (auto i = 0; i < mapElmt.second.second.size(); i++) {
-				auto n_id = mapElmt.second.second[i];
-				m_blocking->get_node(n_id)->info().geom_dim = 1;
-				m_blocking->get_node(n_id)->info().geom_id = c->id();
-				c->project(m_blocking->get_node(n_id)->info().point);
+			if (!alreadyClass(cellIDs)) {
+				auto c = m_geom_model->getCurve(curveID);
+				auto c_end_points = c->points();
+				auto end_point_0 = c_end_points[0];
+				auto end_point_1 = c_end_points[1];
 
-				if (i > 0) {
-					auto m_id = mapElmt.second.second[i - 1];
-					auto e_mn = m_blocking->get_edge(n_id, m_id);
-					e_mn->info().geom_dim = 1;
-					e_mn->info().geom_id = c->id();
+				auto info0 = find_aligned_edge(end_point_0, c->tangent(0), AEdgeIds);
+				auto info1 = find_aligned_edge(end_point_1, c->tangent(1), AEdgeIds);
+				auto first_edge = info0.second;
+				auto second_edge = info1.second;
+
+				first_edge->info().geom_dim = 1;
+				first_edge->info().geom_id = curveID;
+				second_edge->info().geom_dim = 1;
+				second_edge->info().geom_id = curveID;
+
+				for (size_t i = 0; i < cellIDs.size(); i++) {
+					auto n_id = cellIDs[i];
+					m_blocking->get_node(n_id)->info().geom_dim = 1;
+					m_blocking->get_node(n_id)->info().geom_id = curveID;
+					c->project(m_blocking->get_node(n_id)->info().point);
+
+					if (i > 0) {
+						auto m_id = cellIDs[i - 1];
+						auto e_mn = m_blocking->get_edge(n_id, m_id);
+						e_mn->info().geom_dim = 1;
+						e_mn->info().geom_id = curveID;
+					}
 				}
+				is_captured_curves[curveID] = true;
 			}
-			is_captured_curves[c->id()]= true;
 		}
 	}
 
