@@ -691,7 +691,7 @@ class  Blocking
 	 * @param[in] AE an edge we want to split in two edges
 	 * @return true if the operation succeeded, false if the operation
 	 */
-	bool collapse_chord(const Face AF, const Node AN1, const Node AN2);
+	//bool collapse_chord(const Face AF, const Node AN1, const Node AN2);
 
 	/**@brief Indicates if the set of faces provided in @p AFaces is
 	 * a manifold surface that splits the mesh in two pillow-compatible

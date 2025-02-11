@@ -834,8 +834,10 @@ Blocking::convert_to_mesh(Mesh &AMesh)
 	for (auto it = m_gmap.attributes<2>().begin(), itend = m_gmap.attributes<2>().end(); it != itend; ++it) {
 		auto att = m_gmap.info_of_attribute<2>(it);
 		std::vector<Node> cell_nodes = get_nodes_of_face(it);
-		if (cell_nodes.size() != 4) throw GMDSException("Only quad blocking faces can be converted into mesh");
-
+		if (cell_nodes.size() != 4) {
+			continue;
+			//throw GMDSException("Only quad blocking faces can be converted into mesh");
+		}
 		gmds::Face f = AMesh.newQuad(n2n[cell_nodes[0]->info().topo_id], n2n[cell_nodes[1]->info().topo_id], n2n[cell_nodes[2]->info().topo_id],
 		                             n2n[cell_nodes[3]->info().topo_id]);
 
@@ -848,7 +850,10 @@ Blocking::convert_to_mesh(Mesh &AMesh)
 	for (auto it = m_gmap.attributes<3>().begin(), itend = m_gmap.attributes<3>().end(); it != itend; ++it) {
 		auto att = m_gmap.info_of_attribute<3>(it);
 		std::vector<Node> cell_nodes = get_nodes_of_block(it);
-		if (cell_nodes.size() != 8) throw GMDSException("Only hex blocks can be converted into mesh");
+		if (cell_nodes.size() != 8) {
+			continue;
+			throw GMDSException("Only hex blocks can be converted into mesh");
+		}
 
 		gmds::Region r = AMesh.newHex(n2n[cell_nodes[0]->info().topo_id], n2n[cell_nodes[1]->info().topo_id], n2n[cell_nodes[2]->info().topo_id],
 		                              n2n[cell_nodes[3]->info().topo_id], n2n[cell_nodes[4]->info().topo_id], n2n[cell_nodes[5]->info().topo_id],
@@ -1225,7 +1230,6 @@ Blocking::cut_sheet(const Edge AE, const double AParam)
 	assert(AParam > 0 && AParam < 1);
 	// Note: the parameterization starts from the first node of AE, which is the one having the node
 	// of lowest topo id
-
 	// We get a dart per sheet edge
 	std::vector<Dart3> sheet_darts;
 	get_all_sheet_darts(AE, sheet_darts);
