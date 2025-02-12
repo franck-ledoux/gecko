@@ -12,6 +12,7 @@
 // STL Headers
 #	include <cassert>
 #	include <string.h>
+#	include <cmath>      
 /*------------------------------------------------------------------------*/
 // GMDS Headers
 #	include <gmds/math/Constants.h>
