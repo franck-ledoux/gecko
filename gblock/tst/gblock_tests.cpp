@@ -831,6 +831,38 @@ TEST_CASE("test_pillow_12", "[BlockingTestSuite]") {
     REQUIRE(nb_faces_in_volume == 25);
 }
 
+
+TEST_CASE("BlockingTestSuite - split_until", "[blocking]") {
+    gmds::cad::FACManager geom_model;
+    setUp(geom_model);
+    gecko::gblock::Blocking bl(&geom_model, true);
+    gecko::gblock::BlockingClassifier cl(&bl);
+    cl.classify();
+
+    bool to_cut = true;
+    gecko::gblock::Blocking::Edge edge_to_cut;
+    while (to_cut) {
+
+        to_cut = false;
+        auto all_edges = bl.get_all_edges();
+        for (auto cur_edge : all_edges) {
+            auto nodes_of_e = bl.get_nodes_of_edge(cur_edge);
+            gmds::math::Point p0 = nodes_of_e[0]->info().point;
+            gmds::math::Point p1 = nodes_of_e[1]->info().point;
+            if (p0.distance(p1) > 2) {
+                to_cut = true;
+                edge_to_cut = cur_edge;
+            }
+        }
+        if (to_cut) {
+            bl.cut_sheet(edge_to_cut, 0.5);
+        }
+    }
+
+    export_vtk(bl,N|R, "multiple_cuts.vtk");
+    REQUIRE(bl.get_nb_cells<3>() == 512);
+}
+
 TEST_CASE("save_vtk_blocking", "[BlockingTestSuite]") {
     gmds::cad::FACManager geom_model;
     setUp(geom_model);
