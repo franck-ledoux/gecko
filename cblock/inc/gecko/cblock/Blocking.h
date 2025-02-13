@@ -691,7 +691,7 @@ class  Blocking
 	 * @param[in] AE an edge we want to split in two edges
 	 * @return true if the operation succeeded, false if the operation
 	 */
-	bool collapse_chord(const Face AF, const Node AN1, const Node AN2);
+	//bool collapse_chord(const Face AF, const Node AN1, const Node AN2);
 
 	/**@brief Indicates if the set of faces provided in @p AFaces is
 	 * a manifold surface that splits the mesh in two pillow-compatible
@@ -699,13 +699,13 @@ class  Blocking
 	 * @param[in] AFaces a set of faces
 	 * @return true if we have a manifold surface
 	 */
-	bool validate_pillowing_surface(std::vector<Face> &AFaces);
+	//bool validate_pillowing_surface(std::vector<Face> &AFaces);
 
 	/**@brief Pillow the set of faces @p AFaces.
 	 * @param[in] AFaces a set of faces
 	 * @return true if we have a manifold surface, false otherwise.
 	 */
-	bool pillow(std::vector<Face> &AFaces);
+	//bool pillow(std::vector<Face> &AFaces);
 
 	/**@brief Smooth the classified block structure along curves.
 	 * Simple implementation using a Laplacian-kind approach.
@@ -792,7 +792,7 @@ class  Blocking
 	 * @param[in] AMark the mark that indicates where to pillow. Some darts of @p Anode are marked with this mark
 	 * @return a tuple [topo_dim, topo_id, geom_dim, geom_id] that fully describes the cells where to move @p ANode
 	 */
-	std::tuple<int, int, int, int> compute_pillow_twin_node(const Node &ANode, const int AMark);
+	//std::tuple<int, int, int, int> compute_pillow_twin_node(const Node &ANode, const int AMark);
 	/**@brief Create a node attribute in the n-cmap
 	 *
 	 * @param[in] AGeomDim dimension of the associated geometric cell
