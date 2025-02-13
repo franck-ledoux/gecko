@@ -538,46 +538,46 @@ TEST_CASE("BlockingTestSuite - test_init_from_ig_mesh", "[BlockingTestSuite]") {
 //      }
 // }
 
-// TEST_CASE("BlockingTestSuite - test_chord_collapse", "[BlockingTestSuite]") {
-//     gmds::cad::FACManager geom_model;
-//     setUp(geom_model);
-//     gecko::cblock::Blocking bl(&geom_model, false);
-//
-//     gmds::Mesh m(gmds::MeshModel(gmds::DIM3|gmds::N|gmds::R|gmds::R2N));
-//     gmds::GridBuilder gb(&m, 3);
-//     gb.execute(4, 1.0, 4, 1.0, 4, 1.0);
-//     bl.init_from_mesh(m);
-//
-//     std::vector<gecko::cblock::Blocking::Face> bl_faces = bl.get_all_faces();
-//     REQUIRE(bl.get_nb_cells<3>() == 27);
-//
-//     bool found_face = false;
-//     auto face_id = -1;
-//     gmds::math::Point seed(1.5, 1.5, 0.0);
-//     for (auto i = 0; i < bl_faces.size() && !found_face; i++) {
-//         gecko::cblock::Blocking::Face fi = bl_faces[i];
-//         gmds::math::Point ci = bl.get_center_of_face(fi);
-//         if (ci.distance2(seed) < 0.1) {
-//             found_face = true;
-//             face_id = i;
-//         }
-//     }
-//
-//     std::vector<gecko::cblock::Blocking::Node> f_nodes = bl.get_nodes_of_face(bl_faces[face_id]);
-//     bl.collapse_chord(bl_faces[face_id], f_nodes[0], f_nodes[2]);
-//
-//     REQUIRE(bl.get_nb_cells<3>() == 24);
-//
-//     gmds::Mesh m_out(gmds::MeshModel(gmds::DIM3 | gmds::N | gmds::E | gmds::F | gmds::R | gmds::E2N | gmds::F2N | gmds::R2N));
-//     bl.convert_to_mesh(m_out);
-//
-//     gmds::IGMeshIOService ioService(&m_out);
-//     gmds::VTKWriter writer(&ioService);
-//     writer.setCellOptions(gmds::N | gmds::F);
-//     writer.setDataOptions(gmds::N | gmds::F);
-//     writer.write("collapse.vtk");
-// }
-//
+ TEST_CASE("BlockingTestSuite - test_chord_collapse", "[BlockingTestSuite]") {
+    gmds::cad::FACManager geom_model;
+    setUp(geom_model);
+    gecko::cblock::Blocking bl(&geom_model, false);
+
+    gmds::Mesh m(gmds::MeshModel(gmds::DIM3|gmds::N|gmds::R|gmds::R2N));
+    gmds::GridBuilder gb(&m, 3);
+    gb.execute(4, 1.0, 4, 1.0, 4, 1.0);
+    bl.init_from_mesh(m);
+
+    std::vector<gecko::cblock::Blocking::Face> bl_faces = bl.get_all_faces();
+    REQUIRE(bl.get_nb_cells<3>() == 27);
+
+    bool found_face = false;
+    auto face_id = -1;
+    gmds::math::Point seed(1.5, 1.5, 0.0);
+    for (auto i = 0; i < bl_faces.size() && !found_face; i++) {
+        gecko::cblock::Blocking::Face fi = bl_faces[i];
+        gmds::math::Point ci = bl.get_center_of_face(fi);
+        if (ci.distance2(seed) < 0.1) {
+            found_face = true;
+            face_id = i;
+        }
+    }
+
+    std::vector<gecko::cblock::Blocking::Node> f_nodes = bl.get_nodes_of_face(bl_faces[face_id]);
+    bl.collapse_chord(bl_faces[face_id], f_nodes[0], f_nodes[2]);
+
+    REQUIRE(bl.get_nb_cells<3>() == 24);
+
+    gmds::Mesh m_out(gmds::MeshModel(gmds::DIM3 | gmds::N | gmds::E | gmds::F | gmds::R | gmds::E2N | gmds::F2N | gmds::R2N));
+    bl.convert_to_mesh(m_out);
+
+    gmds::IGMeshIOService ioService(&m_out);
+    gmds::VTKWriter writer(&ioService);
+    writer.setCellOptions(gmds::N | gmds::F);
+    writer.setDataOptions(gmds::N | gmds::F);
+    writer.write("collapse.vtk");
+}
+
 //
 
 //

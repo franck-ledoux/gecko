@@ -2014,52 +2014,42 @@ Blocking::smooth_volumes(const int ANbIterations) {
 }
 
 /*----------------------------------------------------------------------------*/
-/* bool
+bool
 Blocking::collapse_chord(const Face AF, const Node AN1, const Node AN2)
 {
 	// first we check that AN1 and AN2 belongs to AF and are opposite in AF
 	Dart3 dart_f = AF->dart();
-	Dart3 dart_n1 = AN1->dart();
-	Dart3 dart_n2 = AN2->dart();
 	// Are n1 and n2 in the face?
 	bool found_n1 = false, found_n2 = false;
-	std::vector<Dart3> all_darts_n1, all_darts_n2;
-	for (CMap3::Dart_of_orbit_range<1, 2, 3>::iterator it(m_cmap.darts_of_orbit<1, 2, 3>(dart_n1).begin()), itend(m_cmap.darts_of_orbit<1, 2, 3>(dart_n1).end());
-	     it != itend; ++it) {
-		all_darts_n1.push_back(it);
-	}
-	for (CMap3::Dart_of_orbit_range<1, 2, 3>::iterator it(m_cmap.darts_of_orbit<1, 2, 3>(dart_n2).begin()), itend(m_cmap.darts_of_orbit<1, 2, 3>(dart_n2).end());
-	     it != itend; ++it) {
-		all_darts_n2.push_back(it);
-	}
-	// We traverse all the darts of the face
-	for (CMap3::Dart_of_orbit_range<1, 3>::iterator it(m_cmap.darts_of_orbit<0, 1, 3>(dart_f).begin()), itend(m_cmap.darts_of_orbit<0, 1, 3>(dart_f).end());
-	     it != itend; ++it) {
-		// Now we go through the dart of the current node
-		for (auto d : all_darts_n1) {
-			if (it == d) found_n1 = true;
+	Dart3 current_dart = dart_f;
+	Dart3 d1;
+	do {
+		auto current_node = m_cmap.attribute<0>(current_dart);
+		if (current_node==AN1) {
+			found_n1 = true;
+			d1 = current_dart;
 		}
-		for (auto d : all_darts_n2) {
-			if (it == d) found_n2 = true;
-		}
+		else if (current_node==AN2)
+			found_n2 = true;
+		current_dart = m_cmap.beta<1>(current_dart);
 	}
-	if (!found_n1 || !found_n2) return false;
+	while (current_dart!=dart_f);
+
+	if (!found_n1 || !found_n2)
+		return false;
 
 	// Are n1 and n2 opposite in the face ?
-	bool n1_is_n2_opposite = false;
-	for (auto d2 : all_darts_n2) {
-		for (auto d1 : all_darts_n1) {
-			if (m_cmap.beta<0, 1, 0>(d1) == d2) n1_is_n2_opposite = true;
-		}
-	}
-	if (!n1_is_n2_opposite) return false;
+	auto d2 =m_cmap.beta<1,1>(d1);
+	if ( m_cmap.attribute<0>(d2)!=AN2)
+		return false;
+	//So d1 and d2 are nodes of AN1 and AN2 and are opposite in AF
 
 	// We need the pair of nodes to collapse in each face. To do that, we iteratively work in each
 	// face traversed by the sheet
 	std::vector<Dart3> chord_darts, chord_darts_opp;
 	get_all_chord_darts(AF, chord_darts);
 	for (auto d : chord_darts) {
-		chord_darts_opp.push_back(m_cmap.beta<0, 1, 0>(d));
+		chord_darts_opp.push_back(m_cmap.beta<1, 1>(d));
 	}
 
 	// Before going further, we check that all the pair of opposite nodes can be merged (geometric conditions)
@@ -2104,4 +2094,4 @@ Blocking::collapse_chord(const Face AF, const Node AN1, const Node AN2)
 		}
 	}
 	return true;
-}*/
+}
