@@ -1,6 +1,0 @@
-[wrap-file]
-directory = ann
-source_url = https://www.cs.umd.edu/~mount/ANN/Files/1.1.2/ann_1.1.2.tar.gz
-source_filename = ann_1.1.2.tar.gz
-source_hash = eea03f2e224b66813226d775053316675375dcec45bd263674c052d9324a49a5
-wrapdb_version = 1.1.2
