@@ -7,27 +7,24 @@
 #include <gmds/ig/MeshDoctor.h>
 #include <gmds/io/IGMeshIOService.h>
 #include <gmds/io/VTKReader.h>
-#include <gmds/io/VTKWriter.h>
 /*----------------------------------------------------------------------------*/
-#include <gecko/gblock/BlockingClassifier.h>
-#include <gecko/gblock/Blocking.h>
-#include <gecko/mcts/BlockingState.h>
-#include <gecko/mcts/BlockingRewardFunction.h>
+#include <gecko/cblock/BlockingClassifier.h>
+#include <gecko/cblock/Blocking.h>
+#include <gecko/mcts-c/BlockingState.h>
+#include <gecko/mcts-c/BlockingRewardFunction.h>
 #include <iostream>
 #include <mcts/MCTSAgent.h>
 
 
 /*----------------------------------------------------------------------------*/
-#include <gecko/mcts/BlockingAction.h>
 #include <nlohmann/json.hpp>
 
-#include "../../gblock/inc/gecko/gblock/BlockingClassifier.h"
 using json = nlohmann::json;
 /*----------------------------------------------------------------------------*/
 using namespace gmds;
 using namespace gecko;
-using namespace gecko::gblock;
-using namespace gecko::mcts;
+using namespace gecko::cblock;
+using namespace gecko::mctsc;
 /*---------------------------------------------------------------------------*/
 json read_param_file(const std::string& AFileName) {
 	json data;
@@ -144,7 +141,7 @@ int main(int argc, char* argv[])
 	 init_geom(geom_model, file_geom);
 	 
 	 // We initialize the blocking structure from the geom model
-	 Blocking bl(&geom_model, false);
+	 cblock::Blocking bl(&geom_model, false);
 	 // and we add the initial block structure afterward
 	 if(with_init_blocking) {
 		  Mesh init_blocks(MeshModel(DIM3 | R | N | R2N | N2R));
@@ -159,7 +156,7 @@ int main(int argc, char* argv[])
 
 	 BlockingRewardFunction reward_function;
 
-	 auto init_state = std::make_shared<BlockingState>(std::make_shared<Blocking>(bl));
+	 auto init_state = std::make_shared<BlockingState>(std::make_shared<cblock::Blocking>(bl));
 	 auto optimal_score = init_state->get_expected_optimal_score();
 	 std::cout << "Expected optimal score: " << optimal_score << std::endl;
 	 std::cout << "=======================================" << std::endl;
@@ -176,13 +173,11 @@ int main(int argc, char* argv[])
 	 auto nb_loop_iter = params.at("nb_loop_iter");
 
 	init_state->get_blocking()->save_vtk_blocking("loop_init");
-	auto win = current_state->win();
-	auto lost = current_state->lost();
 
 	 for (auto i = 0; i < nb_loop_iter && !current_state->win() && !current_state->lost(); i++) {
+	 	  std::cout << "=======================================" << std::endl;
+	 	  std::cout << "Start global iteration " << i << std::endl;
 		  agent.run(current_state);
-		  std::cout << "=======================================" << std::endl;
-
 		  std::cout << "Iteration " << i << ", nb runs: " << agent.get_nb_iterations() - 1;
 		  std::cout << ", timing: " << agent.get_nb_seconds() << " s." << std::endl;
 

@@ -2,14 +2,14 @@
 #ifndef GMDS_MCTS_BLOCKING_ACTION_H
 #define GMDS_MCTS_BLOCKING_ACTION_H
 /*----------------------------------------------------------------------------*/
-#include <gmds/math/AxisAngleRotation.h>
-
 #include "mcts/IAction.h"
 #include <gmds/utils/CommonTypes.h>
+#include <gmds/math/Point.h>
+#include <gecko/cblock/Blocking.h>
 /*----------------------------------------------------------------------------*/
 namespace gecko {
 /*----------------------------------------------------------------------------*/
-namespace mcts {
+namespace mctsc {
 /*----------------------------------------------------------------------------*/
 /**@brief this class encapsulate the action of cutting a block edge
  */

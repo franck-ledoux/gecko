@@ -2,7 +2,7 @@
 #ifndef GMDS_MCTS_BLOCKING_CLASSIFIER_H
 #define GMDS_MCTS_BLOCKING_CLASSIFIER_H
 /*----------------------------------------------------------------------------*/
-#include <gecko//gblock/Blocking.h>
+#include <gecko/gblock/Blocking.h>
 /*----------------------------------------------------------------------------*/
 #include <string>
 #include <tuple>

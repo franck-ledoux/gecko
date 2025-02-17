@@ -1,15 +1,15 @@
 /*----------------------------------------------------------------------------*/
-#include <gecko/gblock/BlockingClassifier.h>
-#include <gecko/mcts/BlockingState.h>
-#include <gecko/mcts/BlockingAction.h>
+#include <gecko/cblock/BlockingClassifier.h>
+#include <gecko/mcts-c/BlockingState.h>
+#include <gecko/mcts-c/BlockingAction.h>
 #include <gmds/cad/GeomManager.h>
 /*----------------------------------------------------------------------------*/
 #include <vector>
 /*----------------------------------------------------------------------------*/
 using namespace gmds;
 using namespace gecko;
-using namespace gecko::gblock;
-using namespace gecko::mcts;
+using namespace gecko::cblock;
+using namespace gecko::mctsc;
 /*----------------------------------------------------------------------------*/
 const int BlockingState::m_memory_depth = 4;
 double BlockingState::weight_nodes = 10000;
@@ -46,7 +46,6 @@ BlockingState::build_actions_selection() const
 {
 	auto actions = get_possible_cuts();
 	// apply the cut on the blocking, dont use the state
-	this->m_blocking;
 	auto block_removals = get_possible_block_removals_limited();
 	actions.insert(actions.end(),block_removals.begin(),block_removals.end());
 
@@ -204,7 +203,7 @@ BlockingState::updateMemory(double AScore)
 }
 /*----------------------------------------------------------------------------*/
 std::vector<std::shared_ptr<IAction>>
-BlockingState::get_possible_block_removals(bool without_blocks_in) const
+BlockingState::get_possible_block_removals() const
 {
 	auto nodes = m_blocking->get_all_nodes();
 	std::set<TCellID> blocks_to_keep;
@@ -248,7 +247,7 @@ BlockingState::get_possible_block_removals(bool without_blocks_in) const
 /*----------------------------------------------------------------------------*/
 
 std::vector<std::shared_ptr<IAction>>
-BlockingState::get_possible_block_removals_limited(bool without_blocks_in) const
+BlockingState::get_possible_block_removals_limited() const
 {
 	auto nodes = m_blocking->get_all_nodes();
 	std::set<TCellID> blocks_to_keep;
@@ -272,7 +271,7 @@ BlockingState::get_possible_block_removals_limited(bool without_blocks_in) const
 		gmds::math::Point pt = m_blocking->get_center_of_block(b);
 
 		bool is_inside = geom->getVolume(1)->isIn(pt);
-		if(is_inside & without_blocks_in) {
+		if(is_inside) {
 			blocks_to_keep.insert(m_blocking->get_block_id(b));
 		}
 	}
@@ -307,7 +306,7 @@ BlockingState::get_possible_cuts() const
 		// We only consider cut of edge that occur inside the edge and not on one of
 		// its end points (so for param O or 1)
 		if (epsilon < param_cut  && param_cut <1.0-epsilon) {
-			auto e2cut = m_blocking->get_edge(edge_cut->info().topo_id);
+			auto e2cut = edge_cut;
 			gmds::math::Point pointCapt = m_blocking->geom_model()->getPoint(p)->point();
 		    list_cuts.insert(std::make_pair(pointCapt,std::make_pair(e2cut->info().topo_id,param_cut)));
 		    // TODO: verify if we always have a cut that is possible for a point???
@@ -350,7 +349,7 @@ BlockingState::get_possible_cuts() const
 			// We only consider cut of edge that occur inside the edge and not on one of
 			// its end points (so for param O or 1)
 			if (epsilon < param_cut  && param_cut < 1.0-epsilon) {
-				auto e2cut = m_blocking->get_edge(std::get<0>(cut_info_p)->info().topo_id);
+				auto e2cut = std::get<0>(cut_info_p);
 				list_cuts.insert(std::make_pair(p,std::make_pair(e2cut->info().topo_id, std::get<1>(cut_info_p))));
 				// TODO: verify if we always have a cut that is possible for a point???
 				// As we cut the edge std::get<0>(action)->info().topo_id, we remove it to avoid multiple actions on the same edge
@@ -422,7 +421,7 @@ BlockingState::get_possible_cuts_limited() const
 		// We only consider cut of edge that occur inside the edge and not on one of
 		// its end points (so for param O or 1)
 		if (epsilon < param_cut  && param_cut <1.0-epsilon) {
-			auto e2cut = m_blocking->get_edge(std::get<0>(action)->info().topo_id);
+			auto e2cut = std::get<0>(action);
 			gmds::math::Point pointCapt = m_blocking->geom_model()->getPoint(p)->point();
 		    list_cuts.insert(std::make_pair(pointCapt,std::make_pair(e2cut->info().topo_id, std::get<1>(action))));
 		    // TODO: verify if we always have a cut that is possible for a point???
@@ -465,7 +464,7 @@ BlockingState::get_possible_cuts_limited() const
 			// We only consider cut of edge that occur inside the edge and not on one of
 			// its end points (so for param O or 1)
 			if (epsilon < param_cut  && param_cut < 1.0-epsilon) {
-				auto e2cut = m_blocking->get_edge(std::get<0>(cut_info_p)->info().topo_id);
+				auto e2cut = std::get<0>(cut_info_p);
 				list_cuts.insert(std::make_pair(p,std::make_pair(e2cut->info().topo_id, std::get<1>(cut_info_p))));
 				// TODO: verify if we always have a cut that is possible for a point???
 				// As we cut the edge std::get<0>(action)->info().topo_id, we remove it to avoid multiple actions on the same edge
