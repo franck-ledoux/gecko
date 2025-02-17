@@ -57,36 +57,38 @@ Blocking::~Blocking() {
 
 /*----------------------------------------------------------------------------*/
 bool Blocking::operator==(Blocking &ABlocking) {
-	bool sameBlocking = true;
-	if (get_all_blocks().size() != ABlocking.get_all_blocks().size()) {
-		sameBlocking = false;
-	} else if (get_all_faces().size() != ABlocking.get_all_faces().size()) {
-		sameBlocking = false;
-	} else if (get_all_edges().size() != ABlocking.get_all_edges().size()) {
-		sameBlocking = false;
-	} else if (get_all_nodes().size() != ABlocking.get_all_nodes().size()) {
-		sameBlocking = false;
+	if (m_cmap.attributes<3>().size()!=ABlocking.cmap()->attributes<3>().size()) {
+		return false;
+	}
+	else if (m_cmap.attributes<2>().size()!=ABlocking.cmap()->attributes<2>().size()) {
+		return false;
+	}
+	else if (m_cmap.attributes<1>().size()!=ABlocking.cmap()->attributes<1>().size()) {
+		return false;
+	}
+	else if (m_cmap.attributes<0>().size()!=ABlocking.cmap()->attributes<0>().size()) {
+		return false;
 	}
 
-	auto listNodes = get_all_nodes();
-	auto listNodesComparedBlocking = ABlocking.get_all_nodes();
+	//we have the same number of 0, 1, 2 and 3- cells in both blockings
+	bool sameBlocking = true;
 
-	for (auto n1: listNodes) {
+	auto nodes_1 = get_all_nodes();
+	auto nodes_2 = ABlocking.get_all_nodes();
+
+	for (auto n1: nodes_1) {
 		bool found = false;
-		for (auto n2: listNodesComparedBlocking) {
-			if (n1->info().point.X() == n2->info().point.X() &&
-			    n1->info().point.Y() == n2->info().point.Y() &&
-			    n1->info().point.Z() == n2->info().point.Z()) {
+		for (auto n2: nodes_2) {
+			if (n1->info().point.distance2(n2->info().point)<1e-3) {
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
-			sameBlocking = false;
-			break;
+			return false;
 		}
 	}
-	return sameBlocking;
+	return true;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1016,7 +1018,7 @@ Blocking::get_all_sheet_edges(const Edge AE, std::vector<Edge> &AEdges) {
 	std::vector<Dart3> sheet_darts;
 	get_all_sheet_darts(AE, sheet_darts);
 	AEdges.resize(sheet_darts.size());
-	for (auto i = 0; i < sheet_darts.size(); i++) {
+	for (size_t i = 0; i < sheet_darts.size(); i++) {
 		AEdges[i] = m_cmap.attribute<1>(sheet_darts[i]);
 	}
 }
@@ -1112,9 +1114,7 @@ Blocking::get_all_sheet_darts(const Edge AE, std::vector<Dart3> &ADarts) {
 	}
 
 	// We must unmark all the marked edges. As we stored one dart per edge, it is straightforward
-	for (auto d: ADarts) {
-		m_cmap.unmark_cell<1>(d, edge_mark);
-	}
+	m_cmap.unmark_all(edge_mark);
 	m_cmap.free_mark(edge_mark);
 }
 
@@ -1138,9 +1138,8 @@ Blocking::get_all_chord_blocks(const Face AF) {
 	}
 
 	// We must unmark all the marked edges. As we stored one dart per edge, it is straightforward
-	for (auto b: bls) {
-		m_cmap.unmark_cell<3>(b->dart(), block_mark);
-	}
+
+	m_cmap.unmark_all(block_mark);
 	m_cmap.free_mark(block_mark);
 	return bls;
 }
@@ -1179,9 +1178,7 @@ Blocking::get_all_chord_darts(const Face AF, std::vector<Dart3> &ADarts) {
 		}
 	}
 	// We must unmark all the marked edges. As we stored one dart per edge, it is straightforward
-	for (auto d: ADarts) {
-		m_cmap.unmark_cell<2>(d, face_mark);
-	}
+	m_cmap.unmark_all(face_mark);
 	m_cmap.free_mark(face_mark);
 }
 
@@ -1212,6 +1209,11 @@ Blocking::get_cut_info(const gmds::math::Point &APoint,
 }
 
 /*----------------------------------------------------------------------------*/
+void Blocking::cut_sheet(const TCellID AnEdgeId, const double AParam) {
+	cut_sheet(get_edge(AnEdgeId), AParam);
+}
+
+/*----------------------------------------------------------------------------*/
 void
 Blocking::cut_sheet(const Edge AE) {
 	cut_sheet(AE, 0.5);
@@ -1235,7 +1237,7 @@ Blocking::cut_sheet(const Edge AE, const double AParam) {
 	assert(AParam > 0 && AParam < 1);
 	// Note: the parameterization starts from the first node of AE, which is the one having the node
 	// of lowest topo id
-
+	save_vtk_blocking("CUT_SHEET");
 	// We get a dart per sheet edge
 	std::vector<Dart3> sheet_darts;
 	get_all_sheet_darts(AE, sheet_darts);
@@ -1323,24 +1325,14 @@ Blocking::cut_sheet(const Edge AE, const double AParam) {
 	// we free the mark after unmarking all the darts. This is not optimal.
 	m_cmap.unmark_all(mark_edge_darts);
 	m_cmap.free_mark(mark_edge_darts);
+
 	m_cmap.unmark_all(mark_done);
 	m_cmap.free_mark(mark_done);
 }
 
 /*----------------------------------------------------------------------------*/
-void Blocking::cut_sheet(const TCellID AnEdgeId, const double AParam) {
-	auto allEdges = get_all_edges();
-	for (auto e: allEdges) {
-		if (e->info().topo_id == AnEdgeId) {
-			cut_sheet(e, AParam);
-		}
-	}
-}
-
-/*----------------------------------------------------------------------------*/
 std::pair<double, double>
 Blocking::get_projection_info(const math::Point &AP, Blocking::Edge &AEdge) {
-	std::pair<double, double> dist_coord;
 
 	std::vector<Node> end_points = get_nodes_of_edge(AEdge);
 	math::Point end0 = end_points[0]->info().point;
@@ -1911,28 +1903,30 @@ Blocking::smooth_curves(const int ANbIterations) {
 			to_smooth.push_back(it);
 		}
 	}
-	for (auto n: to_smooth) {
-		// We get the location of each adjacent node connected through a 1-classified edge
-		Dart3 d = n->dart();
-		math::Point p = n->info().point;
-		math::Point deviation(0, 0, 0);
-		auto ball_size = 0;
-		// We get one dart per 1-cell adjacent to the 0-cell that contains d
-		for (auto it = m_cmap.one_dart_per_incident_cell<1, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<1,
-					     0>(d).end(); it != itend; ++it) {
-			Edge e = m_cmap.attribute<1>(it);
-			if (e->info().geom_dim == 1) {
-				// we keep the opposite node
-				Dart3 d_opp = m_cmap.beta<0>(it);
-				deviation = deviation + m_cmap.attribute<0>(d_opp)->info().point;
-				ball_size++;
+	for (auto i=0; i<ANbIterations; i++) {
+		for (auto n: to_smooth) {
+			// We get the location of each adjacent node connected through a 1-classified edge
+			Dart3 d = n->dart();
+			math::Point p = n->info().point;
+			math::Point deviation(0, 0, 0);
+			auto ball_size = 0;
+			// We get one dart per 1-cell adjacent to the 0-cell that contains d
+			for (auto it = m_cmap.one_dart_per_incident_cell<1, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<1,
+							 0>(d).end(); it != itend; ++it) {
+				Edge e = m_cmap.attribute<1>(it);
+				if (e->info().geom_dim == 1) {
+					// we keep the opposite node
+					Dart3 d_opp = m_cmap.beta<0>(it);
+					deviation = deviation + m_cmap.attribute<0>(d_opp)->info().point;
+					ball_size++;
+				}
+							 }
+			if (ball_size != 0) {
+				// we mode n
+				math::Point p_new = 1.0 / (double) ball_size * deviation;
+				p = 0.5 * p + 0.5 * p_new;
+				move_node(n, p);
 			}
-		}
-		if (ball_size != 0) {
-			// we mode n
-			math::Point p_new = 1.0 / (double) ball_size * deviation;
-			p = 0.5 * p + 0.5 * p_new;
-			move_node(n, p);
 		}
 	}
 }
@@ -1949,28 +1943,30 @@ Blocking::smooth_surfaces(const int ANbIterations) {
 			to_smooth.push_back(it);
 		}
 	}
-	for (auto n: to_smooth) {
-		// We get the location of each adjacent node connected through a 2-classified edge
-		Dart3 d = n->dart();
-		math::Point p = n->info().point;
-		math::Point deviation(0, 0, 0);
-		auto ball_size = 0;
-		// We get one dart per 1-cell adjacent to the 0-cell that contains d
-		for (auto it = m_cmap.one_dart_per_incident_cell<1, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<1,
-					     0>(d).end(); it != itend; ++it) {
-			Edge e = m_cmap.attribute<1>(it);
-			if (e->info().geom_dim == 2) {
-				// we keep the opposite node
-				Dart3 d_opp = m_cmap.beta<0>(it);
-				deviation = deviation + m_cmap.attribute<0>(d_opp)->info().point;
-				ball_size++;
+	for (auto i=0; i<ANbIterations; i++) {
+		for (auto n: to_smooth) {
+			// We get the location of each adjacent node connected through a 2-classified edge
+			Dart3 d = n->dart();
+			math::Point p = n->info().point;
+			math::Point deviation(0, 0, 0);
+			auto ball_size = 0;
+			// We get one dart per 1-cell adjacent to the 0-cell that contains d
+			for (auto it = m_cmap.one_dart_per_incident_cell<1, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<1,
+							 0>(d).end(); it != itend; ++it) {
+				Edge e = m_cmap.attribute<1>(it);
+				if (e->info().geom_dim == 2) {
+					// we keep the opposite node
+					Dart3 d_opp = m_cmap.beta<0>(it);
+					deviation = deviation + m_cmap.attribute<0>(d_opp)->info().point;
+					ball_size++;
+				}
+							 }
+			if (ball_size != 0) {
+				// we mode n
+				math::Point p_new = 1.0 / (double) ball_size * deviation;
+				p = 0.5 * p + 0.5 * p_new;
+				move_node(n, p);
 			}
-		}
-		if (ball_size != 0) {
-			// we mode n
-			math::Point p_new = 1.0 / (double) ball_size * deviation;
-			p = 0.5 * p + 0.5 * p_new;
-			move_node(n, p);
 		}
 	}
 }
@@ -1987,28 +1983,30 @@ Blocking::smooth_volumes(const int ANbIterations) {
 			to_smooth.push_back(it);
 		}
 	}
-	for (auto n: to_smooth) {
-		// We get the location of each adjacent node connected through a 2-classified edge
-		Dart3 d = n->dart();
-		math::Point p = n->info().point;
-		math::Point deviation(0, 0, 0);
-		auto ball_size = 0;
-		// We get one dart per 1-cell adjacent to the 0-cell that contains d
-		for (auto it = m_cmap.one_dart_per_incident_cell<1, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<1,
-					     0>(d).end(); it != itend; ++it) {
-			Edge e = m_cmap.attribute<1>(it);
-			if (e->info().geom_dim == 3) {
-				// we keep the opposite node
-				Dart3 d_opp = m_cmap.beta<0>(it);
-				deviation = deviation + m_cmap.attribute<0>(d_opp)->info().point;
-				ball_size++;
+	for (auto i=0; i<ANbIterations; i++) {
+		for (auto n: to_smooth) {
+			// We get the location of each adjacent node connected through a 2-classified edge
+			Dart3 d = n->dart();
+			math::Point p = n->info().point;
+			math::Point deviation(0, 0, 0);
+			auto ball_size = 0;
+			// We get one dart per 1-cell adjacent to the 0-cell that contains d
+			for (auto it = m_cmap.one_dart_per_incident_cell<1, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<1,
+							 0>(d).end(); it != itend; ++it) {
+				Edge e = m_cmap.attribute<1>(it);
+				if (e->info().geom_dim == 3) {
+					// we keep the opposite node
+					Dart3 d_opp = m_cmap.beta<0>(it);
+					deviation = deviation + m_cmap.attribute<0>(d_opp)->info().point;
+					ball_size++;
+				}
+							 }
+			if (ball_size != 0) {
+				// we mode n
+				math::Point p_new = 1.0 / (double) ball_size * deviation;
+				p = 0.5 * p + 0.5 * p_new;
+				move_node(n, p);
 			}
-		}
-		if (ball_size != 0) {
-			// we mode n
-			math::Point p_new = 1.0 / (double) ball_size * deviation;
-			p = 0.5 * p + 0.5 * p_new;
-			move_node(n, p);
 		}
 	}
 }

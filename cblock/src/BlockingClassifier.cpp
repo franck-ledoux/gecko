@@ -4,6 +4,7 @@
 /*----------------------------------------------------------------------------*/
 #include "gecko/cblock/Graph.h"
 #include <limits>
+#include <CGAL/boost/graph/graph_traits_Surface_mesh.h>
 /*----------------------------------------------------------------------------*/
 using namespace gecko;
 using namespace gecko::cblock;
@@ -268,7 +269,6 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 	std::map<TCellID ,bool> is_captured_surfaces;
 	std::map<size_t,std::pair<int,std::vector<TCellID>>> captCurvesMap;
 
-	// TODO PROBLEME : les sommets ne sont pas numerotés de 0 à V mais on les numeros du blocking!!!!!
 
 	// PAS CONTINU
 	// sortir fonction creation graph en prenant entree seulement ANodesIds et AEdgesIds
@@ -435,7 +435,14 @@ BlockingClassifier::try_and_capture(std::set<TCellID> &ANodeIds,
 	if(!found_one_uncaptured_curve){
 		//we can try and capture surfaces so
 		//we store in a map the color of boundary block faces
-		auto map_faces_colored = blocking_color_faces();
+
+		//we use the boundary faces only
+		std::vector<Blocking::Face> bnd_faces;
+		bnd_faces.reserve(AFaceIds.size());
+		for(auto f_id : AFaceIds) {
+			bnd_faces.push_back(m_blocking->get_face(f_id));
+		}
+		auto map_faces_colored = blocking_color_faces(bnd_faces);
 
 		// We class the faces with a surface
 		for (auto s : geom_surfaces) {
@@ -1176,54 +1183,61 @@ BlockingClassifier::get_closest_cell(const math::Point &AP, const std::vector<ca
 
 /*----------------------------------------------------------------------------*/
 std::map<Blocking::Face, int>
-BlockingClassifier::blocking_color_faces()
+BlockingClassifier::blocking_color_faces() {
+	std::vector<Blocking::Face> bnd_faces;
+	for (auto f : m_blocking->get_all_faces()) {
+		if (m_blocking->get_blocks_of_face(f).size() == 1) {
+			bnd_faces.push_back(f);
+		}
+	}
+	return blocking_color_faces(bnd_faces);
+}
+/*----------------------------------------------------------------------------*/
+std::map<Blocking::Face, int>
+BlockingClassifier::blocking_color_faces(const std::vector<Blocking::Face>& ABndFaces)
 {
-	std::map<Blocking::Face, int> faces_colored;
-	auto allFaces = m_blocking->get_all_faces();
-	auto allEdges = m_blocking->get_all_edges();
+	std::map<Blocking::Face, int> colored_faces;
 
-	for (auto aF : allFaces) {
-		faces_colored.insert(std::pair<Blocking::Face, int>(aF, 0));
+	//we initialize faces as being not colored
+	for (auto f : ABndFaces) {
+		colored_faces.insert(std::pair<Blocking::Face, int>(f, 0));
 	}
 	int current_color = 0;
-
 	bool finish = false;
 
 	while (!finish) {
+		finish = true;
 		current_color++;
-		Blocking::Face currentFace = NULL;
-		for (auto aFC : faces_colored) {
-			if (aFC.second == 0 && (m_blocking->get_blocks_of_face(aFC.first).size() == 1)) {
-				currentFace = aFC.first;
+		if (current_color> 100) {
+			m_blocking->save_vtk_blocking("color_problem");
+		}
+		Blocking::Face seed_face;
+		bool found_seed = false;
+		for (auto face_color : colored_faces) {
+			if (face_color.second == 0) {
+				seed_face = face_color.first;
+				found_seed = true;
+				finish = false;
 				break;
 			}
 		}
-		if (currentFace == NULL) {
-			finish = true;
-		}
-		else {
-			std::set<TCellID> front;
-			front.insert(currentFace->info().topo_id);
+		if (found_seed) {
+			//We have a set of faces to color
+			std::set<Blocking::Face> front;
+			front.insert(seed_face);
 			while (!front.empty()) {
-				TCellID current_id = *front.begin();
+				auto current_face = *front.begin();
 				front.erase(front.begin());
-				Blocking::Face aFace;
-				for (auto f : allFaces) {
-					if (f->info().topo_id == current_id) {
-						aFace = f;
-						break;
-					}
-				}
-				faces_colored[aFace] = current_color;
-				auto edges_f = m_blocking->get_edges_of_face(aFace);
+				colored_faces[current_face] = current_color;
+				auto edges_f = m_blocking->get_edges_of_face(current_face);
 				for (auto e : edges_f) {
-					// if edge not classified on a curve
+					// if the  edge e is not classified on a curve
 					if (e->info().geom_dim != 1) {
-						// We get her faces
-						auto faces_e = m_blocking->get_faces_of_edge(e);
-						for (auto f : faces_e) {
-							if (faces_colored[f] == 0 && m_blocking->get_blocks_of_face(f).size() == 1) {
-								front.insert(f->info().topo_id);
+						// We get adjacent faces
+						auto e_faces = m_blocking->get_faces_of_edge(e);
+						for (auto f : e_faces) {
+							if (colored_faces[f] == 0 && m_blocking->get_blocks_of_face(f).size() == 1) {
+								front.insert(f);
 							}
 						}
 					}
@@ -1231,7 +1245,7 @@ BlockingClassifier::blocking_color_faces()
 			}
 		}
 	}
-	return faces_colored;
+	return colored_faces;
 }
 /*----------------------------------------------------------------------------*/
 bool

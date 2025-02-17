@@ -40,6 +40,7 @@ subdir('gmds_core')
 subdir('gblock')
 subdir('cblock')
 subdir('mcts')
+subdir('mcts-c')
 
 
 #==========================================================

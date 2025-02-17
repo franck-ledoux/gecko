@@ -121,9 +121,11 @@ class BlockingClassifier
 	 */
 	ClassificationErrors classify(const double AMaxDistance = 0.01, const double APointSnapDistance = 0.1);
 
-	/**@brief This method colored all the faces with the same color by surfaces
+	/**@brief This method colored all the boundary faces with the same color by surfaces. The boundary faces are given
+	 *		  in parameter
 	 * @return a map with the boundary faces colored
 	 */
+	std::map<Blocking::Face, int> blocking_color_faces(const std::vector<Blocking::Face>& ABndFaces);
 	std::map<Blocking::Face, int> blocking_color_faces();
 
 	/**@brief This method check if the classification between the model and the blocking is valid (all the elements of the model are captured)

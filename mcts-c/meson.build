@@ -10,7 +10,7 @@ lib_src = files('src/BlockingAction.cpp',
 
 exe_src = files('src/main_blocker.cpp')
 
-mcts_c_lib = library('mcts_lib',
+mcts_c_lib = library('mcts_c_lib',
                     lib_src,
                     include_directories: inc_dir,
                     dependencies : [cgal_dep,
@@ -29,7 +29,7 @@ mcts_c_lib = library('mcts_lib',
 
 mcts_c_lib_dep = declare_dependency(include_directories: inc_dir, link_with : mcts_c_lib)
 
-mcts_exe = executable('mcts_blocker', exe_src, dependencies: [mcts_c_lib_dep,cgal_dep,
+mcts_c_exe = executable('mcts_c_blocker', exe_src, dependencies: [mcts_c_lib_dep,cgal_dep,
                                                               boost_dep,
                                                               nlohmann_json_dep,
                                                               gmds_core_cad_lib_dep,

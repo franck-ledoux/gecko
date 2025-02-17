@@ -1,12 +1,12 @@
 /*----------------------------------------------------------------------------*/
-#include <gecko/mcts/BlockingAction.h>
-#include <gecko/mcts/BlockingState.h>
-#include <gecko/gblock/BlockingClassifier.h>
-#include <gecko/gblock/Blocking.h>
+#include <gecko/mcts-c/BlockingAction.h>
+#include <gecko/mcts-c/BlockingState.h>
+#include <gecko/cblock/BlockingClassifier.h>
+#include <gecko/cblock/Blocking.h>
 /*----------------------------------------------------------------------------*/
 using namespace gmds;
 using namespace gecko;
-using namespace gecko::mcts;
+using namespace gecko::mctsc;
 /*----------------------------------------------------------------------------*/
 /** EDGE CUT ACTION */
 /*----------------------------------------------------------------------------*/
@@ -25,7 +25,7 @@ std::shared_ptr<IState>
 EdgeCutAction::apply_on(std::shared_ptr<IState> AState) const
 {
 	auto current_state = std::dynamic_pointer_cast<BlockingState>(AState);
-	auto new_blocking = std::make_shared<gecko::gblock::Blocking>(* current_state->get_blocking());
+	auto new_blocking = std::make_shared<gecko::cblock::Blocking>(* current_state->get_blocking());
 	new_blocking->cut_sheet(m_edge_id, m_cut_param);
 	auto next_state =  std::make_shared<BlockingState>(new_blocking, current_state->get_depth()+1, current_state->get_memory());
 	return next_state;
@@ -56,7 +56,7 @@ std::shared_ptr<IState>
 BlockRemovalAction::apply_on(std::shared_ptr<IState> AState) const
 {
 	   auto current_state = std::dynamic_pointer_cast<BlockingState>(AState);
-	   auto new_blocking = std::make_shared<gblock::Blocking>(* current_state->get_blocking());
+	   auto new_blocking = std::make_shared<cblock::Blocking>(* current_state->get_blocking());
 	   new_blocking->remove_block(m_block_id);
 	   auto next_state =  std::make_shared<BlockingState>(new_blocking, current_state->get_depth()+1, current_state->get_memory());
 	   return next_state;
@@ -85,7 +85,7 @@ CaptureAction::apply_on(std::shared_ptr<IState> AState) const
 
 
 	auto current_state = std::dynamic_pointer_cast<BlockingState>(AState);
-	auto new_blocking = std::make_shared<gblock::Blocking>(* current_state->get_blocking());
+	auto new_blocking = std::make_shared<cblock::Blocking>(* current_state->get_blocking());
 	std::set<TCellID> nids, eids,fids;
 	new_blocking->extract_boundary(nids,eids,fids);
 	//	BlockingClassifier(new_blocking.get()).try_and_classify_nodes(nids);

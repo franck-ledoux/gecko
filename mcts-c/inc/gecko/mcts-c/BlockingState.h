@@ -3,11 +3,11 @@
 #define GMDS_MCTS_BLOCKING_STATE_H
 /*----------------------------------------------------------------------------*/
 #include "mcts/IState.h"
-#include <gecko/gblock/Blocking.h>
+#include <gecko/cblock/Blocking.h>
 /*----------------------------------------------------------------------------*/
 namespace gecko {
 /*----------------------------------------------------------------------------*/
-namespace mcts {
+namespace mctsc {
 /*----------------------------------------------------------------------------*/
 class BlockingState : public IState
 {
@@ -18,7 +18,7 @@ class BlockingState : public IState
 	static  double weight_edges;
 	static  double weight_faces;
 
-	BlockingState(std::shared_ptr<gblock::Blocking> AB, int ADepth = 0, std::deque<double> APrevScore = std::deque<double>());
+	BlockingState(std::shared_ptr<cblock::Blocking> AB, int ADepth = 0, std::deque<double> APrevScore = std::deque<double>());
 	BlockingState(const BlockingState &AState);
 
 	std::vector<std::shared_ptr<IAction>> build_actions_selection() const;
@@ -60,7 +60,7 @@ class BlockingState : public IState
 	double computeMinEdgeLenght() const;
 
 
-	std::shared_ptr<gblock::Blocking> get_blocking() const {return m_blocking;}
+	std::shared_ptr<cblock::Blocking> get_blocking() const {return m_blocking;}
 	int get_depth() const {return m_depth;}
 	/**
 	 * Stack of memorized score. The last score in the stack (back) is the score of the current state
@@ -84,13 +84,13 @@ class BlockingState : public IState
 	/**@brief This method returns all the possible block erasing. A block can be erased if
 	 *  - it doesn't not belong a corner that is the only one to capture a point.
 	 * @return a vector of block ids. */
-	std::vector<std::shared_ptr<IAction>> get_possible_block_removals(bool without_blocks_in = true) const;
+	std::vector<std::shared_ptr<IAction>> get_possible_block_removals() const;
 
 	/**@brief This method returns all the possible block erasing. A block can be erased if
 	 *  - it doesn't not belong a corner that is the only one to capture a point.
 	 *  - its centroid is not inside the volume
 	 * @return a vector of block ids. */
-	std::vector<std::shared_ptr<IAction>> get_possible_block_removals_limited(bool without_blocks_in = true) const;
+	std::vector<std::shared_ptr<IAction>> get_possible_block_removals_limited() const;
 
  private:
 	/** the memory depth we store*/
@@ -98,14 +98,14 @@ class BlockingState : public IState
 
 	double m_expected_optimal_score;
 	/** the blocking we act on. Note that the geometric model is known by the blocking */
-	std::shared_ptr<gblock::Blocking> m_blocking;
+	std::shared_ptr<cblock::Blocking> m_blocking;
 
 	std::set<TCellID> m_boundary_node_ids;
 	std::set<TCellID> m_boundary_edge_ids;
 	std::set<TCellID> m_boundary_face_ids;
 	/** we need to know at what depth we are in the tree */
 	int m_depth;
-	/** we store the score of the current blocking and the m_memory_depth previsious one.*/
+	/** we store the score of the current blocking and the m_memory_depth previous one.*/
 	std::deque<double> m_memory_scores;
 	/** we store the possible actions for the state*/
 	std::vector<std::shared_ptr<IAction>> m_list_actions_selection;

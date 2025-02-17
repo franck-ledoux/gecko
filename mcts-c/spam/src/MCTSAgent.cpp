@@ -7,6 +7,7 @@
 /*---------------------------------------------------------------------------*/
 #include "mcts/MCTSAgent.h"
 #include <chrono>
+#include <gecko/mcts-c/BlockingState.h>
 /*---------------------------------------------------------------------------*/
 using json = nlohmann::json;
 /*---------------------------------------------------------------------------*/
@@ -89,21 +90,27 @@ std::pair<double,MCTSAgent::GAME_RESULT> MCTSAgent::simulate(MCTSTree* ANode) {
 
 	 bool found_win=false;
 	 bool found_lost =false;
-    if(!state->win() && !ANode->is_terminal()) {
+    if(!state->win() && !state->is_terminal()) {
 		  //TODO checker cette boucle.
         for (int d = 0; d < m_simulation_depth && !found_win && !found_lost; d++) {
             if (!state->is_terminal()) {
-                auto a = get_random_action(state);
-				    if(a== nullptr)
-				    	return std::make_pair(m_reward_function->evaluate(state),LOST);
+	            auto a = get_random_action(state);
+
+            	if(a== nullptr){
+            		std::cout<<"Error in simulate()"<<std::endl;;
+            	return std::make_pair(m_reward_function->evaluate(state),LOST);
+            }
             			//exit(55); //si cela se produit verifier qu'un etat non terminal a bien une list d'action non vide, state.lost() ordre des elements conditionnels
 
-
+            	auto bs = std::dynamic_pointer_cast<gecko::mctsc::BlockingState>(state);
+            //	bs->get_blocking()->save_vtk_blocking("simulation_error");
+			//	std::cout<<"We apply action "<<a->get_description()<<std::endl;
                 state = a->apply_on(state);
-				    if (state->win())
-					    found_win=true;
-				    else if (state->lost())
-					    found_lost=true;
+            //	std::cout<<"\t done"<<std::endl;
+            	if (state->win())
+            		found_win=true;
+            	else if (state->lost())
+            		found_lost=true;
             }
         }
     }
@@ -216,24 +223,24 @@ void MCTSAgent::run(std::shared_ptr<IState> ARootState) {
         auto node = select(m_tree);
 		  end_select = std::chrono::system_clock::now();
 		  std::chrono::duration<double> elapsed_seconds = end_select - start_iter;
-		//  std::cout << "\t node selection    : " << elapsed_seconds.count() << "s\n";
+	//	 std::cout << "\t node selection    : " << elapsed_seconds.count() << "s\n";
 
 		  // 2. EXPAND by adding a single child (if not terminal or not fully expanded)
         node = expand(node);
 		  end_expand = std::chrono::system_clock::now();
 		  elapsed_seconds = end_reward - end_select;
-		//  std::cout << "\t node expansion    : " << elapsed_seconds.count() << "s\n";
+	//	 std::cout << "\t node expansion    : " << elapsed_seconds.count() << "s\n";
 
         // 3. SIMULATE (if not terminal)
         auto [reward, result] = simulate(node);
 		  end_reward = std::chrono::system_clock::now();
 		  elapsed_seconds = end_reward - end_expand;
-	//	  std::cout << "\t node reward       : " << elapsed_seconds.count() << "s\n";
+	//	std::cout << "\t node simulation   : " << elapsed_seconds.count() << "s\n";
         // 4. BACK PROPAGATION
         back_propagate(node,reward,result);
 		  end_back = std::chrono::system_clock::now();
 		  elapsed_seconds = end_back - end_reward;
-		//  std::cout << "\t node backprogation: " << elapsed_seconds.count() << "s\n";
+	//	 std::cout << "\t node backprogation: " << elapsed_seconds.count() << "s\n";
 
         //increase loop counters
         i++;
@@ -242,7 +249,7 @@ void MCTSAgent::run(std::shared_ptr<IState> ARootState) {
             if(i%m_debug_frequency==0)
                 export_tree();
         }
-		//  std::cout<<" done"<<std::endl;
+	//	 std::cout<<"  -- done"<<std::endl;
     }
     m_nb_iterations=i;
     m_nb_seconds =elapsed.count();

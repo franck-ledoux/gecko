@@ -1,11 +1,11 @@
 /*----------------------------------------------------------------------------*/
-#include <gecko/mcts/BlockingRewardFunction.h>
-#include <gecko/mcts/BlockingState.h>
+#include <gecko/mcts-c/BlockingRewardFunction.h>
+#include <gecko/mcts-c/BlockingState.h>
 /*----------------------------------------------------------------------------*/
 using namespace gmds;
 using namespace gecko;
-using namespace gecko::gblock;
-using namespace gecko::mcts;
+using namespace gecko::cblock;
+using namespace gecko::mctsc;
 /*---------------------------------------------------------------------------*/
 double BlockingRewardFunction::evaluate(std::shared_ptr<IState> AState) const {
 	auto state = std::dynamic_pointer_cast<BlockingState>(AState);
