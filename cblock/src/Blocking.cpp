@@ -269,8 +269,8 @@ std::vector<Blocking::Block>
 Blocking::get_blocks_of_node(const Node AN) {
 	std::vector<Block> blocks;
 	Dart3 d = AN->dart();
-	for (auto it = m_cmap.one_dart_per_incident_cell<3, 0>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<3,
-				     0>(d).end(); it != itend; ++it) {
+	for (auto it = m_cmap.one_dart_per_incident_cell<3, 0>(d).begin(),
+		itend = m_cmap.one_dart_per_incident_cell<3, 0>(d).end(); it != itend; ++it) {
 		blocks.push_back(m_cmap.attribute<3>(it));
 	}
 	return blocks;
@@ -281,8 +281,9 @@ std::vector<Blocking::Face>
 Blocking::get_faces_of_edge(const Edge AE) {
 	std::vector<Face> faces;
 	Dart3 d = AE->dart();
-	for (auto it = m_cmap.one_dart_per_incident_cell<2, 1>(d).begin(), itend = m_cmap.one_dart_per_incident_cell<2,
-				     1>(d).end(); it != itend; ++it) {
+	for (auto it = m_cmap.one_dart_per_incident_cell<2, 1>(d).begin(),
+		itend = m_cmap.one_dart_per_incident_cell<2,1>(d).end();
+		it != itend; ++it) {
 		faces.push_back(m_cmap.attribute<2>(it));
 	}
 	return faces;
@@ -1115,6 +1116,9 @@ Blocking::get_all_sheet_darts(const Edge AE, std::vector<Dart3> &ADarts) {
 
 	// We must unmark all the marked edges. As we stored one dart per edge, it is straightforward
 	m_cmap.unmark_all(edge_mark);
+	if (!m_cmap.is_whole_map_unmarked(edge_mark)) {
+		std::cout<<"Error in Blocking::get_all_sheet_darts"<<std::endl;
+	}
 	m_cmap.free_mark(edge_mark);
 }
 
