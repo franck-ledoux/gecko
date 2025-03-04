@@ -872,6 +872,15 @@ TEST_CASE("save_vtk_blocking", "[BlockingTestSuite]") {
     bl.save_vtk_blocking("testSaveWork.vtk");
 }
 
+TEST_CASE("save_vtk_darts", "[BlockingTestSuite]") {
+    gmds::cad::FACManager geom_model;
+    setUp(geom_model);
+    gecko::gblock::Blocking bl(&geom_model, true);
+    gecko::gblock::BlockingClassifier classifier(&bl);
+
+    bl.save_vtk_darts("darts_testSaveWork.vtk");
+}
+
 TEST_CASE("get_Id_block", "[BlockingTestSuite]") {
     gmds::cad::FACManager geom_model;
     setUp(geom_model);
