@@ -96,34 +96,48 @@ FACCurve::tangent(const int AParam) const
 		std::vector<TCellID> e_node_ids = e.getIDs<Node>();
 		if (nb_node_occurrences[e_node_ids[0]] == 1) {
 			// end point
-			// We check which end point it is and if it the expected on
-			if (e_node_ids[0] == end0_node_id && p == 0) {
+			// We check which end point it is and if it the expected one
+			if (e_node_ids[0] == end0_node_id ) {
 				// return edge vector
 				Node n0 = m_support->get<Node>(e_node_ids[0]);
 				Node n1 = m_support->get<Node>(e_node_ids[1]);
-				return (n1.point() - n0.point()).getNormalize();
+				if (p == 0)
+					return (n1.point() - n0.point()).getNormalize();
+				if (p == 1)
+					return (n0.point() - n1.point()).getNormalize();
+
 			}
-			else if (e_node_ids[0] == end1_node_id && p == 1) {
+
+			if (e_node_ids[0] == end1_node_id) {
 				// return edge vector
 				Node n0 = m_support->get<Node>(e_node_ids[0]);
 				Node n1 = m_support->get<Node>(e_node_ids[1]);
-				return (n1.point() - n0.point()).getNormalize();
+				if (p == 1)
+					return (n1.point() - n0.point()).getNormalize();
+				if (p == 0)
+					return (n0.point() - n1.point()).getNormalize();
 			}
 		}
 		else if (nb_node_occurrences[e_node_ids[1]] == 1) {
 				// end point
 				// We check which end point it is and if it the expected on
-				if (e_node_ids[1] == end0_node_id && p == 0) {
+				if (e_node_ids[1] == end0_node_id ) {
 					// return edge vector
 					Node n0 = m_support->get<Node>(e_node_ids[0]);
 					Node n1 = m_support->get<Node>(e_node_ids[1]);
-					return (n0.point() - n1.point()).getNormalize();
+					if (p==0)
+						return (n0.point() - n1.point()).getNormalize();
+					if (p==1)
+						return (n1.point() - n0.point()).getNormalize();
 				}
-				else if (e_node_ids[1] == end1_node_id && p == 1) {
+			    if (e_node_ids[1] == end1_node_id ) {
 					// return edge vector
 					Node n0 = m_support->get<Node>(e_node_ids[0]);
 					Node n1 = m_support->get<Node>(e_node_ids[1]);
-					return (n0.point() - n1.point()).getNormalize();
+			    	if (p==1)
+						return (n0.point() - n1.point()).getNormalize();
+			    	if (p==0)
+			    		return (n1.point() - n0.point()).getNormalize();
 				}
 			}
 		}

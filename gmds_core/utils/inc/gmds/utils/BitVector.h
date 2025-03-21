@@ -35,7 +35,6 @@ namespace gmds{
             }
 
             iterator(BitVector* AContainer, size_type ACurrent):container_(AContainer),current_(ACurrent){}
-            iterator(const iterator& AIt):container_(AIt.container_),current_(AIt.current_){}
 
 
             self_type operator++() {

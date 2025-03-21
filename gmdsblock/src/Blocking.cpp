@@ -9,46 +9,53 @@ using namespace gecko::cblock;
 /*----------------------------------------------------------------------------*/
 // int CellInfo::m_counter_global_id = 0;
 /*----------------------------------------------------------------------------*/
-Blocking::Blocking(cad::GeomManager *AGeomModel, bool AInitAsBoundingBox) : m_geom_model(AGeomModel), m_counter(0) {
+Blocking::Blocking(cad::GeomManager *AGeomModel, bool AInitAsBoundingBox) : m_geom_model(AGeomModel), m_counter(0),
+m_structure(MeshModel(DIM3|R|F|E|N|R2N|F2N|E2N|N2E|N2F|N2R)){
+
+	m_node_info = m_structure.newVariable<CellInfo, GMDS_NODE>("info");
+	m_edge_info = m_structure.newVariable<CellInfo, GMDS_EDGE>("info");
+	m_face_info = m_structure.newVariable<CellInfo, GMDS_FACE>("info");
+	m_block_info = m_structure.newVariable<CellInfo, GMDS_REGION>("info");
 	if (AInitAsBoundingBox) {
 		init_from_bounding_box();
 	}
 }
 
 /*----------------------------------------------------------------------------*/
-Blocking::Blocking(const Blocking &ABl) : m_geom_model(ABl.m_geom_model), m_cmap(ABl.m_cmap), m_counter(ABl.m_counter) {
-	for (auto b: cmap()->attributes<3>()) {
-		b.info().counter = &m_counter;
+Blocking::Blocking(const Blocking &ABl) : m_geom_model(ABl.m_geom_model), m_structure(ABl.m_structure), m_counter(ABl.m_counter) {
+	for (auto b: m_structure.regions()) {
+		(*m_block_info)[b].counter = &m_counter;
 	}
-	for (auto f: cmap()->attributes<2>()) {
-		f.info().counter = &m_counter;
+	for (auto f: m_structure.faces()) {
+		(*m_face_info)[f].counter = &m_counter;
 	}
-	for (auto e: cmap()->attributes<1>()) {
-		e.info().counter = &m_counter;
+	for (auto e: m_structure.edges()) {
+		(*m_edge_info)[e].counter = &m_counter;
 	}
-	for (auto n: cmap()->attributes<0>()) {
-		n.info().counter = &m_counter;
+	for (auto n: m_structure.nodes()) {
+		(*m_node_info)[n].counter = &m_counter;
 	}
 }
 
 /*----------------------------------------------------------------------------*/
 void Blocking::reset_classification() {
-	for (auto b: cmap()->attributes<3>()) {
-		b.info().geom_dim = 4;
-		b.info().geom_id = NullID;
+	for (auto b: m_structure.regions()) {
+		(*m_block_info)[b].geom_dim = 4;
+		(*m_block_info)[b].geom_id = NullID;
 	}
-	for (auto f: cmap()->attributes<2>()) {
-		f.info().geom_dim = 4;
-		f.info().geom_id = NullID;
+	for (auto f: m_structure.faces()) {
+		(*m_face_info)[f].geom_dim = 4;
+		(*m_face_info)[f].geom_id = NullID;
 	}
-	for (auto e: cmap()->attributes<1>()) {
-		e.info().geom_dim = 4;
-		e.info().geom_id = NullID;
+	for (auto e: m_structure.edges()) {
+		(*m_edge_info)[e].geom_dim = 4;
+		(*m_edge_info)[e].geom_id = NullID;
 	}
-	for (auto n: cmap()->attributes<0>()) {
-		n.info().geom_dim = 4;
-		n.info().geom_id = NullID;
+	for (auto n: m_structure.nodes()) {
+		(*m_node_info)[n].geom_dim = 4;
+		(*m_node_info)[n].geom_id = NullID;
 	}
+
 }
 
 /*----------------------------------------------------------------------------*/
@@ -57,16 +64,10 @@ Blocking::~Blocking() {
 
 /*----------------------------------------------------------------------------*/
 bool Blocking::operator==(Blocking &ABlocking) {
-	if (m_cmap.attributes<3>().size()!=ABlocking.cmap()->attributes<3>().size()) {
-		return false;
-	}
-	else if (m_cmap.attributes<2>().size()!=ABlocking.cmap()->attributes<2>().size()) {
-		return false;
-	}
-	else if (m_cmap.attributes<1>().size()!=ABlocking.cmap()->attributes<1>().size()) {
-		return false;
-	}
-	else if (m_cmap.attributes<0>().size()!=ABlocking.cmap()->attributes<0>().size()) {
+	if (m_structure.getNbRegions()!=ABlocking.m_structure.getNbRegions() ||
+		m_structure.getNbFaces()!=ABlocking.m_structure.getNbFaces() ||
+		m_structure.getNbEdges()!=ABlocking.m_structure.getNbEdges() ||
+		m_structure.getNbNodes()!=ABlocking.m_structure.getNbNodes()) {
 		return false;
 	}
 
@@ -79,7 +80,7 @@ bool Blocking::operator==(Blocking &ABlocking) {
 	for (auto n1: nodes_1) {
 		bool found = false;
 		for (auto n2: nodes_2) {
-			if (n1->info().point.distance2(n2->info().point)<1e-3) {
+			if (n1.point().distance2(n2.point())<1e-3) {
 				found = true;
 				break;
 			}
@@ -90,41 +91,10 @@ bool Blocking::operator==(Blocking &ABlocking) {
 	}
 	return true;
 }
-
-/*----------------------------------------------------------------------------*/
-CMap3 *
-Blocking::cmap() {
-	return &m_cmap;
-}
-
 /*----------------------------------------------------------------------------*/
 cad::GeomManager *
 Blocking::geom_model() const {
 	return m_geom_model;
-}
-
-/*----------------------------------------------------------------------------*/
-Blocking::Node
-Blocking::create_node(const int AGeomDim, const int AGeomId, const math::Point &APoint) {
-	return m_cmap.create_attribute<0>(NodeInfo(this->getCounter(), m_geom_model, AGeomDim, AGeomId, APoint));
-}
-
-/*----------------------------------------------------------------------------*/
-Blocking::Edge
-Blocking::create_edge(const int AGeomDim, const int AGeomId) {
-	return m_cmap.create_attribute<1>(CellInfo(this->getCounter(), m_geom_model, 1, AGeomDim, AGeomId));
-}
-
-/*----------------------------------------------------------------------------*/
-Blocking::Face
-Blocking::create_face(const int AGeomDim, const int AGeomId) {
-	return m_cmap.create_attribute<2>(CellInfo(this->getCounter(), m_geom_model, 2, AGeomDim, AGeomId));
-}
-
-/*----------------------------------------------------------------------------*/
-Blocking::Block
-Blocking::create_block(const int AGeomDim, const int AGeomId) {
-	return m_cmap.create_attribute<3>(CellInfo(this->getCounter(), m_geom_model, 3, AGeomDim, AGeomId));
 }
 
 /*----------------------------------------------------------------------------*/
