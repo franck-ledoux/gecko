@@ -1,0 +1,16 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bibi/Developpement/gecko/build/_deps/eigen3-src/unsupported/test/dgmres.cpp"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"BuildUnsupported"
+		],
+		"name" : "dgmres_2"
+	}
+}

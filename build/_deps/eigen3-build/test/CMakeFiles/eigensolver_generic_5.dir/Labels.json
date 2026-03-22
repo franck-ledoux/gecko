@@ -1,0 +1,16 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bibi/Developpement/gecko/build/_deps/eigen3-src/test/eigensolver_generic.cpp"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"BuildOfficial"
+		],
+		"name" : "eigensolver_generic_5"
+	}
+}

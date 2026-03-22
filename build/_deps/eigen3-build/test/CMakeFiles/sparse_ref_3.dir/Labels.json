@@ -1,0 +1,16 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bibi/Developpement/gecko/build/_deps/eigen3-src/test/sparse_ref.cpp"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"BuildOfficial"
+		],
+		"name" : "sparse_ref_3"
+	}
+}

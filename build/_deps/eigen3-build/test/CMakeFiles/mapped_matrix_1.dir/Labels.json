@@ -1,0 +1,16 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bibi/Developpement/gecko/build/_deps/eigen3-src/test/mapped_matrix.cpp"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"BuildOfficial"
+		],
+		"name" : "mapped_matrix_1"
+	}
+}

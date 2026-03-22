@@ -1,0 +1,2 @@
+/Library/Developer/CommandLineTools/usr/bin/ar qc libgmds_core_io_lib.a CMakeFiles/gmds_core_io_lib.dir/src/GMSHWriter.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/IGMeshIOService.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/IMeshIOService.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/IReader.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/IWriter.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/MeditReader.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/VTKReader.cpp.o CMakeFiles/gmds_core_io_lib.dir/src/VTKWriter.cpp.o
+/Library/Developer/CommandLineTools/usr/bin/ranlib libgmds_core_io_lib.a

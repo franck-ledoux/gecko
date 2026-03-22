@@ -1,0 +1,2 @@
+add_library(ext_predicates_lib src/Predicates_psm.cpp)
+target_include_directories(ext_predicates_lib PUBLIC inc)

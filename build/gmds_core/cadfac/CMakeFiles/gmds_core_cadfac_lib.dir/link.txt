@@ -1,0 +1,2 @@
+/Library/Developer/CommandLineTools/usr/bin/ar qc libgmds_core_cadfac_lib.a CMakeFiles/gmds_core_cadfac_lib.dir/src/FACCurve.cpp.o CMakeFiles/gmds_core_cadfac_lib.dir/src/FACManager.cpp.o CMakeFiles/gmds_core_cadfac_lib.dir/src/FACPoint.cpp.o CMakeFiles/gmds_core_cadfac_lib.dir/src/FACSurface.cpp.o CMakeFiles/gmds_core_cadfac_lib.dir/src/FACVolume.cpp.o
+/Library/Developer/CommandLineTools/usr/bin/ranlib libgmds_core_cadfac_lib.a
