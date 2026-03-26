@@ -95,24 +95,9 @@ test_cblock_EXTERNAL_OBJECTS =
 
 cblock/tst/test_cblock: cblock/tst/CMakeFiles/test_cblock.dir/cblock_tests.cpp.o
 cblock/tst/test_cblock: cblock/tst/CMakeFiles/test_cblock.dir/build.make
-cblock/tst/test_cblock: gmds_core/cad/libgmds_core_cad_lib.a
-cblock/tst/test_cblock: gmds_core/cadfac/libgmds_core_cadfac_lib.a
-cblock/tst/test_cblock: gmds_core/ig/libgmds_core_ig_lib.a
-cblock/tst/test_cblock: gmds_core/igalgo/libgmds_core_igalgo_lib.a
-cblock/tst/test_cblock: gmds_core/io/libgmds_core_io_lib.a
-cblock/tst/test_cblock: gmds_core/math/libgmds_core_math_lib.a
-cblock/tst/test_cblock: gmds_core/utils/libgmds_core_utils_lib.a
 cblock/tst/test_cblock: cblock/libcblock_lib.a
 cblock/tst/test_cblock: _deps/catch2-build/src/libCatch2.a
 cblock/tst/test_cblock: _deps/catch2-build/src/libCatch2Main.a
-cblock/tst/test_cblock: gmds_core/cadfac/libgmds_core_cadfac_lib.a
-cblock/tst/test_cblock: gmds_core/cad/libgmds_core_cad_lib.a
-cblock/tst/test_cblock: gmds_core/igalgo/libgmds_core_igalgo_lib.a
-cblock/tst/test_cblock: gmds_core/io/libgmds_core_io_lib.a
-cblock/tst/test_cblock: gmds_core/ig/libgmds_core_ig_lib.a
-cblock/tst/test_cblock: gmds_core/math/libgmds_core_math_lib.a
-cblock/tst/test_cblock: subprojects/predicates/libext_predicates_lib.a
-cblock/tst/test_cblock: gmds_core/utils/libgmds_core_utils_lib.a
 cblock/tst/test_cblock: _deps/catch2-build/src/libCatch2.a
 cblock/tst/test_cblock: cblock/tst/CMakeFiles/test_cblock.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/bibi/Developpement/gecko/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable test_cblock"

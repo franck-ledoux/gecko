@@ -172,19 +172,6 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named test_split
-
-# Build rule for target.
-test_split: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_split
-.PHONY : test_split
-
-# fast build rule for target.
-test_split/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_split.dir/build.make CMakeFiles/test_split.dir/build
-.PHONY : test_split/fast
-
-#=============================================================================
 # Target rules for targets named ext_predicates_lib
 
 # Build rule for target.
@@ -14602,201 +14589,6 @@ Catch2WithMain/fast:
 .PHONY : Catch2WithMain/fast
 
 #=============================================================================
-# Target rules for targets named gmds_core_utils_lib
-
-# Build rule for target.
-gmds_core_utils_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_utils_lib
-.PHONY : gmds_core_utils_lib
-
-# fast build rule for target.
-gmds_core_utils_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/utils/CMakeFiles/gmds_core_utils_lib.dir/build.make gmds_core/utils/CMakeFiles/gmds_core_utils_lib.dir/build
-.PHONY : gmds_core_utils_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gmds_core_utils
-
-# Build rule for target.
-test_gmds_core_utils: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gmds_core_utils
-.PHONY : test_gmds_core_utils
-
-# fast build rule for target.
-test_gmds_core_utils/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/utils/tst/CMakeFiles/test_gmds_core_utils.dir/build.make gmds_core/utils/tst/CMakeFiles/test_gmds_core_utils.dir/build
-.PHONY : test_gmds_core_utils/fast
-
-#=============================================================================
-# Target rules for targets named gmds_core_math_lib
-
-# Build rule for target.
-gmds_core_math_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_math_lib
-.PHONY : gmds_core_math_lib
-
-# fast build rule for target.
-gmds_core_math_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/math/CMakeFiles/gmds_core_math_lib.dir/build.make gmds_core/math/CMakeFiles/gmds_core_math_lib.dir/build
-.PHONY : gmds_core_math_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gmds_core_math
-
-# Build rule for target.
-test_gmds_core_math: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gmds_core_math
-.PHONY : test_gmds_core_math
-
-# fast build rule for target.
-test_gmds_core_math/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/math/tst/CMakeFiles/test_gmds_core_math.dir/build.make gmds_core/math/tst/CMakeFiles/test_gmds_core_math.dir/build
-.PHONY : test_gmds_core_math/fast
-
-#=============================================================================
-# Target rules for targets named gmds_core_ig_lib
-
-# Build rule for target.
-gmds_core_ig_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_ig_lib
-.PHONY : gmds_core_ig_lib
-
-# fast build rule for target.
-gmds_core_ig_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/ig/CMakeFiles/gmds_core_ig_lib.dir/build.make gmds_core/ig/CMakeFiles/gmds_core_ig_lib.dir/build
-.PHONY : gmds_core_ig_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gmds_core_ig
-
-# Build rule for target.
-test_gmds_core_ig: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gmds_core_ig
-.PHONY : test_gmds_core_ig
-
-# fast build rule for target.
-test_gmds_core_ig/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/ig/tst/CMakeFiles/test_gmds_core_ig.dir/build.make gmds_core/ig/tst/CMakeFiles/test_gmds_core_ig.dir/build
-.PHONY : test_gmds_core_ig/fast
-
-#=============================================================================
-# Target rules for targets named gmds_core_io_lib
-
-# Build rule for target.
-gmds_core_io_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_io_lib
-.PHONY : gmds_core_io_lib
-
-# fast build rule for target.
-gmds_core_io_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/io/CMakeFiles/gmds_core_io_lib.dir/build.make gmds_core/io/CMakeFiles/gmds_core_io_lib.dir/build
-.PHONY : gmds_core_io_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gmds_core_io
-
-# Build rule for target.
-test_gmds_core_io: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gmds_core_io
-.PHONY : test_gmds_core_io
-
-# fast build rule for target.
-test_gmds_core_io/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/io/tst/CMakeFiles/test_gmds_core_io.dir/build.make gmds_core/io/tst/CMakeFiles/test_gmds_core_io.dir/build
-.PHONY : test_gmds_core_io/fast
-
-#=============================================================================
-# Target rules for targets named gmds_core_igalgo_lib
-
-# Build rule for target.
-gmds_core_igalgo_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_igalgo_lib
-.PHONY : gmds_core_igalgo_lib
-
-# fast build rule for target.
-gmds_core_igalgo_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/igalgo/CMakeFiles/gmds_core_igalgo_lib.dir/build.make gmds_core/igalgo/CMakeFiles/gmds_core_igalgo_lib.dir/build
-.PHONY : gmds_core_igalgo_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gmds_core_igalgo
-
-# Build rule for target.
-test_gmds_core_igalgo: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gmds_core_igalgo
-.PHONY : test_gmds_core_igalgo
-
-# fast build rule for target.
-test_gmds_core_igalgo/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/igalgo/tst/CMakeFiles/test_gmds_core_igalgo.dir/build.make gmds_core/igalgo/tst/CMakeFiles/test_gmds_core_igalgo.dir/build
-.PHONY : test_gmds_core_igalgo/fast
-
-#=============================================================================
-# Target rules for targets named gmds_core_cad_lib
-
-# Build rule for target.
-gmds_core_cad_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_cad_lib
-.PHONY : gmds_core_cad_lib
-
-# fast build rule for target.
-gmds_core_cad_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/cad/CMakeFiles/gmds_core_cad_lib.dir/build.make gmds_core/cad/CMakeFiles/gmds_core_cad_lib.dir/build
-.PHONY : gmds_core_cad_lib/fast
-
-#=============================================================================
-# Target rules for targets named gmds_core_cadfac_lib
-
-# Build rule for target.
-gmds_core_cadfac_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gmds_core_cadfac_lib
-.PHONY : gmds_core_cadfac_lib
-
-# fast build rule for target.
-gmds_core_cadfac_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/cadfac/CMakeFiles/gmds_core_cadfac_lib.dir/build.make gmds_core/cadfac/CMakeFiles/gmds_core_cadfac_lib.dir/build
-.PHONY : gmds_core_cadfac_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gmds_core_cadfac
-
-# Build rule for target.
-test_gmds_core_cadfac: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gmds_core_cadfac
-.PHONY : test_gmds_core_cadfac
-
-# fast build rule for target.
-test_gmds_core_cadfac/fast:
-	$(MAKE) $(MAKESILENT) -f gmds_core/cadfac/tst/CMakeFiles/test_gmds_core_cadfac.dir/build.make gmds_core/cadfac/tst/CMakeFiles/test_gmds_core_cadfac.dir/build
-.PHONY : test_gmds_core_cadfac/fast
-
-#=============================================================================
-# Target rules for targets named gblock_lib
-
-# Build rule for target.
-gblock_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gblock_lib
-.PHONY : gblock_lib
-
-# fast build rule for target.
-gblock_lib/fast:
-	$(MAKE) $(MAKESILENT) -f gblock/CMakeFiles/gblock_lib.dir/build.make gblock/CMakeFiles/gblock_lib.dir/build
-.PHONY : gblock_lib/fast
-
-#=============================================================================
-# Target rules for targets named test_gblock
-
-# Build rule for target.
-test_gblock: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gblock
-.PHONY : test_gblock
-
-# fast build rule for target.
-test_gblock/fast:
-	$(MAKE) $(MAKESILENT) -f gblock/tst/CMakeFiles/test_gblock.dir/build.make gblock/tst/CMakeFiles/test_gblock.dir/build
-.PHONY : test_gblock/fast
-
-#=============================================================================
 # Target rules for targets named cblock_lib
 
 # Build rule for target.
@@ -14821,82 +14613,6 @@ test_cblock: cmake_check_build_system
 test_cblock/fast:
 	$(MAKE) $(MAKESILENT) -f cblock/tst/CMakeFiles/test_cblock.dir/build.make cblock/tst/CMakeFiles/test_cblock.dir/build
 .PHONY : test_cblock/fast
-
-#=============================================================================
-# Target rules for targets named mcts_lib
-
-# Build rule for target.
-mcts_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mcts_lib
-.PHONY : mcts_lib
-
-# fast build rule for target.
-mcts_lib/fast:
-	$(MAKE) $(MAKESILENT) -f mcts/CMakeFiles/mcts_lib.dir/build.make mcts/CMakeFiles/mcts_lib.dir/build
-.PHONY : mcts_lib/fast
-
-#=============================================================================
-# Target rules for targets named mcts_blocker
-
-# Build rule for target.
-mcts_blocker: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mcts_blocker
-.PHONY : mcts_blocker
-
-# fast build rule for target.
-mcts_blocker/fast:
-	$(MAKE) $(MAKESILENT) -f mcts/CMakeFiles/mcts_blocker.dir/build.make mcts/CMakeFiles/mcts_blocker.dir/build
-.PHONY : mcts_blocker/fast
-
-#=============================================================================
-# Target rules for targets named mcts_c_lib
-
-# Build rule for target.
-mcts_c_lib: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mcts_c_lib
-.PHONY : mcts_c_lib
-
-# fast build rule for target.
-mcts_c_lib/fast:
-	$(MAKE) $(MAKESILENT) -f mcts-c/CMakeFiles/mcts_c_lib.dir/build.make mcts-c/CMakeFiles/mcts_c_lib.dir/build
-.PHONY : mcts_c_lib/fast
-
-#=============================================================================
-# Target rules for targets named mcts_c_blocker
-
-# Build rule for target.
-mcts_c_blocker: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mcts_c_blocker
-.PHONY : mcts_c_blocker
-
-# fast build rule for target.
-mcts_c_blocker/fast:
-	$(MAKE) $(MAKESILENT) -f mcts-c/CMakeFiles/mcts_c_blocker.dir/build.make mcts-c/CMakeFiles/mcts_c_blocker.dir/build
-.PHONY : mcts_c_blocker/fast
-
-test/split.o: test/split.cpp.o
-.PHONY : test/split.o
-
-# target to build an object file
-test/split.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_split.dir/build.make CMakeFiles/test_split.dir/test/split.cpp.o
-.PHONY : test/split.cpp.o
-
-test/split.i: test/split.cpp.i
-.PHONY : test/split.i
-
-# target to preprocess a source file
-test/split.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_split.dir/build.make CMakeFiles/test_split.dir/test/split.cpp.i
-.PHONY : test/split.cpp.i
-
-test/split.s: test/split.cpp.s
-.PHONY : test/split.s
-
-# target to generate assembly for a file
-test/split.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_split.dir/build.make CMakeFiles/test_split.dir/test/split.cpp.s
-.PHONY : test/split.cpp.s
 
 # Help Target
 help:
@@ -15332,7 +15048,6 @@ help:
 	@echo "... fullpivlu_int_ok"
 	@echo "... fullpivqr_int_ko"
 	@echo "... fullpivqr_int_ok"
-	@echo "... gblock_lib"
 	@echo "... geo_alignedbox_1"
 	@echo "... geo_alignedbox_10"
 	@echo "... geo_alignedbox_11"
@@ -15379,13 +15094,6 @@ help:
 	@echo "... geo_transformations_7"
 	@echo "... geo_transformations_8"
 	@echo "... geo_transformations_9"
-	@echo "... gmds_core_cad_lib"
-	@echo "... gmds_core_cadfac_lib"
-	@echo "... gmds_core_ig_lib"
-	@echo "... gmds_core_igalgo_lib"
-	@echo "... gmds_core_io_lib"
-	@echo "... gmds_core_math_lib"
-	@echo "... gmds_core_utils_lib"
 	@echo "... gmres_1"
 	@echo "... gmres_2"
 	@echo "... half_float"
@@ -15559,10 +15267,6 @@ help:
 	@echo "... matrix_square_root_3"
 	@echo "... matrix_square_root_4"
 	@echo "... matrix_square_root_5"
-	@echo "... mcts_blocker"
-	@echo "... mcts_c_blocker"
-	@echo "... mcts_c_lib"
-	@echo "... mcts_lib"
 	@echo "... meta"
 	@echo "... minres_1"
 	@echo "... minres_2"
@@ -15975,15 +15679,7 @@ help:
 	@echo "... ternary_2_ko"
 	@echo "... ternary_2_ok"
 	@echo "... test_cblock"
-	@echo "... test_gblock"
-	@echo "... test_gmds_core_cadfac"
-	@echo "... test_gmds_core_ig"
-	@echo "... test_gmds_core_igalgo"
-	@echo "... test_gmds_core_io"
-	@echo "... test_gmds_core_math"
-	@echo "... test_gmds_core_utils"
 	@echo "... test_sparseLU"
-	@echo "... test_split"
 	@echo "... transpose_nonconst_ctor_on_const_xpr_ko"
 	@echo "... transpose_nonconst_ctor_on_const_xpr_ok"
 	@echo "... transpose_on_const_type_actually_const_ko"
@@ -16042,9 +15738,6 @@ help:
 	@echo "... zblat2"
 	@echo "... zblat3"
 	@echo "... zerosized"
-	@echo "... test/split.o"
-	@echo "... test/split.i"
-	@echo "... test/split.s"
 .PHONY : help
 
 

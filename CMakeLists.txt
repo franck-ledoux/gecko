@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Warning level equivalent to Meson's warning_level=3
 if(MSVC)
     add_compile_options(/W4)
 else()
@@ -75,16 +74,11 @@ configure_file(
     ${CMAKE_BINARY_DIR}/unit_test_config.h
     @ONLY
 )
-add_library(ut_dep INTERFACE)
-target_include_directories(ut_dep INTERFACE ${CMAKE_BINARY_DIR})
 
 # =====================================================
 # Project modules
 # =====================================================
-add_subdirectory(gmds_core)
 add_subdirectory(cblock)
-# add_subdirectory(gmdsblock)
-add_subdirectory(mcts-c)
 
 # =====================================================
 # Tests

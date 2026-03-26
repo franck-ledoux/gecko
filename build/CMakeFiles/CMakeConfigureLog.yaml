@@ -2481,3 +2481,81 @@ events:
         
       exitCode: 0
 ...
+
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/opt/homebrew/share/cmake/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/opt/homebrew/share/cmake/Modules/CheckCXXCompilerFlag.cmake:55 (cmake_check_compiler_flag)"
+      - "build/_deps/eigen3-src/CMakeLists.txt:71 (check_cxx_compiler_flag)"
+      - "build/_deps/eigen3-src/CMakeLists.txt:88 (ei_add_cxx_compiler_flag)"
+    checks:
+      - "Performing Test COMPILER_SUPPORT_std=cpp03"
+    directories:
+      source: "/Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-S9Oygo"
+      binary: "/Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-S9Oygo"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/Users/bibi/Developpement/gecko/build/_deps/eigen3-src/cmake"
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk"
+    buildResult:
+      variable: "COMPILER_SUPPORT_std=cpp03"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-S9Oygo'
+        
+        Run Build Command(s): /opt/homebrew/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_cba2f/fast
+        /Library/Developer/CommandLineTools/usr/bin/make  -f CMakeFiles/cmTC_cba2f.dir/build.make CMakeFiles/cmTC_cba2f.dir/build
+        Building CXX object CMakeFiles/cmTC_cba2f.dir/src.cxx.o
+        /Library/Developer/CommandLineTools/usr/bin/c++ -DCOMPILER_SUPPORT_std=cpp03  -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk   -std=c++03 -MD -MT CMakeFiles/cmTC_cba2f.dir/src.cxx.o -MF CMakeFiles/cmTC_cba2f.dir/src.cxx.o.d -o CMakeFiles/cmTC_cba2f.dir/src.cxx.o -c /Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-S9Oygo/src.cxx
+        Linking CXX executable cmTC_cba2f
+        /opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/cmTC_cba2f.dir/link.txt --verbose=1
+        /Library/Developer/CommandLineTools/usr/bin/c++  -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cmTC_cba2f.dir/src.cxx.o -o cmTC_cba2f
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CheckFortranFunctionExists.cmake:70 (try_compile)"
+      - "build/_deps/eigen3-src/cmake/FindBLAS.cmake:298 (check_fortran_function_exists)"
+      - "build/_deps/eigen3-src/cmake/FindBLAS.cmake:1298 (check_fortran_libraries)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindDependencyMacro.cmake:76 (find_package)"
+      - "build/_deps/eigen3-src/cmake/FindBLASEXT.cmake:54 (find_dependency)"
+      - "build/_deps/eigen3-src/cmake/FindBLASEXT.cmake:87 (find_package_blas)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindDependencyMacro.cmake:76 (find_package)"
+      - "build/_deps/eigen3-src/cmake/FindPASTIX.cmake:214 (find_dependency)"
+      - "build/_deps/eigen3-src/test/CMakeLists.txt:89 (find_package)"
+    checks:
+      - "Looking for Fortran sgemm"
+    directories:
+      source: "/Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-bWSAhE"
+      binary: "/Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-bWSAhE"
+    cmakeVariables:
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_Fortran_FLAGS: ""
+      CMAKE_MODULE_PATH: "/Users/bibi/Developpement/gecko/build/_deps/eigen3-src/cmake"
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk"
+    buildResult:
+      variable: "BLAS_blas_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-bWSAhE'
+        
+        Run Build Command(s): /opt/homebrew/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_26173/fast
+        /Library/Developer/CommandLineTools/usr/bin/make  -f CMakeFiles/cmTC_26173.dir/build.make CMakeFiles/cmTC_26173.dir/build
+        Building Fortran object CMakeFiles/cmTC_26173.dir/testFortranCompiler.f.o
+        /opt/homebrew/bin/gfortran   -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk -c /Users/bibi/Developpement/gecko/build/CMakeFiles/CMakeScratch/TryCompile-bWSAhE/testFortranCompiler.f -o CMakeFiles/cmTC_26173.dir/testFortranCompiler.f.o
+        Linking Fortran executable cmTC_26173
+        /opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/cmTC_26173.dir/link.txt --verbose=1
+        /opt/homebrew/bin/gfortran  -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk CMakeFiles/cmTC_26173.dir/testFortranCompiler.f.o -o cmTC_26173  /Library/Developer/CommandLineTools/SDKs/MacOSX14.2.sdk/usr/lib/libblas.tbd
+        
+      exitCode: 0
+...
