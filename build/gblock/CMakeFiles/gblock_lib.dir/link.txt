@@ -1,2 +1,0 @@
-/Library/Developer/CommandLineTools/usr/bin/ar qc libgblock_lib.a CMakeFiles/gblock_lib.dir/src/Blocking.cpp.o CMakeFiles/gblock_lib.dir/src/BlockingClassifier.cpp.o CMakeFiles/gblock_lib.dir/src/Graph.cpp.o
-/Library/Developer/CommandLineTools/usr/bin/ranlib libgblock_lib.a

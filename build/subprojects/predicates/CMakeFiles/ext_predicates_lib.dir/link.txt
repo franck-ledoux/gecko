@@ -1,2 +1,0 @@
-/Library/Developer/CommandLineTools/usr/bin/ar qc libext_predicates_lib.a CMakeFiles/ext_predicates_lib.dir/src/Predicates_psm.cpp.o
-/Library/Developer/CommandLineTools/usr/bin/ranlib libext_predicates_lib.a

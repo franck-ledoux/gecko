@@ -1,0 +1,155 @@
+/*----------------------------------------------------------------------------*/
+/** \file    GeomManager.h
+ *  \author  F. LEDOUX
+ *  \date    30/06/11
+ */
+/*----------------------------------------------------------------------------*/
+#ifndef GMDS_GEOM_GEOMMANAGER_H_
+#define GMDS_GEOM_GEOMMANAGER_H_
+/*----------------------------------------------------------------------------*/
+// GMDS File Headers
+/*----------------------------------------------------------------------------*/
+#include "gmds/utils/CommonTypes.h"
+#include "gmds/cad/GeomPoint.h"
+#include "gmds/cad/GeomCurve.h"
+#include "gmds/cad/GeomSurface.h"
+#include "gmds/cad/GeomVolume.h"
+/*----------------------------------------------------------------------------*/
+namespace gmds{
+/*----------------------------------------------------------------------------*/
+namespace cad{
+/*----------------------------------------------------------------------------*/
+/** \class GeomManager
+ *  \brief This interface gathers the factory methods required for every
+ *  		geometric model, the access to all the geom entities stored in the
+ *  		model as the responsability to delete geometric entities.
+ *
+ *  \param TBase the basic type used to store geometric coordinates.
+ */
+/*----------------------------------------------------------------------------*/
+	class GeomManager {
+
+public:
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Get the number of points of the model.
+	 *
+	 *	\return the number of points.
+	 */
+	virtual TInt getNbPoints() const =0;
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Get the number of curves of the model.
+	 *
+	 *	\return the number of curves.
+	 */
+	virtual TInt getNbCurves() const =0;
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Get the number of surfaces of the model.
+	 *
+	 *	\return the number of surfaces.
+	 */
+	virtual TInt getNbSurfaces() const =0;
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Get the number of volumes of the model.
+	 *
+	 *	\return the number of volumes.
+	 */
+	virtual TInt getNbVolumes() const =0;
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Access to the points of the model.
+	 *
+	 *  \param points the points of the model.
+	 */
+	virtual void getPoints(std::vector<GeomPoint*>& points) const =0;
+	virtual std::vector<GeomPoint*> getPoints() const =0;
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Access to the curves of the model.
+	 *
+	 *  \param curves the curves of the model.
+	 */
+	virtual void getCurves(std::vector<GeomCurve*>& curves) const =0;
+	virtual std::vector<GeomCurve*> getCurves() const =0;
+
+	/*------------------------------------------------------------------------*/
+	/** \brief  Access to the surface of the model.
+	 *
+	 *  \param surfaces the surfaces of the model.
+	 */
+	virtual void getSurfaces(std::vector<GeomSurface*>& surfaces)const=0;
+	virtual std::vector<GeomSurface*> getSurfaces()const =0;
+
+		/*------------------------------------------------------------------------*/
+		/** \brief  Access to the volumes of the model.
+         *  \param volumes the volumes of the model.
+         */
+		virtual void getVolumes(std::vector<GeomVolume*>& volumes) const =0;
+	   virtual  std::vector<GeomVolume*> getVolumes() const =0;
+
+
+		/*------------------------------------------------------------------------*/
+		/** \brief  Gives access to the entity of id @AID and dimension @p ADim.
+		 *          Return NullPtr if it does not exist.
+		 *  \return A point
+		 */
+		virtual GeomEntity* getEntity(TInt AID, TInt ADim)=0;
+        /*------------------------------------------------------------------------*/
+        /** \brief  Gives access to the point of id @AID, Return NullPtr if it does
+         *          not exist.
+         *  \return A point
+         */
+        virtual GeomPoint* getPoint(TInt AID)=0;
+        /*------------------------------------------------------------------------*/
+        /** \brief  Gives access to the curve of id @AID, Return NullPtr if it does
+         *          not exist.
+         *  \return A curve
+         */
+        virtual GeomCurve* getCurve(TInt AID)=0;
+        /*------------------------------------------------------------------------*/
+        /** \brief  Gives access to the surface of id @AID, Return NullPtr if it
+         *          does not exist.
+         *  \return A surface
+         */
+        virtual GeomSurface* getSurface(TInt AID)=0;
+        /*------------------------------------------------------------------------*/
+        /** \brief  Gives access to the volume of id @AID, Return NullPtr if it
+         *          does not exist.
+         *  \return A volume
+         */
+        virtual GeomVolume* getVolume(TInt AID)=0;
+
+
+	     /*------------------------------------------------------------------------*/
+	     /** \brief  Get the curve common to 2 points
+         *
+         *  \param AP1 first point
+         *  \param AP2 second point
+         *  \param return the id of the common curve, and -1 if it doesn't exist
+	      */
+	     virtual int getCommonCurve(GeomPoint* AP1, GeomPoint* AP2) const =0;
+	     /*------------------------------------------------------------------------*/
+	     /** \brief  Get the surfaces common to 2 points
+         *
+         *  \param return the ids of the common surfaces (potentially empty)
+	      */
+	     virtual std::vector<int> getCommonSurfaces(GeomPoint* AP1, GeomPoint* AP2) const =0;
+
+		/*------------------------------------------------------------------------*/
+		/** \brief  Get the surface common to 2 curves
+         *
+         *  \param return the id of the common surface, and -1 if it doesn't exist
+         */
+		virtual int getCommonSurface(GeomCurve* AC1, GeomCurve* AC2) const =0;
+
+};
+/*----------------------------------------------------------------------------*/
+} // namespace cad
+/*----------------------------------------------------------------------------*/
+} // namespace gmds
+/*----------------------------------------------------------------------------*/
+#endif /* GMDS_GEOM_GEOMMANAGER_H_ */
+

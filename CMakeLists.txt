@@ -75,12 +75,16 @@ configure_file(
     @ONLY
 )
 
-# =====================================================
-# Project modules
-# =====================================================
-add_subdirectory(cblock)
+add_library(ut_dep INTERFACE)
+target_include_directories(ut_dep INTERFACE ${CMAKE_BINARY_DIR})
 
 # =====================================================
 # Tests
 # =====================================================
 enable_testing()
+
+# =====================================================
+# Project modules
+# =====================================================
+add_subdirectory(gmds_core)
+add_subdirectory(cblock)
