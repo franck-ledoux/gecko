@@ -44,11 +44,9 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="dc13383c-79df-4518-8556-778986223aaf" name="Changes" comment="Update with eigen">
-      <change afterPath="$PROJECT_DIR$/LICENSE" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+    <list default="true" id="dc13383c-79df-4518-8556-778986223aaf" name="Changes" comment="Update with ultimaille">
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/block/tst/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/block/tst/CMakeLists.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -82,23 +80,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0108627191758268" />
-      <entry key="MS500" value="1.5975495476482542" />
-      <entry key="S2" value="3.1000813430180654" />
-      <entry key="S5" value="4.03330939969095" />
-      <entry key="S10" value="4.612178738956569" />
-      <entry key="S30" value="7.0579839435747775" />
-      <entry key="S60" value="9.434732127208417" />
-      <entry key="M2" value="11.646375040786555" />
-      <entry key="M5" value="14.06334946038158" />
-      <entry key="M10" value="15.32313357094081" />
-      <entry key="M15" value="15.827229220981094" />
-      <entry key="M30" value="16.383653875262766" />
-      <entry key="H1" value="16.68381828873229" />
-      <entry key="H2" value="16.839838014207395" />
-      <entry key="H4" value="16.919392329186703" />
-      <entry key="D1" value="16.986491470358267" />
-      <entry key="W1" value="16.99806838971248" />
+      <entry key="MS100" value="1.011125392153102" />
+      <entry key="MS500" value="1.406689599066063" />
+      <entry key="S2" value="1.7985751034431714" />
+      <entry key="S5" value="1.9139581429495145" />
+      <entry key="S10" value="1.9560115809703953" />
+      <entry key="S30" value="1.9851243915134096" />
+      <entry key="S60" value="2.0023266510868476" />
+      <entry key="M2" value="2.371536885549319" />
+      <entry key="M5" value="5.557714770862379" />
+      <entry key="M10" value="9.707933796362187" />
+      <entry key="M15" value="12.010865438820241" />
+      <entry key="M30" value="15.030066752137657" />
+      <entry key="H1" value="16.87866297180569" />
+      <entry key="H2" value="17.90275084096487" />
+      <entry key="H4" value="18.44189844742937" />
+      <entry key="D1" value="18.90563763757355" />
+      <entry key="W1" value="18.986486325258124" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -120,23 +118,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.561590935124177" />
-      <entry key="MS500" value="1.480139604322001" />
-      <entry key="S2" value="3.058692988074861" />
-      <entry key="S5" value="4.013321658933814" />
-      <entry key="S10" value="4.6013249943112955" />
-      <entry key="S30" value="7.05391816704476" />
-      <entry key="S60" value="9.432512948065042" />
-      <entry key="M2" value="11.645081161636911" />
-      <entry key="M5" value="14.062661405100425" />
-      <entry key="M10" value="15.32272896248256" />
-      <entry key="M15" value="15.826941808911686" />
-      <entry key="M30" value="16.383500000023748" />
-      <entry key="H1" value="16.68373852703855" />
-      <entry key="H2" value="16.839797389038036" />
-      <entry key="H4" value="16.919371825527293" />
-      <entry key="D1" value="16.986488026109733" />
-      <entry key="W1" value="16.99806789701071" />
+      <entry key="MS100" value="0.9903167324802893" />
+      <entry key="MS500" value="1.4008514899104811" />
+      <entry key="S2" value="1.796706059360556" />
+      <entry key="S5" value="1.913162315634326" />
+      <entry key="S10" value="1.955604882083441" />
+      <entry key="S30" value="1.9849867940887491" />
+      <entry key="S60" value="2.002255292247587" />
+      <entry key="M2" value="2.3714606009400288" />
+      <entry key="M5" value="5.557526782353726" />
+      <entry key="M10" value="9.707723319156544" />
+      <entry key="M15" value="12.010679019194626" />
+      <entry key="M30" value="15.029942061233559" />
+      <entry key="H1" value="16.878590684395363" />
+      <entry key="H2" value="17.90271189871077" />
+      <entry key="H4" value="18.44187823357327" />
+      <entry key="D1" value="18.90563416158311" />
+      <entry key="W1" value="18.986485826015592" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -180,7 +178,7 @@
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "Runtime.Targets.Configurable",
+    "settings.editor.selected.configurable": "project.propVCSSupport.DirectoryMappings",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -328,7 +326,7 @@
       <option name="presentableId" value="Default" />
       <updated>1784321084530</updated>
       <workItem from="1784321085649" duration="246000" />
-      <workItem from="1784321368474" duration="2570000" />
+      <workItem from="1784321368474" duration="3168000" />
     </task>
     <task id="LOCAL-00001" summary="Update with eigen">
       <option name="closed" value="true" />
@@ -346,7 +344,15 @@
       <option name="project" value="LOCAL" />
       <updated>1784539653837</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="Update with ultimaille">
+      <option name="closed" value="true" />
+      <created>1784540203618</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1784540203618</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -371,6 +377,7 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Update with eigen" />
-    <option name="LAST_COMMIT_MESSAGE" value="Update with eigen" />
+    <MESSAGE value="Update with ultimaille" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update with ultimaille" />
   </component>
 </project>
