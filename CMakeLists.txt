@@ -18,8 +18,8 @@ target_include_directories(cgal_dep INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/extern
 
 # Eigen3
 add_library(eigen3_dep INTERFACE)
-target_include_directories(eigen3_dep INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/eigen-3.4.0)
-
+target_include_directories(eigen3_dep INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/eigen-5.0.0)
+add_library(Eigen3::Eigen ALIAS eigen3_dep)
 # nlohmann_json
 add_library(json_dep INTERFACE)
 target_include_directories(json_dep INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/nlohmann_json/single_include)
@@ -56,4 +56,4 @@ configure_file(
 # Modules du projet
 # =====================================================
 add_subdirectory(gmds_core)
-add_subdirectory(cblock)
+add_subdirectory(block)
