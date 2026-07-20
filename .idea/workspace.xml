@@ -44,11 +44,10 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="dc13383c-79df-4518-8556-778986223aaf" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+    <list default="true" id="dc13383c-79df-4518-8556-778986223aaf" name="Changes" comment="Update with eigen">
+      <change afterPath="$PROJECT_DIR$/LICENSE" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/block/tst/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/block/tst/CMakeLists.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -83,23 +82,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0001690815126478" />
-      <entry key="MS500" value="1.191541442605922" />
-      <entry key="S2" value="2.4598454453093392" />
-      <entry key="S5" value="4.598851162086777" />
-      <entry key="S10" value="6.263499051042799" />
-      <entry key="S30" value="7.931377205296841" />
-      <entry key="S60" value="8.513113619747658" />
-      <entry key="M2" value="9.177024963777207" />
-      <entry key="M5" value="10.30404781486196" />
-      <entry key="M10" value="11.00564436905015" />
-      <entry key="M15" value="11.299020933980282" />
-      <entry key="M30" value="11.628860785834158" />
-      <entry key="H1" value="11.808941574679462" />
-      <entry key="H2" value="11.90305552243913" />
-      <entry key="H4" value="11.951168414471091" />
-      <entry key="D1" value="11.991811016682155" />
-      <entry key="W1" value="11.99882890504307" />
+      <entry key="MS100" value="1.0108627191758268" />
+      <entry key="MS500" value="1.5975495476482542" />
+      <entry key="S2" value="3.1000813430180654" />
+      <entry key="S5" value="4.03330939969095" />
+      <entry key="S10" value="4.612178738956569" />
+      <entry key="S30" value="7.0579839435747775" />
+      <entry key="S60" value="9.434732127208417" />
+      <entry key="M2" value="11.646375040786555" />
+      <entry key="M5" value="14.06334946038158" />
+      <entry key="M10" value="15.32313357094081" />
+      <entry key="M15" value="15.827229220981094" />
+      <entry key="M30" value="16.383653875262766" />
+      <entry key="H1" value="16.68381828873229" />
+      <entry key="H2" value="16.839838014207395" />
+      <entry key="H4" value="16.919392329186703" />
+      <entry key="D1" value="16.986491470358267" />
+      <entry key="W1" value="16.99806838971248" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -121,23 +120,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9660996509056151" />
-      <entry key="MS500" value="1.1833320820272164" />
-      <entry key="S2" value="2.4557612007859113" />
-      <entry key="S5" value="4.5957972765135615" />
-      <entry key="S10" value="6.2614026261406615" />
-      <entry key="S30" value="7.930482765470005" />
-      <entry key="S60" value="8.512578915246067" />
-      <entry key="M2" value="9.17658726295837" />
-      <entry key="M5" value="10.303711492883071" />
-      <entry key="M10" value="11.005422278139354" />
-      <entry key="M15" value="11.298857590756999" />
-      <entry key="M30" value="11.62877046202565" />
-      <entry key="H1" value="11.80889403952544" />
-      <entry key="H2" value="11.903031133306445" />
-      <entry key="H4" value="11.951156060855077" />
-      <entry key="D1" value="11.99180893533896" />
-      <entry key="W1" value="11.998828607155405" />
+      <entry key="MS100" value="0.561590935124177" />
+      <entry key="MS500" value="1.480139604322001" />
+      <entry key="S2" value="3.058692988074861" />
+      <entry key="S5" value="4.013321658933814" />
+      <entry key="S10" value="4.6013249943112955" />
+      <entry key="S30" value="7.05391816704476" />
+      <entry key="S60" value="9.432512948065042" />
+      <entry key="M2" value="11.645081161636911" />
+      <entry key="M5" value="14.062661405100425" />
+      <entry key="M10" value="15.32272896248256" />
+      <entry key="M15" value="15.826941808911686" />
+      <entry key="M30" value="16.383500000023748" />
+      <entry key="H1" value="16.68373852703855" />
+      <entry key="H2" value="16.839797389038036" />
+      <entry key="H4" value="16.919371825527293" />
+      <entry key="D1" value="16.986488026109733" />
+      <entry key="W1" value="16.99806789701071" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -151,6 +150,9 @@
   &quot;fromUser&quot;: false
 }</component>
   <component name="ProjectId" id="3Ge9I4GF00iLw6GK7UnR3TMFa60" />
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="2" id="Add" />
+  </component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
@@ -166,11 +168,13 @@
     "RunOnceActivity.readMode.enableVisualFormatting": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "RunOnceActivity.west.config.association.type.startup.service": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "cf.first.check.clang-format": "false",
     "cidr.known.project.marker": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "ctest.advertisement.all.test.configuration.is.created": "true",
     "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/bibi/CLionProjects/gecko",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -180,6 +184,11 @@
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+    </key>
+  </component>
   <component name="RunManager" selected="Catch.test_cblock">
     <configuration name="test_cblock" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_cblock" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_cblock" TEST_MODE="SUITE_TEST">
       <method v="2">
@@ -319,8 +328,25 @@
       <option name="presentableId" value="Default" />
       <updated>1784321084530</updated>
       <workItem from="1784321085649" duration="246000" />
-      <workItem from="1784321368474" duration="1947000" />
+      <workItem from="1784321368474" duration="2570000" />
     </task>
+    <task id="LOCAL-00001" summary="Update with eigen">
+      <option name="closed" value="true" />
+      <created>1784539630902</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1784539630902</updated>
+    </task>
+    <task id="LOCAL-00002" summary="Update with eigen">
+      <option name="closed" value="true" />
+      <created>1784539653837</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1784539653837</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -331,5 +357,20 @@
     <isAutomaticFoundErrors value="true" />
     <isAutomaticReloadCMake value="true" />
     <isAutomaticBootstrapAfterUpdate value="false" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Update with eigen" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update with eigen" />
   </component>
 </project>

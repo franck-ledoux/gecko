@@ -13,7 +13,6 @@ target_link_libraries(test_cblock PRIVATE
     cblock_lib
     Catch2::Catch2
     Catch2::Catch2WithMain
-
 )
 # To get access to the generated file "unit_test_config.h"
 target_include_directories(test_cblock PRIVATE ${CMAKE_BINARY_DIR})

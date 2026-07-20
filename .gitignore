@@ -1,4 +1,57 @@
-subprojects/Catch2-3.8.0/
-subprojects/eigen-3.4.0/
-subprojects/nlohmann_json-3.11.3/
-subprojects/packagecache/
+# ==========================================
+# Compilations et Dossiers de Build (CMake)
+# ==========================================
+# Bloque tous les dossiers de build locaux courants
+build/
+build-*/
+cmake-build-*/
+.cmake/
+out/
+
+# Bloque les fichiers générés par CMake lors de la configuration
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# ==========================================
+# Fichiers générés par le code (unit_test_config.h)
+# ==========================================
+# Ce fichier est généré dynamiquement par configure_file dans ton build,
+# s'il apparaît par erreur à la racine, on ne veut pas le commit.
+unit_test_config.h
+
+# ==========================================
+# IDEs (CLion / JetBrains)
+# ==========================================
+# Dossier de configuration de CLion
+.idea/
+
+# Fichiers d'historique ou de crash de l'IDE
+*.iws
+*.ipr
+.shelf/
+
+# ==========================================
+# Artefacts de compilation C++ (Sécurité)
+# ==========================================
+# Au cas où des fichiers compilés se baladent hors du dossier build
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# ==========================================
+# Fichiers Système / OS
+# ==========================================
+.DS_Store
+Thumbs.db
