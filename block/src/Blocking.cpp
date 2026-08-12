@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------------*/
-#include "gecko/cblock/Blocking.h"
+#include "gecko/block/Blocking.h"
 
 #include <gmds/io/IGMeshIOService.h>
 #include <gmds/io/VTKWriter.h>

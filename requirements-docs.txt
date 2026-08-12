@@ -1,0 +1,8 @@
+mkdocs==1.5.3
+mkdocs-material==9.5.3
+mkdoxy==1.2.8
+
+# Markdown formatter/linter (docs/*.md, README.md)
+mdformat==1.0.0
+mdformat-gfm==1.0.0
+mdformat-admon==2.1.1

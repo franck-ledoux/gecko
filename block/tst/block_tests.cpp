@@ -1,5 +1,5 @@
-#include <gecko/cblock/Blocking.h>
-#include <gecko/cblock/BlockingClassifier.h>
+#include <gecko/block/Blocking.h>
+#include <gecko/block/BlockingClassifier.h>
 #include <gmds/cadfac/FACManager.h>
 #include <gmds/ig/MeshDoctor.h>
 #include <gmds/igalgo/GridBuilder.h>
@@ -28,7 +28,6 @@ setUp(gmds::cad::FACManager &AGeomManager)
 	doc.buildFacesAndR2F();
 	doc.buildEdgesAndX2E();
 	doc.updateUpwardConnectivity();
-
 	AGeomManager.initFrom3DMesh(&m_vol);
 }
 

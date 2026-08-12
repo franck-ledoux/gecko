@@ -2,7 +2,7 @@
 #ifndef GECKO_CBlOCK_BLOCKING_CLASSIFIER_H
 #define GECKO_CBlOCK_BLOCKING_CLASSIFIER_H
 /*----------------------------------------------------------------------------*/
-#include <gecko/cblock/Blocking.h>
+#include <gecko/block/Blocking.h>
 /*----------------------------------------------------------------------------*/
 #include <string>
 #include <tuple>

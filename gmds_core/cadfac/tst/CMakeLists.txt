@@ -1,7 +1,7 @@
 add_executable(test_gmds_core_cadfac
-    fac_manager_tests.cpp
-    geom_linker_tests.cpp
-    geom_topology_tests.cpp
+        fac_manager_tests.cpp
+        geom_linker_tests.cpp
+        geom_topology_tests.cpp
 )
 target_link_libraries(test_gmds_core_cadfac PRIVATE
     gmds_core_cad_lib

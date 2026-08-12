@@ -1,0 +1,29 @@
+# Doxyfile.lint
+#
+# Documentation completeness/consistency check. Not used to generate any
+# output (no HTML/XML) — it only exists to make Doxygen's own warnings
+# (undocumented members, mismatched @param names, ...) fail the build.
+#
+# Usage:
+#   cmake --build build --target doc-lint
+#   # or directly:
+#   doxygen Doxyfile.lint
+
+PROJECT_NAME            = "Gecko"
+OUTPUT_DIRECTORY        = .doc-lint-tmp
+INPUT                   = utils/inc math/inc geom_itf/inc geom/inc mesh/inc
+RECURSIVE               = YES
+FILE_PATTERNS           = *.h *.hpp
+
+GENERATE_HTML           = NO
+GENERATE_LATEX          = NO
+# XML output is generated (into OUTPUT_DIRECTORY, a scratch dir) only so Doxygen
+# doesn't itself warn about "no output format selected" under WARN_AS_ERROR.
+GENERATE_XML            = YES
+QUIET                   = YES
+
+WARNINGS                = YES
+WARN_IF_UNDOCUMENTED    = YES
+WARN_IF_DOC_ERROR       = YES
+WARN_NO_PARAMDOC        = YES
+WARN_AS_ERROR           = FAIL_ON_WARNINGS

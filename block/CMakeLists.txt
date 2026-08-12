@@ -1,10 +1,10 @@
-add_library(cblock_lib
+add_library(block_lib
     src/Blocking.cpp
     src/BlockingClassifier.cpp
     src/Graph.cpp
 )
-target_include_directories(cblock_lib PUBLIC inc)
-target_link_libraries(cblock_lib PUBLIC
+target_include_directories(block_lib PUBLIC inc)
+target_link_libraries(block_lib PUBLIC
     cgal_dep
     boost_dep
     gmds_core_cad_lib
