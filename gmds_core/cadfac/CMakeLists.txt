@@ -1,9 +1,9 @@
 add_library(gmds_core_cadfac_lib
-    src/FACCurve.cpp
-    src/FACManager.cpp
-    src/FACPoint.cpp
-    src/FACSurface.cpp
-    src/FACVolume.cpp
+        src/FACCurve.cpp
+        src/FACManager.cpp
+        src/FACPoint.cpp
+        src/FACSurface.cpp
+        src/FACVolume.cpp
 )
 target_include_directories(gmds_core_cadfac_lib PUBLIC inc)
 target_link_libraries(gmds_core_cadfac_lib PUBLIC

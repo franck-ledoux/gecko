@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------------------*/
-#include <gecko/cblock/Graph.h>
+#include <gecko/block/Graph.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>

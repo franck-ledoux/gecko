@@ -1,6 +1,6 @@
 add_library(gmds_core_cad_lib
-    src/GeomSurface.cpp
-    src/GeomMeshLinker.cpp
+        src/GeomSurface.cpp
+        src/GeomMeshLinker.cpp
 )
 target_include_directories(gmds_core_cad_lib PUBLIC inc)
 target_link_libraries(gmds_core_cad_lib PUBLIC

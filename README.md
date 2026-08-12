@@ -1,38 +1,34 @@
 # GECKO
 
-GECKO stands for hiGh ordEr bloCK tOolkit. It provides data structures and algorithms to easily modify a block structure used for discretizing a geometrical domain with a hexahedral mesh.
+GECKO stands for hi**G**h ord**E**r blo**C**K t**O**olkit. It provides data structures and
+algorithms to easily modify a block structure used for discretizing a geometrical domain with a
+hexahedral mesh.
 
-## Prerequisites
+## Quick start
 
-- CMake >= 3.20
-- A C++17 compiler (GCC, Clang, MSVC)
-- An internet connection (CMake will automatically download Eigen3, nlohmann_json and Catch2)
+Requires CMake >= 3.20 and a C++20/23 compiler (GCC, Clang, MSVC/AppleClang).
 
-The following dependencies are bundled in the repository under `subprojects/`:
-- Boost 1.87.0 (header-only)
-- CGAL 5.6.2 (header-only)
-- predicates (compiled)
-
-## Build
-
-```sh
-mkdir build && cd build
-cmake ..
-make
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j
+cd build && ctest --output-on-failure
 ```
 
-## Run unit tests
+## Documentation
 
-Tests are located in `cblock/tst/`. After building, run them with:
+The full developer documentation — project layout, running/writing tests, code coverage,
+writing/generating this documentation itself, and linting — lives under [`docs/`](docs/index.md)
+and is kept up to date there rather than duplicated here:
 
-```sh
-cd build
-ctest -R test_cblock -V
-```
+- [Overview & project layout](docs/index.md)
+- [Building & Testing](docs/developer-guide/testing.md)
+- [Writing Documentation](docs/developer-guide/documentation.md)
+- [Linting & Formatting](docs/developer-guide/linting.md)
 
-To rebuild and run in one step:
+For the full experience (searchable, with the API reference generated from the source code
+comments), build and browse the site instead of reading the raw Markdown:
 
-```sh
-cd build
-make test_cblock && ctest -R test_cblock -V
+```bash
+cmake --build build --target docs-serve   # http://127.0.0.1:8000, live-reloading
+# or: cmake --build build --target docs   # static site in site/index.html
 ```

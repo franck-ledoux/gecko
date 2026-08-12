@@ -1,8 +1,8 @@
 /*----------------------------------------------------------------------------*/
-#include <gecko/cblock/BlockingClassifier.h>
+#include <gecko/block/BlockingClassifier.h>
 #include <gmds/utils/Exception.h>
 /*----------------------------------------------------------------------------*/
-#include "gecko/cblock/Graph.h"
+#include "gecko/block/Graph.h"
 #include <limits>
 #include <CGAL/boost/graph/graph_traits_Surface_mesh.h>
 /*----------------------------------------------------------------------------*/

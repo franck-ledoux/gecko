@@ -1,0 +1,64 @@
+site_name: Gecko
+site_description: Developer documentation for the Gecko meshing toolkit
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets
+
+plugins:
+  - search
+  - mkdoxy:
+      projects:
+        gecko:
+          src-dirs: utils/inc math/inc geom_itf/inc geom/inc mesh/inc
+          full-doc: True
+          doxy-cfg:
+            FILE_PATTERNS: "*.h *.hpp"
+            RECURSIVE: True
+            SHOW_NAMESPACES: YES
+
+nav:
+  - Home: index.md
+  - Developer Guide:
+      - Building & Testing: developer-guide/testing.md
+      - Writing Documentation: developer-guide/documentation.md
+      - Linting & Formatting: developer-guide/linting.md
+  - API Reference:
+      - Class List: gecko/annotated.md
+      - Class Index: gecko/classes.md
+      - Class Hierarchy: gecko/hierarchy.md
+      - Namespace List: gecko/namespaces.md
+      - File List: gecko/files.md
