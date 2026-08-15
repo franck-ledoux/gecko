@@ -16,6 +16,7 @@ target_sources(gecko_math_lib INTERFACE
         BASE_DIRS inc
         FILES
         inc/gecko/math/BezierCurve.h
+        inc/gecko/math/ClosestPoint.h
         inc/gecko/math/Point3d.h
         inc/gecko/math/Vector3d.h
 )
