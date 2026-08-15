@@ -43,7 +43,7 @@ plugins:
   - mkdoxy:
       projects:
         gecko:
-          src-dirs: utils/inc math/inc geom_itf/inc geom/inc mesh/inc
+          src-dirs: utils/inc math/inc geom_itf/inc geom/inc mesh/inc io/inc
           full-doc: True
           doxy-cfg:
             FILE_PATTERNS: "*.h *.hpp"

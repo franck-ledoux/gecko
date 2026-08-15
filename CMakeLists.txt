@@ -180,7 +180,7 @@ endif (GECKO_BUILD_DOCS)
 #==============================================================================
 option(GECKO_BUILD_LINT "Enable the 'format'/'format-check'/'docs-format'/'docs-format-check'/'doc-lint'/'lint' targets" ON)
 if (GECKO_BUILD_LINT)
-    set(GECKO_LINT_MODULES utils math geom_itf geom mesh)
+    set(GECKO_LINT_MODULES utils math geom_itf geom mesh io)
 
     file(GLOB_RECURSE GECKO_CXX_SOURCES CONFIGURE_DEPENDS
             ${CMAKE_SOURCE_DIR}/utils/inc/*.h ${CMAKE_SOURCE_DIR}/utils/tst/*.cpp
@@ -188,6 +188,7 @@ if (GECKO_BUILD_LINT)
             ${CMAKE_SOURCE_DIR}/geom_itf/inc/*.h ${CMAKE_SOURCE_DIR}/geom_itf/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/geom/inc/*.h ${CMAKE_SOURCE_DIR}/geom/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/mesh/inc/*.h ${CMAKE_SOURCE_DIR}/mesh/tst/*.cpp
+            ${CMAKE_SOURCE_DIR}/io/inc/*.h ${CMAKE_SOURCE_DIR}/io/tst/*.cpp
     )
     file(GLOB_RECURSE GECKO_MARKDOWN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/docs/*.md)
     list(APPEND GECKO_MARKDOWN_SOURCES ${CMAKE_SOURCE_DIR}/README.md)
@@ -261,6 +262,6 @@ add_subdirectory(utils)
 add_subdirectory(math)
 add_subdirectory(geom_itf)
 add_subdirectory(mesh)
+add_subdirectory(io)
 add_subdirectory(geom)
-#add_subdirectory(gmds_core)
 #add_subdirectory(block)
