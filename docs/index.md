@@ -22,13 +22,14 @@ very documentation, and how code/docs formatting is enforced.
 Gecko is split into small, single-purpose CMake modules, each with its own `inc/` (public headers)
 and `tst/` (Catch2 unit tests) directories:
 
-| Module     | Depends on                  | Content                                                |
-| ---------- | --------------------------- | ------------------------------------------------------ |
-| `utils`    | —                           | Strong ids, generic utilities (`gecko::StrongId`, ...) |
-| `math`     | `utils`                     | `Point3d`, `Vector3d`, `BezierCurve`                   |
-| `geom_itf` | `utils`, `math`             | Concepts describing geometric entities                 |
-| `geom`     | `utils`, `math`, `geom_itf` | CAD model entities (`GeomVertex`, `GeomCurve`, ...)    |
-| `mesh`     | `utils`, `math`             | `UnstructuredMesh`, `VariableRegistry`                 |
+| Module     | Depends on                  | Content                                                      |
+| ---------- | --------------------------- | ------------------------------------------------------------ |
+| `utils`    | —                           | Strong ids, generic utilities (`gecko::StrongId`, ...)       |
+| `math`     | `utils`                     | `Point3d`, `Vector3d`, `BezierCurve`                         |
+| `geom_itf` | `utils`, `math`             | Concepts describing geometric entities                       |
+| `geom`     | `utils`, `math`, `geom_itf` | CAD model entities (`GeomVertex`, `GeomCurve`, ...)          |
+| `mesh`     | `utils`, `math`             | `UnstructuredMesh`, `VariableRegistry`                       |
+| `io`       | `utils`, `mesh`             | Mesh structure file I/O (`GmshMeshReader`, `GmshMeshWriter`) |
 
 `block` and `gmds_core` also exist in the repository but are currently disabled in the root
 `CMakeLists.txt` (`add_subdirectory` calls are commented out) and are not part of the build yet.

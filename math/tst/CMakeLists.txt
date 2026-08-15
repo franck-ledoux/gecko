@@ -1,5 +1,6 @@
 add_executable(test_math
         bezier_curve_tests.cpp
+        closest_point_tests.cpp
         PointVector_tests.cpp)
 target_link_libraries(test_math PRIVATE
     Gecko::Math

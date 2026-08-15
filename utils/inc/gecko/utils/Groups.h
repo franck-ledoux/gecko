@@ -1,4 +1,6 @@
 #pragma once
+#include <cstddef>
+#include <span>
 #include <string>
 #include <vector>
 #include <gecko/utils/Types.h>
@@ -52,6 +54,15 @@ namespace gecko {
          * @pre @p id must be a valid id previously returned by add_group().
          */
         [[nodiscard]] const Group &get_group(GroupId id) const { return m_groups[static_cast<std::uint32_t>(id)]; }
+
+        /** @brief Gets the number of groups stored in the registry. @return The group count. */
+        [[nodiscard]] std::size_t size() const noexcept { return m_groups.size(); }
+
+        /**
+         * @brief Gets a zero-copy view onto every group stored in the registry.
+         * @return A span of all the registry's groups, in creation order.
+         */
+        [[nodiscard]] std::span<const Group> groups() const noexcept { return m_groups; }
 
     private:
         std::vector<Group> m_groups;

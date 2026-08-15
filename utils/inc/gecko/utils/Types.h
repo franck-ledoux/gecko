@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 
@@ -20,9 +21,17 @@ namespace gecko {
         /** @brief Underlying id value, defaults to #invalid_value. */
         T value{invalid_value};
 
-        /** @brief Default constructor, builds an invalid id. */
-        constexpr StrongId() noexcept = default;
+        /**
+         * @brief Sentinel invalid StrongId instance.
+         * @note Declared here without an initializer and defined just after the class: a static
+         *       data member of the class's own type cannot be initialized in-class, because the
+         *       class is still an incomplete type at that point (and `constexpr` requires an
+         *       initializer right where it's declared).
+         */
+        static const StrongId invalid_id;
 
+        /** @brief Default constructor, builds an invalid id. */
+        constexpr StrongId() noexcept : value(invalid_value) {}
         /**
          * @brief Constructs an id from its underlying value.
          * @param val The underlying value to wrap.
@@ -123,6 +132,10 @@ namespace gecko {
         }
     };
 
+    /** @brief Out-of-line definition of StrongId::invalid_id, now that StrongId is complete. */
+    template<typename Tag, typename T>
+    inline constexpr StrongId<Tag, T> StrongId<Tag, T>::invalid_id{};
+
     /**
      * @brief Adds an offset to a StrongId (id + offset).
      * @tparam TagT Tag type of the StrongId.
@@ -180,6 +193,7 @@ namespace gecko {
     using FaceId = StrongId<FaceTag>;
     using CellId = StrongId<CellTag>;
 
+    using SizeT = std::size_t;
     using Int = std::int32_t;
     using UInt = std::uint32_t;
     using Float = double;

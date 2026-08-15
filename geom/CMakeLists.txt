@@ -15,13 +15,13 @@ target_sources(gecko_geom_lib INTERFACE
         FILE_SET HEADERS
         BASE_DIRS inc
         FILES
-        inc/gecko/geom/GeomEntityRefVariant.h
-        inc/gecko/geom/GeomEntities.h
-        inc/gecko/geom/Geometry.h
+        inc/gecko/geom/FacetedEntities.h
+        inc/gecko/geom/FacetedEntityRefVariant.h
+        inc/gecko/geom/FacetedGeometry.h
 )
 
 # Dependency to other Gecko modules
-target_link_libraries(gecko_geom_lib INTERFACE Gecko::Utils Gecko::Math Gecko::GeomItf)
+target_link_libraries(gecko_geom_lib INTERFACE Gecko::Utils Gecko::Math Gecko::GeomItf Gecko::Mesh Gecko::Io)
 # Require C++23
 target_compile_features(gecko_geom_lib INTERFACE cxx_std_23)
 # -----------------------------------------------------------------------------
