@@ -4,6 +4,8 @@
 #include <type_traits>
 #include <variant>
 
+#include <unit_test_config.h>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <gecko/geom/FacetedGeometry.h>
@@ -193,4 +195,17 @@ TEST_CASE("FacetedGeometry_AddsVolume_FromTetrahedra", "[FacetedGeometry]") {
     const auto solid_entities = geom.entities(solid);
     REQUIRE(solid_entities.size() == 1);
     REQUIRE(std::holds_alternative<const FacetedVolume *>(solid_entities[0]));
+}
+
+TEST_CASE("FacetedGeometry_FromGmsh2DFile", "[FacetedGeometry]") {
+
+    std::string dir(TEST_SAMPLES_DIR);
+    const auto path = dir + "/square.msh";
+
+    FacetedGeometry geom(path);
+
+    REQUIRE(geom.nb_volumes() == 0);
+    REQUIRE(geom.nb_surfaces() == 2);
+    REQUIRE(geom.nb_curves() == 7);
+    REQUIRE(geom.nb_vertices() == 6);
 }
