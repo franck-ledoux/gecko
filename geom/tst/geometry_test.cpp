@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <gecko/geom/FacetedGeometry.h>
 #include <gecko/io/GmshMeshWriter.h>
+#include <catch2/matchers/catch_matchers_range_equals.hpp>
 
 using Catch::Approx;
 using namespace gecko;
@@ -150,6 +151,24 @@ TEST_CASE("FacetedGeometry_BoundaryRep_FromTriangles", "[FacetedGeometry]") {
         REQUIRE(mutated == cp);
     }
 
+    SECTION("Entities can be looked up by their entity_tag") {
+        const auto *vertex = geom.vertex_by_tag(10);
+        REQUIRE(vertex != nullptr);
+        REQUIRE(vertex->entity_tag() == 10);
+
+        const auto *curve = geom.curve_by_tag(20);
+        REQUIRE(curve != nullptr);
+        REQUIRE(curve->entity_tag() == 20);
+
+        const auto *surface = geom.surface_by_tag(30);
+        REQUIRE(surface != nullptr);
+        REQUIRE(surface->entity_tag() == 30);
+
+        REQUIRE(geom.vertex_by_tag(999) == nullptr);
+        REQUIRE(geom.curve_by_tag(999) == nullptr);
+        REQUIRE(geom.surface_by_tag(999) == nullptr);
+    }
+
     SECTION("Distance, closest_point and project against a known FacetedCurve") {
         const auto &curve = find_by_tag(geom.curves(), 20); // segment n0(0,0,0) -> n1(1,0,0)
         const Point3d p(0.5, 3.0, 0.0);
@@ -192,6 +211,9 @@ TEST_CASE("FacetedGeometry_AddsVolume_FromTetrahedra", "[FacetedGeometry]") {
     REQUIRE(geom.volumes()[0].dimension() == GroupDim::Dim3);
     REQUIRE(geom.volumes()[0].distance(Point3d(5.0, 5.0, 5.0)) == Approx(0.0).margin(1e-12));
 
+    REQUIRE(geom.volume_by_tag(40) == &geom.volumes()[0]);
+    REQUIRE(geom.volume_by_tag(999) == nullptr);
+
     const auto solid_entities = geom.entities(solid);
     REQUIRE(solid_entities.size() == 1);
     REQUIRE(std::holds_alternative<const FacetedVolume *>(solid_entities[0]));
@@ -208,4 +230,50 @@ TEST_CASE("FacetedGeometry_FromGmsh2DFile", "[FacetedGeometry]") {
     REQUIRE(geom.nb_surfaces() == 2);
     REQUIRE(geom.nb_curves() == 7);
     REQUIRE(geom.nb_vertices() == 6);
+
+    //check the vertex tags
+    auto tag_view_vertices =
+        geom.vertices() | std::views::transform([](const FacetedVertex &v) { return v.entity_tag(); });
+    REQUIRE_THAT(tag_view_vertices, Catch::Matchers::RangeEquals(std::vector{1, 2, 3, 4, 5, 6}));
+    //check the curve tags
+    auto tag_view_curves = geom.curves() | std::views::transform([](const FacetedCurve &c) { return c.entity_tag(); });
+    REQUIRE_THAT(tag_view_curves, Catch::Matchers::RangeEquals(std::vector{1, 2, 3, 4, 5, 6, 7}));
+    //check the surface tags
+    auto tag_view_surfs =
+        geom.surfaces() | std::views::transform([](const FacetedSurface &s) { return s.entity_tag(); });
+    REQUIRE_THAT(tag_view_surfs, Catch::Matchers::RangeEquals(std::vector{1, 2}));
+
+    REQUIRE(geom.surface_by_tag(1)->distance(Point3d(0.5, 0.5, 1.0)) == Approx(1.0).margin(1e-12));
+    REQUIRE(geom.surface_by_tag(2)->distance(Point3d(1.5, 0.5, 1.0)) == Approx(1.0).margin(1e-12));
+}
+
+TEST_CASE("FacetedGeometry_FromGmsh3DFile", "[FacetedGeometry]") {
+
+    std::string dir(TEST_SAMPLES_DIR);
+    const auto path = dir + "/two_cubes.msh";
+
+    FacetedGeometry geom(path);
+
+    REQUIRE(geom.nb_volumes() == 2);
+    REQUIRE(geom.nb_surfaces() == 11);
+    REQUIRE(geom.nb_curves() == 20);
+    REQUIRE(geom.nb_vertices() == 12);
+
+    //check the vertex tags
+    auto tag_view_vertices =
+        geom.vertices() | std::views::transform([](const FacetedVertex &v) { return v.entity_tag(); });
+    REQUIRE_THAT(tag_view_vertices, Catch::Matchers::RangeEquals(std::vector{1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 15, 16}));
+    //check the curve tags
+    auto tag_view_curves = geom.curves() | std::views::transform([](const FacetedCurve &c) { return c.entity_tag(); });
+    REQUIRE_THAT(tag_view_curves, Catch::Matchers::RangeEquals(std::vector{1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
+                                                                           11, 12, 21, 22, 23, 24, 25, 26, 27, 28}));
+    //check the surface tags
+    auto tag_view_surfs =
+        geom.surfaces() | std::views::transform([](const FacetedSurface &s) { return s.entity_tag(); });
+    REQUIRE_THAT(tag_view_surfs, Catch::Matchers::RangeEquals(std::vector{1, 2, 3, 4, 5, 6, 12, 13, 14, 15, 16}));
+
+    //check the volume tags
+    auto tag_view_volumes =
+        geom.volumes() | std::views::transform([](const FacetedVolume &v) { return v.entity_tag(); });
+    REQUIRE_THAT(tag_view_volumes, Catch::Matchers::RangeEquals(std::vector{1, 3}));
 }

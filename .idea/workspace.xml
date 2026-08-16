@@ -4,12 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="BackendCodeEditorMiscSettings">
-    <option name="/Default/Environment/Hierarchy/GeneratedFilesCacheKey/Timestamp/@EntryValue" value="6" type="long" />
+    <option name="/Default/Environment/Hierarchy/GeneratedFilesCacheKey/Timestamp/@EntryValue" value="9" type="long" />
     <option name="/Default/Housekeeping/FeatureSuggestion/FeatureSuggestionManager/DisabledSuggesters/=SwitchToGoToActionSuggester/@EntryIndexedValue" value="true" type="bool" />
+    <option name="/Default/Housekeeping/LiveTemplatesHousekeeping/HotspotSessionHintIsShown/@EntryValue" value="true" type="bool" />
+    <option name="/Default/Housekeeping/OptionsDialog/SelectedPageId/@EntryValue" value="CppGeneralOptions" type="string" />
   </component>
-  <component name="CMakePresetLoader"><![CDATA[{
-  "useNewFormat": true
-}]]></component>
+  <component name="CMakePresetLoader">{
+  &quot;useNewFormat&quot;: true
+}</component>
   <component name="CMakeProjectFlavorService">
     <option name="flavorId" value="CMakePlainProjectFlavor" />
   </component>
@@ -18,24 +20,21 @@
   </component>
   <component name="CMakeRunConfigurationManager">
     <generated>
-      <config projectName="gecko" targetName="test_gmds_core_io" />
-      <config projectName="gecko" targetName="test_cblock" />
-      <config projectName="gecko" targetName="test_gmds_core_cadfac" />
-      <config projectName="gecko" targetName="cblock_lib" />
-      <config projectName="gecko" targetName="test_gmds_core_math" />
-      <config projectName="gecko" targetName="gmds_core_ig_lib" />
-      <config projectName="gecko" targetName="test_gmds_core_ig" />
-      <config projectName="gecko" targetName="gmds_core_utils_lib" />
+      <config projectName="gecko" targetName="test_mesh" />
+      <config projectName="gecko" targetName="doc-lint" />
+      <config projectName="gecko" targetName="lint" />
+      <config projectName="gecko" targetName="docs-format" />
+      <config projectName="gecko" targetName="test_utils" />
       <config projectName="gecko" targetName="Catch2" />
+      <config projectName="gecko" targetName="docs-serve" />
+      <config projectName="gecko" targetName="format" />
       <config projectName="gecko" targetName="Catch2WithMain" />
-      <config projectName="gecko" targetName="ext_predicates_lib" />
-      <config projectName="gecko" targetName="test_gmds_core_igalgo" />
-      <config projectName="gecko" targetName="gmds_core_io_lib" />
-      <config projectName="gecko" targetName="gmds_core_math_lib" />
-      <config projectName="gecko" targetName="gmds_core_cadfac_lib" />
-      <config projectName="gecko" targetName="test_gmds_core_utils" />
-      <config projectName="gecko" targetName="gmds_core_cad_lib" />
-      <config projectName="gecko" targetName="gmds_core_igalgo_lib" />
+      <config projectName="gecko" targetName="test_geometry" />
+      <config projectName="gecko" targetName="format-check" />
+      <config projectName="gecko" targetName="docs" />
+      <config projectName="gecko" targetName="docs-format-check" />
+      <config projectName="gecko" targetName="test_io" />
+      <config projectName="gecko" targetName="test_math" />
     </generated>
   </component>
   <component name="CMakeSettings">
@@ -45,8 +44,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="dc13383c-79df-4518-8556-778986223aaf" name="Changes" comment="Update with ultimaille">
+      <change beforePath="$PROJECT_DIR$/.idea/ctestState.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/ctestState.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/geom/inc/gecko/geom/FacetedGeometry.h" beforeDir="false" afterPath="$PROJECT_DIR$/geom/inc/gecko/geom/FacetedGeometry.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/geom/tst/geometry_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/geom/tst/geometry_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/geom_itf/inc/gecko/geom_itf/Concepts.h" beforeDir="false" afterPath="$PROJECT_DIR$/geom_itf/inc/gecko/geom_itf/Concepts.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -57,11 +60,16 @@
     <option name="formatViaClangd" value="false" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="22455" />
+    <option name="cachedIndexableFilesCount" value="22486" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="main" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="MacroExpansionManager">
@@ -80,23 +88,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.011125392153102" />
-      <entry key="MS500" value="1.406689599066063" />
-      <entry key="S2" value="1.7985751034431714" />
-      <entry key="S5" value="1.9139581429495145" />
-      <entry key="S10" value="1.9560115809703953" />
-      <entry key="S30" value="1.9851243915134096" />
-      <entry key="S60" value="2.0023266510868476" />
-      <entry key="M2" value="2.371536885549319" />
-      <entry key="M5" value="5.557714770862379" />
-      <entry key="M10" value="9.707933796362187" />
-      <entry key="M15" value="12.010865438820241" />
-      <entry key="M30" value="15.030066752137657" />
-      <entry key="H1" value="16.87866297180569" />
-      <entry key="H2" value="17.90275084096487" />
-      <entry key="H4" value="18.44189844742937" />
-      <entry key="D1" value="18.90563763757355" />
-      <entry key="W1" value="18.986486325258124" />
+      <entry key="MS100" value="1.0000000000007236" />
+      <entry key="MS500" value="1.003731573970244" />
+      <entry key="S2" value="1.2471570561417888" />
+      <entry key="S5" value="1.5717276623008871" />
+      <entry key="S10" value="1.7561270005778984" />
+      <entry key="S30" value="1.9210176644029375" />
+      <entry key="S60" value="2.095801160848791" />
+      <entry key="M2" value="2.5085933423514275" />
+      <entry key="M5" value="3.16793335570979" />
+      <entry key="M10" value="3.5297595581021968" />
+      <entry key="M15" value="3.6730132370299917" />
+      <entry key="M30" value="3.829357103593752" />
+      <entry key="H1" value="3.9128113751436255" />
+      <entry key="H2" value="3.9559285312577663" />
+      <entry key="H4" value="3.978300073619007" />
+      <entry key="D1" value="22.229835459642604" />
+      <entry key="W1" value="1239.9008380642051" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -107,34 +115,34 @@
       <entry key="S30" value="0.0" />
       <entry key="S60" value="0.0" />
       <entry key="M2" value="0.0" />
-      <entry key="M5" value="0.0" />
-      <entry key="M10" value="0.0" />
-      <entry key="M15" value="0.0" />
-      <entry key="M30" value="0.0" />
-      <entry key="H1" value="0.0" />
-      <entry key="H2" value="0.0" />
-      <entry key="H4" value="0.0" />
-      <entry key="D1" value="0.0" />
-      <entry key="W1" value="0.0" />
+      <entry key="M5" value="7.640581062378631E-252" />
+      <entry key="M10" value="4.99219772623097E-126" />
+      <entry key="M15" value="4.645491405960731E-84" />
+      <entry key="M30" value="4.97328055287528E-42" />
+      <entry key="H1" value="5.658498940951779E-21" />
+      <entry key="H2" value="1.9685105547086914E-10" />
+      <entry key="H4" value="3.7019375034282817E-5" />
+      <entry key="D1" value="2.355628078871533" />
+      <entry key="W1" value="113.4661383392754" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9903167324802893" />
-      <entry key="MS500" value="1.4008514899104811" />
-      <entry key="S2" value="1.796706059360556" />
-      <entry key="S5" value="1.913162315634326" />
-      <entry key="S10" value="1.955604882083441" />
-      <entry key="S30" value="1.9849867940887491" />
-      <entry key="S60" value="2.002255292247587" />
-      <entry key="M2" value="2.3714606009400288" />
-      <entry key="M5" value="5.557526782353726" />
-      <entry key="M10" value="9.707723319156544" />
-      <entry key="M15" value="12.010679019194626" />
-      <entry key="M30" value="15.029942061233559" />
-      <entry key="H1" value="16.878590684395363" />
-      <entry key="H2" value="17.90271189871077" />
-      <entry key="H4" value="18.44187823357327" />
-      <entry key="D1" value="18.90563416158311" />
-      <entry key="W1" value="18.986485826015592" />
+      <entry key="MS100" value="0.9592641193259164" />
+      <entry key="MS500" value="0.9953715100266972" />
+      <entry key="S2" value="1.2437982375056127" />
+      <entry key="S5" value="1.5697085925038794" />
+      <entry key="S10" value="1.7549254464343622" />
+      <entry key="S30" value="1.9205610714892156" />
+      <entry key="S60" value="2.095550203645218" />
+      <entry key="M2" value="2.508443394980284" />
+      <entry key="M5" value="3.1678579800809916" />
+      <entry key="M10" value="3.5297176596103244" />
+      <entry key="M15" value="3.672984194130254" />
+      <entry key="M30" value="3.829341976306141" />
+      <entry key="H1" value="3.9128036498396277" />
+      <entry key="H2" value="3.955924627045197" />
+      <entry key="H4" value="3.9783351167566874" />
+      <entry key="D1" value="24.585355441515187" />
+      <entry key="W1" value="1353.366048696462" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -151,16 +159,38 @@
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="2" id="Add" />
   </component>
+  <component name="ProjectStatusUIService">{
+  &quot;uiKindId&quot;: &quot;Widget&quot;
+}</component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "CTest Application.All CTest.executor": "Run",
+    "Catch.All in geometry_test.cpp.executor": "Run",
+    "Catch.FacetedGeometry_FromGmsh2DFile.executor": "Run",
+    "Catch.Point3d construction and element access.executor": "Run",
+    "Catch.SimplicialMesh_BuildConnectivity_IsolatedCell.executor": "Run",
+    "Catch.SimplicialMesh_Face_Node_Connectivity.executor": "Run",
+    "Catch.StrongId - Comparaisons.executor": "Run",
+    "Catch.StrongId - Incrémentation et Décrémentation.executor": "Run",
+    "Catch.StrongId - Initialisation et Validité.executor": "Run",
+    "Catch.StrongId - Initialisation.executor": "Run",
+    "Catch.StrongId - Opérations de décalage (+, -, +=, -=).executor": "Run",
+    "Catch.StrongId - Utilisation dans des boucles.executor": "Run",
+    "Catch.Variables.executor": "Run",
+    "Catch.bezier_curve_degree_2.executor": "Run",
+    "Catch.cubic.executor": "Run",
+    "Catch.geometry.executor": "Run",
+    "Catch.test_block.executor": "Run",
     "Catch.test_cblock.executor": "Run",
+    "Catch.test_mesh.executor": "Run",
     "RunOnceActivity.MCP Project settings loaded": "true",
     "RunOnceActivity.RadMigrateCodeStyle": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.cidr.known.project.marker": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.readMode.enableVisualFormatting": "true",
@@ -171,60 +201,82 @@
     "cidr.known.project.marker": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "ctest.advertisement.all.test.configuration.is.created": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/bibi/CLionProjects/gecko",
+    "git-widget-placeholder": "21-improvement-of-the-2d3d-faceted-model",
+    "git.auto.fetch.suggestion.counter": "1",
+    "last_opened_file_path": "/Users/bibi/Developpement/gecko",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "project.propVCSSupport.DirectoryMappings",
+    "settings.editor.selected.configurable": "CPPToolchains",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$" />
+      <recent name="$PROJECT_DIR$/utils/inc/gecko/utils" />
+      <recent name="$PROJECT_DIR$/geom/tst" />
+      <recent name="$PROJECT_DIR$/geo" />
+      <recent name="$PROJECT_DIR$/mesh/tst" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/math/inc/gecko/math" />
+      <recent name="$PROJECT_DIR$/math/inc" />
+      <recent name="$PROJECT_DIR$/math" />
+      <recent name="$PROJECT_DIR$/gmds_core" />
     </key>
   </component>
-  <component name="RunManager" selected="Catch.test_cblock">
-    <configuration name="test_cblock" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_cblock" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_cblock" TEST_MODE="SUITE_TEST">
+  <component name="RunManager" selected="Catch.All in geometry_test.cpp">
+    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="All in geometry_test.cpp" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_geometry" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_geometry" TEST_PATTERN="[#geometry_test]" TEST_MODE="PATTERN">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="test_gmds_core_cadfac" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_gmds_core_cadfac" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_gmds_core_cadfac" TEST_MODE="SUITE_TEST">
+    <configuration name="FacetedGeometry_FromGmsh2DFile" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_geometry" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_geometry" TEST_CLASS="[facetedgeometry]" TEST_METHOD="FacetedGeometry_FromGmsh2DFile" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="test_gmds_core_ig" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_gmds_core_ig" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_gmds_core_ig" TEST_MODE="SUITE_TEST">
+    <configuration name="bezier_curve_degree_2" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_math" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_math" TEST_CLASS="[mathtestsuite]" TEST_METHOD="bezier_curve_degree_2" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="test_gmds_core_igalgo" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_gmds_core_igalgo" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_gmds_core_igalgo" TEST_MODE="SUITE_TEST">
+    <configuration name="geom" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" TEST_CLASS="[geometrytestsuite]" TEST_METHOD="geom" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="test_gmds_core_io" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_gmds_core_io" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_gmds_core_io" TEST_MODE="SUITE_TEST">
+    <configuration name="geometry" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_geometry" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_geometry" TEST_CLASS="[geometrytestsuite]" TEST_METHOD="geometry" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="test_gmds_core_math" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_gmds_core_math" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_gmds_core_math" TEST_MODE="SUITE_TEST">
+    <configuration name="test_io" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_io" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_io" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="test_gmds_core_utils" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_gmds_core_utils" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_gmds_core_utils" TEST_MODE="SUITE_TEST">
+    <configuration name="test_mesh" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_mesh" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_mesh" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_utils" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_utils" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_utils" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
@@ -240,83 +292,82 @@
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration default="true" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+    <configuration name="doc-lint" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="doc-lint" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="cblock_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="cblock_lib" CONFIG_NAME="Debug">
+    <configuration name="docs-format-check" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="docs-format-check" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="ext_predicates_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="ext_predicates_lib" CONFIG_NAME="Debug">
+    <configuration name="docs-format" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="docs-format" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="gmds_core_cad_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_cad_lib" CONFIG_NAME="Debug">
+    <configuration name="docs-serve" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="docs-serve" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="gmds_core_cadfac_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_cadfac_lib" CONFIG_NAME="Debug">
+    <configuration name="docs" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="docs" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="gmds_core_ig_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_ig_lib" CONFIG_NAME="Debug">
+    <configuration name="format-check" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="format-check" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="gmds_core_igalgo_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_igalgo_lib" CONFIG_NAME="Debug">
+    <configuration name="format" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="format" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="gmds_core_io_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_io_lib" CONFIG_NAME="Debug">
+    <configuration name="lint" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="lint" CONFIG_NAME="Debug">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="gmds_core_math_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_math_lib" CONFIG_NAME="Debug">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="gmds_core_utils_lib" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="gmds_core_utils_lib" CONFIG_NAME="Debug">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="All CTest" type="CTestRunConfiguration" factoryName="CTestRun" PROGRAM_PARAMS="--extra-verbose" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$CMakeCurrentLocalGenerationDir$" PASS_PARENT_ENVS_2="true" RUN_PATH="$CTestCurrentExecutableName$" EXPLICIT_BUILD_TARGET_NAME="all" TEST_MODE="SUITE_TEST">
+    <configuration name="All CTest" type="CTestRunConfiguration" factoryName="CTestRun" PROGRAM_PARAMS="--extra-verbose" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$CMakeCurrentLocalGenerationDir$" PASS_PARENT_ENVS_2="true" CONFIG_NAME="Debug" RUN_PATH="$CTestCurrentExecutableName$" EXPLICIT_BUILD_TARGET_NAME="all" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
     <list>
-      <item itemvalue="Catch.test_cblock" />
-      <item itemvalue="Catch.test_gmds_core_cadfac" />
-      <item itemvalue="Catch.test_gmds_core_ig" />
-      <item itemvalue="Catch.test_gmds_core_igalgo" />
-      <item itemvalue="Catch.test_gmds_core_io" />
-      <item itemvalue="Catch.test_gmds_core_math" />
-      <item itemvalue="Catch.test_gmds_core_utils" />
-      <item itemvalue="CMake Application.cblock_lib" />
+      <item itemvalue="Catch.test_mesh" />
+      <item itemvalue="Catch.test_utils" />
+      <item itemvalue="Catch.test_io" />
+      <item itemvalue="Catch.All in geometry_test.cpp" />
+      <item itemvalue="Catch.FacetedGeometry_FromGmsh2DFile" />
+      <item itemvalue="Catch.geometry" />
+      <item itemvalue="Catch.bezier_curve_degree_2" />
+      <item itemvalue="Catch.geom" />
+      <item itemvalue="CMake Application.doc-lint" />
+      <item itemvalue="CMake Application.docs" />
+      <item itemvalue="CMake Application.docs-format" />
+      <item itemvalue="CMake Application.docs-format-check" />
+      <item itemvalue="CMake Application.docs-serve" />
+      <item itemvalue="CMake Application.format" />
+      <item itemvalue="CMake Application.format-check" />
+      <item itemvalue="CMake Application.lint" />
       <item itemvalue="CMake Application.Catch2" />
       <item itemvalue="CMake Application.Catch2WithMain" />
-      <item itemvalue="CMake Application.ext_predicates_lib" />
-      <item itemvalue="CMake Application.gmds_core_cad_lib" />
-      <item itemvalue="CMake Application.gmds_core_cadfac_lib" />
-      <item itemvalue="CMake Application.gmds_core_ig_lib" />
-      <item itemvalue="CMake Application.gmds_core_igalgo_lib" />
-      <item itemvalue="CMake Application.gmds_core_io_lib" />
-      <item itemvalue="CMake Application.gmds_core_math_lib" />
-      <item itemvalue="CMake Application.gmds_core_utils_lib" />
       <item itemvalue="CTest Application.All CTest" />
     </list>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Catch.All in geometry_test.cpp" />
+        <item itemvalue="Catch.FacetedGeometry_FromGmsh2DFile" />
+        <item itemvalue="Catch.geom" />
+        <item itemvalue="Catch.bezier_curve_degree_2" />
+        <item itemvalue="Catch.geometry" />
+      </list>
+    </recent_temporary>
   </component>
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
@@ -327,6 +378,9 @@
       <updated>1784321084530</updated>
       <workItem from="1784321085649" duration="246000" />
       <workItem from="1784321368474" duration="3168000" />
+      <workItem from="1784703027828" duration="29513000" />
+      <workItem from="1785134063635" duration="31531000" />
+      <workItem from="1786542400757" duration="25808000" />
     </task>
     <task id="LOCAL-00001" summary="Update with eigen">
       <option name="closed" value="true" />
@@ -369,15 +423,35 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State />
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="feature/discrete-geometry-gmsh" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
           </value>
         </entry>
       </map>
     </option>
   </component>
   <component name="VcsManagerConfiguration">
+    <ignored-roots>
+      <path value="$PROJECT_DIR$/external/Catch2" />
+      <path value="$PROJECT_DIR$/external/ultimaille" />
+    </ignored-roots>
     <MESSAGE value="Update with eigen" />
     <MESSAGE value="Update with ultimaille" />
     <option name="LAST_COMMIT_MESSAGE" value="Update with ultimaille" />
+  </component>
+  <component name="XSLT-Support.FileAssociations.UIState">
+    <expand />
+    <select />
   </component>
 </project>

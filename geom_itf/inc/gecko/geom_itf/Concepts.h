@@ -17,8 +17,9 @@ namespace gecko {
      * (a pure query, does not modify its argument); a project() method that snaps a point onto
      * the entity **in place** (mutates its argument, returns nothing — unrelated to
      * BezierCurve::project(), which instead returns a curvilinear parameter; easy to conflate
-     * given the shared name, but a different type in a different module); and a dimension()
-     * method returning the entity's topological dimension.
+     * given the shared name, but a different type in a different module); a dimension()
+     * method returning the entity's topological dimension; and a tag that identify the cell in its dimension, using
+     * Gmsh approach.
      * @tparam T Candidate geometric entity type.
      */
     template<typename T>
@@ -27,6 +28,7 @@ namespace gecko {
         { entity.closest_point(p) } -> std::same_as<Point3d>;
         { entity.project(mutable_p) } -> std::same_as<void>;
         { entity.dimension() } -> std::same_as<GroupDim>;
+        { entity.entity_tag() } -> std::same_as<Int>;
     };
 
     /**
@@ -37,14 +39,17 @@ namespace gecko {
      *
      * A conforming type must provide: nb_vertices()/nb_curves()/nb_surfaces()/nb_volumes() entity
      * counts; vertices()/curves()/surfaces()/volumes() ranges of GeomEntityConcept-conforming
-     * entities (any range type, not necessarily a `std::vector`); groups() (every group,
-     * regardless of dimension) and groups(GroupDim) (groups of one dimension only); and
-     * entities(GroupId), the (possibly dimension-mixed) entities belonging to a given group.
+     * entities (any range type, not necessarily a `std::vector`); vertex_by_tag()/curve_by_tag()/
+     * surface_by_tag()/volume_by_tag(), each looking up an entity by its entity_tag() (see
+     * GeomEntityConcept) and returning a pointer to it, or `nullptr` if no entity of that
+     * dimension has that tag; groups() (every group, regardless of dimension) and
+     * groups(GroupDim) (groups of one dimension only); and entities(GroupId), the (possibly
+     * dimension-mixed) entities belonging to a given group.
      * @tparam T Candidate geometric model type.
      */
     template<typename T>
     concept GeomModelConcept =
-        requires(const T model, GroupId gid, GroupDim dim) {
+        requires(const T model, GroupId gid, GroupDim dim, Int tag) {
             { model.nb_vertices() } -> std::convertible_to<std::size_t>;
             { model.nb_curves() } -> std::convertible_to<std::size_t>;
             { model.nb_surfaces() } -> std::convertible_to<std::size_t>;
@@ -56,6 +61,18 @@ namespace gecko {
             { model.groups() } -> std::ranges::range;
             { model.groups(dim) } -> std::ranges::range;
             { model.entities(gid) } -> std::ranges::range;
+            {
+                model.vertex_by_tag(tag)
+            } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().vertices())> *>;
+            {
+                model.curve_by_tag(tag)
+            } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().curves())> *>;
+            {
+                model.surface_by_tag(tag)
+            } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().surfaces())> *>;
+            {
+                model.volume_by_tag(tag)
+            } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().volumes())> *>;
         } && GeomEntityConcept<std::ranges::range_value_t<decltype(std::declval<const T &>().vertices())>> &&
         GeomEntityConcept<std::ranges::range_value_t<decltype(std::declval<const T &>().curves())>> &&
         GeomEntityConcept<std::ranges::range_value_t<decltype(std::declval<const T &>().surfaces())>> &&
