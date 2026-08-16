@@ -6,6 +6,11 @@
 #include <utility>
 #include <vector>
 
+#include <CGAL/AABB_traits.h>
+#include <CGAL/AABB_tree.h>
+#include <CGAL/AABB_triangle_primitive.h>
+#include <CGAL/Simple_cartesian.h>
+#include <CGAL/Triangle_3.h>
 #include <gecko/math/ClosestPoint.h>
 #include <gecko/math/Point3d.h>
 #include <gecko/math/Vector3d.h>
@@ -143,40 +148,43 @@ namespace gecko {
      * Gmsh elementary entity tag.
      *
      * Stores a non-owning pointer to the backing mesh plus the ids of its constituent faces,
-     * rather than copied coordinates. Queries are brute-force over every face (no acceleration
-     * structure), the closest point of the triangle it defines to the query point.
+     * rather than copied coordinates. Closest-point/distance queries are accelerated by a
+     * CGAL::AABB_tree built once at construction time from those triangles (same
+     * Simple_cartesian<double> kernel + AABB_triangle_primitive pattern as gmds_core's
+     * FACSurface), rather than a brute-force scan; CGAL's AABB_tree package is
+     * GPL-3.0-or-later, combinable with Gecko's AGPL-3.0 license under GPLv3/AGPLv3 section 13.
+     *
+     * Move-only (matching CGAL::AABB_tree, which disables copy): the tree's primitives hold
+     * iterators into #m_cgal_triangles, so this class must never be copied, and relies on
+     * std::vector's move constructor leaving the underlying buffer address (and hence those
+     * iterators) unchanged when moved.
      */
     class FacetedSurface {
     public:
         /**
-         * @brief Constructor.
+         * @brief Constructor. Builds the AABB tree from @p faces' triangles.
          * @param mesh Backing mesh; must outlive this surface.
          * @param faces Ids of the mesh faces this surface is built from (must be non-empty).
          * @param entity_tag Gmsh elementary entity tag this surface was reconstructed from.
          */
         FacetedSurface(const SimplicialMesh *mesh, std::vector<FaceId> faces, Int entity_tag)
-            : m_mesh(mesh), m_faces(std::move(faces)), m_entity_tag(entity_tag) {
+            : m_mesh(mesh),
+              m_faces(std::move(faces)),
+              m_entity_tag(entity_tag),
+              m_cgal_triangles(build_cgal_triangles(m_mesh, m_faces)),
+              m_aabb_tree(m_cgal_triangles.begin(), m_cgal_triangles.end()) {
             assert(!m_faces.empty() && "FacetedSurface: must be built from at least one face");
+            m_aabb_tree.accelerate_distance_queries();
         }
 
         /**
          * @brief Gets the closest point of this surface to a query point.
          * @param p Query point.
-         * @return The closest point, over every constituent face, of that face's triangle to @p p.
+         * @return The closest point of the surface (over every constituent triangle) to @p p.
          */
         [[nodiscard]] Point3d closest_point(const Point3d &p) const {
-            Point3d best{};
-            double best_dist_sq = std::numeric_limits<double>::infinity();
-            for (FaceId f : m_faces) {
-                const auto nodes = m_mesh->face_nodes(f);
-                const Point3d cand = closest_point_on_triangle(
-                    p, m_mesh->node(nodes[0]), m_mesh->node(nodes[1]), m_mesh->node(nodes[2]));
-                if (const double d = Vector3d(cand, p).norm_sq(); d < best_dist_sq) {
-                    best_dist_sq = d;
-                    best = cand;
-                }
-            }
-            return best;
+            const auto cp = m_aabb_tree.closest_point(CgalPoint(p.x(), p.y(), p.z()));
+            return Point3d(cp.x(), cp.y(), cp.z());
         }
 
         /**
@@ -202,9 +210,39 @@ namespace gecko {
         [[nodiscard]] std::span<const FaceId> faces() const noexcept { return m_faces; }
 
     private:
+        using CgalKernel = CGAL::Simple_cartesian<double>;
+        using CgalPoint = CgalKernel::Point_3;
+        using CgalTriangle = CgalKernel::Triangle_3;
+        using CgalTrianglePrimitive = CGAL::AABB_triangle_primitive<CgalKernel, std::vector<CgalTriangle>::iterator>;
+        using CgalTraits = CGAL::AABB_traits<CgalKernel, CgalTrianglePrimitive>;
+        using CgalTree = CGAL::AABB_tree<CgalTraits>;
+
+        /**
+         * @brief Builds the list of CGAL triangles making up @p faces, for the AABB tree.
+         * @param mesh Backing mesh to read node positions from.
+         * @param faces Ids of the mesh faces to convert.
+         * @return One CgalTriangle per face, in the same order.
+         */
+        static std::vector<CgalTriangle> build_cgal_triangles(const SimplicialMesh *mesh,
+                                                              std::span<const FaceId> faces) {
+            std::vector<CgalTriangle> triangles;
+            triangles.reserve(faces.size());
+            for (FaceId f : faces) {
+                const auto nodes = mesh->face_nodes(f);
+                const auto &a = mesh->node(nodes[0]);
+                const auto &b = mesh->node(nodes[1]);
+                const auto &c = mesh->node(nodes[2]);
+                triangles.emplace_back(
+                    CgalPoint(a.x(), a.y(), a.z()), CgalPoint(b.x(), b.y(), b.z()), CgalPoint(c.x(), c.y(), c.z()));
+            }
+            return triangles;
+        }
+
         const SimplicialMesh *m_mesh;
         std::vector<FaceId> m_faces;
         Int m_entity_tag;
+        std::vector<CgalTriangle> m_cgal_triangles;
+        CgalTree m_aabb_tree;
     };
     static_assert(GeomEntityConcept<FacetedSurface>, "FacetedSurface must satisfy GeomEntityConcept");
 

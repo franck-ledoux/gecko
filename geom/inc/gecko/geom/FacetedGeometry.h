@@ -5,6 +5,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gecko/geom/FacetedEntities.h>
@@ -37,6 +38,15 @@ namespace gecko {
         /**
          * @brief Constructor. Reads the backing mesh from a Gmsh MSH file and reconstructs every
          * geometric entity from its elements' elementary entity tags.
+         *
+         * Does **not** call `UnstructuredMesh::build_connectivity()`: that computes cell-to-cell
+         * and face-to-face adjacency under a 2-manifold assumption (it throws if an edge borders
+         * more than 2 faces), which a legitimate multi-volume B-Rep file routinely violates — an
+         * edge where an internal partition surface between two volumes meets the exterior
+         * boundary is shared by 3+ triangles from 3+ different surfaces, which is valid CAD
+         * topology, not mesh corruption. FacetedGeometry never needs that adjacency anyway: every
+         * entity is reconstructed purely from elementary entity tags (see build_entities()).
+         *
          * @param path Path to the .msh file (triangles-only for a boundary rep, or tetrahedra to
          *        also get volumes).
          * @throw std::runtime_error if the file cannot be read (see GmshMeshReader::read()).
@@ -45,7 +55,6 @@ namespace gecko {
             auto data = io::SimplicialMeshReader::read(path);
             m_mesh = std::make_unique<SimplicialMesh>(std::move(data.mesh));
             m_groups = std::move(data.groups);
-            m_mesh->build_connectivity();
             build_entities();
         }
 
@@ -76,6 +85,46 @@ namespace gecko {
         [[nodiscard]] std::span<const FacetedSurface> surfaces() const noexcept { return m_surfaces; }
         /** @brief Gets a zero-copy view onto every volume of the model. @return A span of volumes. */
         [[nodiscard]] std::span<const FacetedVolume> volumes() const noexcept { return m_volumes; }
+
+        /**
+         * @brief Finds the vertex reconstructed from a given Gmsh elementary entity tag.
+         * @param tag Elementary entity tag to look up.
+         * @return A pointer to the matching vertex, or nullptr if no vertex has that tag.
+         */
+        [[nodiscard]] const FacetedVertex *vertex_by_tag(Int tag) const {
+            const auto it = m_vertex_by_tag.find(tag);
+            return it != m_vertex_by_tag.end() ? it->second : nullptr;
+        }
+
+        /**
+         * @brief Finds the curve reconstructed from a given Gmsh elementary entity tag.
+         * @param tag Elementary entity tag to look up.
+         * @return A pointer to the matching curve, or nullptr if no curve has that tag.
+         */
+        [[nodiscard]] const FacetedCurve *curve_by_tag(Int tag) const {
+            const auto it = m_curve_by_tag.find(tag);
+            return it != m_curve_by_tag.end() ? it->second : nullptr;
+        }
+
+        /**
+         * @brief Finds the surface reconstructed from a given Gmsh elementary entity tag.
+         * @param tag Elementary entity tag to look up.
+         * @return A pointer to the matching surface, or nullptr if no surface has that tag.
+         */
+        [[nodiscard]] const FacetedSurface *surface_by_tag(Int tag) const {
+            const auto it = m_surface_by_tag.find(tag);
+            return it != m_surface_by_tag.end() ? it->second : nullptr;
+        }
+
+        /**
+         * @brief Finds the volume reconstructed from a given Gmsh elementary entity tag.
+         * @param tag Elementary entity tag to look up.
+         * @return A pointer to the matching volume, or nullptr if no volume has that tag.
+         */
+        [[nodiscard]] const FacetedVolume *volume_by_tag(Int tag) const {
+            const auto it = m_volume_by_tag.find(tag);
+            return it != m_volume_by_tag.end() ? it->second : nullptr;
+        }
 
         /**
          * @brief Gets a zero-copy view onto every physical group of the model, regardless of dimension.
@@ -169,6 +218,7 @@ namespace gecko {
             m_vertices.reserve(nodes_by_tag.size());
             for (auto &[tag, ids] : nodes_by_tag) {
                 m_vertices.emplace_back(m_mesh.get(), ids.front(), tag);
+                m_vertex_by_tag[tag] = &m_vertices.back();
                 register_in_group(node_group[ids.front().value], &m_vertices.back());
             }
 
@@ -176,6 +226,7 @@ namespace gecko {
             for (auto &[tag, ids] : edges_by_tag) {
                 const auto gid = edge_group[ids.front().value];
                 m_curves.emplace_back(m_mesh.get(), std::move(ids), tag);
+                m_curve_by_tag[tag] = &m_curves.back();
                 register_in_group(gid, &m_curves.back());
             }
 
@@ -183,12 +234,14 @@ namespace gecko {
             for (auto &[tag, ids] : faces_by_tag) {
                 const auto gid = face_group[ids.front().value];
                 m_surfaces.emplace_back(m_mesh.get(), std::move(ids), tag);
+                m_surface_by_tag[tag] = &m_surfaces.back();
                 register_in_group(gid, &m_surfaces.back());
             }
 
             m_volumes.reserve(cells_by_tag.size());
             for (auto &[tag, ids] : cells_by_tag) {
                 m_volumes.emplace_back(tag);
+                m_volume_by_tag[tag] = &m_volumes.back();
                 register_in_group(cell_group[ids.front().value], &m_volumes.back());
             }
         }
@@ -199,6 +252,10 @@ namespace gecko {
         std::vector<FacetedCurve> m_curves;
         std::vector<FacetedSurface> m_surfaces;
         std::vector<FacetedVolume> m_volumes;
+        std::unordered_map<Int, const FacetedVertex *> m_vertex_by_tag;
+        std::unordered_map<Int, const FacetedCurve *> m_curve_by_tag;
+        std::unordered_map<Int, const FacetedSurface *> m_surface_by_tag;
+        std::unordered_map<Int, const FacetedVolume *> m_volume_by_tag;
         std::vector<std::vector<FacetedEntityRefVariant>> m_entities_by_group;
     };
     static_assert(GeomModelConcept<FacetedGeometry>, "FacetedGeometry must satisfy GeomModelConcept");
