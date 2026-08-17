@@ -18,6 +18,7 @@ target_sources(gecko_io_lib INTERFACE
         inc/gecko/io/GmshCommon.h
         inc/gecko/io/GmshMeshReader.h
         inc/gecko/io/GmshMeshWriter.h
+        inc/gecko/io/VtkMeshWriter.h
 )
 # Dependency to other Gecko modules
 target_link_libraries(gecko_io_lib INTERFACE Gecko::Mesh Gecko::Utils)

@@ -277,3 +277,65 @@ TEST_CASE("FacetedGeometry_FromGmsh3DFile", "[FacetedGeometry]") {
         geom.volumes() | std::views::transform([](const FacetedVolume &v) { return v.entity_tag(); });
     REQUIRE_THAT(tag_view_volumes, Catch::Matchers::RangeEquals(std::vector{1, 3}));
 }
+
+TEST_CASE("FacetedGeometry_FromGmshCylinderFile", "[FacetedGeometry]") {
+    // test_data/cylinder.msh: an OpenCASCADE-generated tet mesh of a radius-0.5, length-2 cylinder
+    // lying along x (Cylinder(1) = {0,0,0, 2,0,0, 0.5}), with no $PhysicalNames (like two_cubes.msh),
+    // exercising entity-tag-only classification for a single-volume, curved-surface model: 2
+    // vertices (the seam's 2 endpoints), 3 curves (the seam line + the 2 circular rims), 3 surfaces
+    // (the lateral cylindrical surface + the 2 flat end caps) and 1 volume.
+    std::string dir(TEST_SAMPLES_DIR);
+    const auto path = dir + "/cylinder.msh";
+
+    FacetedGeometry geom(path);
+
+    REQUIRE(geom.nb_vertices() == 2);
+    REQUIRE(geom.nb_curves() == 3);
+    REQUIRE(geom.nb_surfaces() == 3);
+    REQUIRE(geom.nb_volumes() == 1);
+
+    auto tag_view_vertices =
+        geom.vertices() | std::views::transform([](const FacetedVertex &v) { return v.entity_tag(); });
+    REQUIRE_THAT(tag_view_vertices, Catch::Matchers::RangeEquals(std::vector{1, 2}));
+    auto tag_view_curves = geom.curves() | std::views::transform([](const FacetedCurve &c) { return c.entity_tag(); });
+    REQUIRE_THAT(tag_view_curves, Catch::Matchers::RangeEquals(std::vector{1, 2, 3}));
+    auto tag_view_surfs =
+        geom.surfaces() | std::views::transform([](const FacetedSurface &s) { return s.entity_tag(); });
+    REQUIRE_THAT(tag_view_surfs, Catch::Matchers::RangeEquals(std::vector{1, 2, 3}));
+    auto tag_view_volumes =
+        geom.volumes() | std::views::transform([](const FacetedVolume &v) { return v.entity_tag(); });
+    REQUIRE_THAT(tag_view_volumes, Catch::Matchers::RangeEquals(std::vector{1}));
+
+    // The seam's 2 endpoints sit on the rim circles, at (x=2,y=0,z=0.5) and (x=0,y=0,z=0.5) — i.e.
+    // radius 0.5 from the x axis at each end of the cylinder's length.
+    const auto *v1 = geom.vertex_by_tag(1);
+    REQUIRE(v1 != nullptr);
+    REQUIRE(v1->closest_point(Point3d(0, 0, 0)).x() == Approx(2.0).margin(1e-9));
+    REQUIRE(v1->closest_point(Point3d(0, 0, 0)).y() == Approx(0.0).margin(1e-9));
+    REQUIRE(v1->closest_point(Point3d(0, 0, 0)).z() == Approx(0.5).margin(1e-9));
+    const auto *v2 = geom.vertex_by_tag(2);
+    REQUIRE(v2 != nullptr);
+    REQUIRE(v2->closest_point(Point3d(0, 0, 0)).x() == Approx(0.0).margin(1e-9));
+
+    // Surface 1 (the lateral surface) must be markedly closer to a point on the cylinder's own axis,
+    // mid-length, than the flat end-cap surfaces 2 (at x=2) / 3 (at x=0) are.
+    const auto *lateral = geom.surface_by_tag(1);
+    const auto *cap_far = geom.surface_by_tag(2);
+    const auto *cap_near = geom.surface_by_tag(3);
+    REQUIRE(lateral != nullptr);
+    REQUIRE(cap_far != nullptr);
+    REQUIRE(cap_near != nullptr);
+    const Point3d axis_midpoint(1.0, 0.0, 0.0);
+    // The lateral surface's own triangulated facets slightly undershoot the analytic radius (a
+    // chord-vs-arc faceting error), hence the looser margin than the flat, exactly-planar caps.
+    REQUIRE(lateral->distance(axis_midpoint) == Approx(0.5).margin(5e-3));
+    REQUIRE(cap_near->distance(axis_midpoint) == Approx(1.0).margin(1e-6));
+    REQUIRE(cap_far->distance(axis_midpoint) == Approx(1.0).margin(1e-6));
+
+    // The single volume's stub distance()/closest_point() (see FacetedVolume's own doc comment) is
+    // always 0/identity, regardless of query point — still worth asserting explicitly here, since a
+    // multi-surface curved model is exactly the case that stub is a known simplification for.
+    const auto *volume = geom.volume_by_tag(1);
+    REQUIRE(volume != nullptr);
+    REQUIRE(volume->distance(axis_midpoint) == Approx(0.0).margin(1e-12));
+}
