@@ -1,8 +1,11 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <ranges>
 #include <utility>
+#include <gecko/math/BezierCurve.h>
+#include <gecko/math/CurveSurfaceTraits.h>
 #include <gecko/math/Point3d.h>
 #include <gecko/utils/Groups.h>
 
@@ -77,5 +80,40 @@ namespace gecko {
         GeomEntityConcept<std::ranges::range_value_t<decltype(std::declval<const T &>().curves())>> &&
         GeomEntityConcept<std::ranges::range_value_t<decltype(std::declval<const T &>().surfaces())>> &&
         GeomEntityConcept<std::ranges::range_value_t<decltype(std::declval<const T &>().volumes())>>;
+
+    /**
+     * @brief Concept describing a control-point-based curve representation usable as a `block`
+     * edge's geometry (e.g. `gecko::BezierCurve<N, Point3d>` today; a future NURBS/B-spline curve
+     * satisfying the same concept plugs in without touching any code written against it).
+     *
+     * A conforming type must be default-constructible (needed to serve as a CGAL `Cell_attribute`
+     * info payload) and provide: `Degree`, the curve's polynomial/parametric degree; `NumControlPoints`
+     * (`Degree + 1`), the number of degrees of freedom driving the curve; `value(t)`, evaluating the
+     * curve at a parametric coordinate in `[0.0, 1.0]`; `control_points()`, a zero-copy, ordered,
+     * endpoint-inclusive view of its control points; indexed read/write access (`operator[]`) to
+     * individual control points — used together to linearly initialize a fresh curve between two
+     * corners, to reposition interior control points once classified onto a geometric curve, and to
+     * build a reversed copy of a curve (needed when orienting a block's edges consistently around a
+     * face/volume for Coons/TFI construction); and a `CurveSurfaceTraits<T>::Surface` specialization
+     * (see `math/CurveSurfaceTraits.h`) naming the paired tensor-product surface representation
+     * `Blocking`/`coons_surface_from_edges()` build faces with — the seam that keeps `block` generic
+     * over the representation family instead of hardcoding `BezierSurface`/`BezierVolume`.
+     * @tparam T Candidate curve representation type.
+     */
+    template<typename T>
+    concept EdgeCurveConcept =
+        std::default_initializable<T> && requires(T curve, const T const_curve, double t, std::size_t i) {
+            { T::Degree } -> std::convertible_to<std::size_t>;
+            { T::NumControlPoints } -> std::convertible_to<std::size_t>;
+            { const_curve.value(t) } -> std::same_as<Point3d>;
+            { const_curve.control_points() } -> std::ranges::range;
+            { const_curve[i] } -> std::same_as<const Point3d &>;
+            { curve[i] } -> std::same_as<Point3d &>;
+            typename CurveSurfaceTraits<T>::Surface;
+        };
+    static_assert(EdgeCurveConcept<BezierCurve<1, Point3d>>,
+                  "BezierCurve<1,Point3d> (linear) must satisfy EdgeCurveConcept");
+    static_assert(EdgeCurveConcept<BezierCurve<3, Point3d>>,
+                  "BezierCurve<3,Point3d> (cubic) must satisfy EdgeCurveConcept");
 
 } // namespace gecko

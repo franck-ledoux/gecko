@@ -1,20 +1,22 @@
-add_executable(test_block block_tests.cpp)
+add_executable(test_block
+        blocking_classification_tests.cpp
+        blocking_connectivity_tests.cpp
+        blocking_creation_tests.cpp
+        blocking_curve_evaluation_tests.cpp
+        blocking_mesh_generation_tests.cpp
+        cell_data_tests.cpp)
 target_link_libraries(test_block PRIVATE
-    Eigen3::Eigen
-    cgal_dep
-    boost_dep
-    gmds_core_cad_lib
-    gmds_core_cadfac_lib
-    gmds_core_ig_lib
-    gmds_core_igalgo_lib
-    gmds_core_io_lib
-    gmds_core_math_lib
-    gmds_core_utils_lib
-    block_lib
+    Gecko::Block
+    Gecko::Geom
     Catch2::Catch2
     Catch2::Catch2WithMain
 )
 # To get access to the generated file "unit_test_config.h"
 target_include_directories(test_block PRIVATE ${CMAKE_BINARY_DIR})
+
+# LIEN IMPORTANT : Injection des flags de couverture sur l'exécutable de tests
+if(TARGET coverage_config)
+    target_link_libraries(test_block PRIVATE coverage_config)
+endif()
 
 add_test(NAME test_block COMMAND test_block)

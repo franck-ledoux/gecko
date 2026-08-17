@@ -180,7 +180,7 @@ endif (GECKO_BUILD_DOCS)
 #==============================================================================
 option(GECKO_BUILD_LINT "Enable the 'format'/'format-check'/'docs-format'/'docs-format-check'/'doc-lint'/'lint' targets" ON)
 if (GECKO_BUILD_LINT)
-    set(GECKO_LINT_MODULES utils math geom_itf geom mesh io)
+    set(GECKO_LINT_MODULES utils math geom_itf geom mesh io block)
 
     file(GLOB_RECURSE GECKO_CXX_SOURCES CONFIGURE_DEPENDS
             ${CMAKE_SOURCE_DIR}/utils/inc/*.h ${CMAKE_SOURCE_DIR}/utils/tst/*.cpp
@@ -189,12 +189,13 @@ if (GECKO_BUILD_LINT)
             ${CMAKE_SOURCE_DIR}/geom/inc/*.h ${CMAKE_SOURCE_DIR}/geom/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/mesh/inc/*.h ${CMAKE_SOURCE_DIR}/mesh/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/io/inc/*.h ${CMAKE_SOURCE_DIR}/io/tst/*.cpp
+            ${CMAKE_SOURCE_DIR}/block/inc/*.h ${CMAKE_SOURCE_DIR}/block/tst/*.cpp
     )
     file(GLOB_RECURSE GECKO_MARKDOWN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/docs/*.md)
     list(APPEND GECKO_MARKDOWN_SOURCES ${CMAKE_SOURCE_DIR}/README.md)
 
     # --- C++ formatting (clang-format), scoped to the modules above ---
-    # NOTE: block/ and gmds_core/ are excluded, matching GECKO_BUILD_DOCS's scope (see docs/index.md).
+    # NOTE: gmds_core/ is excluded, matching GECKO_BUILD_DOCS's scope (see docs/index.md).
     find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format)
     if (CLANG_FORMAT_EXECUTABLE)
         add_custom_target(format
@@ -264,4 +265,4 @@ add_subdirectory(geom_itf)
 add_subdirectory(mesh)
 add_subdirectory(io)
 add_subdirectory(geom)
-#add_subdirectory(block)
+add_subdirectory(block)

@@ -1,4 +1,4 @@
-add_executable(test_io gmsh_io_tests.cpp)
+add_executable(test_io gmsh_io_tests.cpp vtk_io_tests.cpp)
 target_link_libraries(test_io PRIVATE
     Gecko::Io
     Catch2::Catch2

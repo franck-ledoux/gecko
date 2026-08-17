@@ -11,7 +11,7 @@
 
 PROJECT_NAME            = "Gecko"
 OUTPUT_DIRECTORY        = .doc-lint-tmp
-INPUT                   = utils/inc math/inc geom_itf/inc geom/inc mesh/inc io/inc
+INPUT                   = utils/inc math/inc geom_itf/inc geom/inc mesh/inc io/inc block/inc
 RECURSIVE               = YES
 FILE_PATTERNS           = *.h *.hpp
 

@@ -22,14 +22,15 @@ very documentation, and how code/docs formatting is enforced.
 Gecko is split into small, single-purpose CMake modules, each with its own `inc/` (public headers)
 and `tst/` (Catch2 unit tests) directories:
 
-| Module     | Depends on                  | Content                                                      |
-| ---------- | --------------------------- | ------------------------------------------------------------ |
-| `utils`    | —                           | Strong ids, generic utilities (`gecko::StrongId`, ...)       |
-| `math`     | `utils`                     | `Point3d`, `Vector3d`, `BezierCurve`                         |
-| `geom_itf` | `utils`, `math`             | Concepts describing geometric entities                       |
-| `geom`     | `utils`, `math`, `geom_itf` | CAD model entities (`GeomVertex`, `GeomCurve`, ...)          |
-| `mesh`     | `utils`, `math`             | `UnstructuredMesh`, `VariableRegistry`                       |
-| `io`       | `utils`, `mesh`             | Mesh structure file I/O (`GmshMeshReader`, `GmshMeshWriter`) |
+| Module     | Depends on                                | Content                                                               |
+| ---------- | ----------------------------------------- | --------------------------------------------------------------------- |
+| `utils`    | —                                         | Strong ids, generic utilities (`gecko::StrongId`, ...)                |
+| `math`     | `utils`                                   | `Point3d`, `Vector3d`, `BezierCurve`, `BezierSurface`, `BezierVolume` |
+| `geom_itf` | `utils`, `math`                           | Concepts describing geometric entities                                |
+| `geom`     | `utils`, `math`, `geom_itf`               | CAD model entities (`GeomVertex`, `GeomCurve`, ...)                   |
+| `mesh`     | `utils`, `math`                           | `UnstructuredMesh`, `VariableRegistry`                                |
+| `io`       | `utils`, `mesh`                           | Mesh structure file I/O (`GmshMeshReader`, `GmshMeshWriter`)          |
+| `block`    | `utils`, `math`, `geom_itf`, `mesh`, `io` | CGAL-combinatorial-map-based quad/hex blocking (`Blocking`)           |
 
-`block` and `gmds_core` also exist in the repository but are currently disabled in the root
-`CMakeLists.txt` (`add_subdirectory` calls are commented out) and are not part of the build yet.
+`gmds_core` also exists in the repository but is currently disabled in the root `CMakeLists.txt`
+(its `add_subdirectory` call is commented out) and is not part of the build.

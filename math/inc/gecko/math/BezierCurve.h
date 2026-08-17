@@ -14,8 +14,13 @@ namespace gecko {
      * and it can be used for any type of points.
      *
      * @tparam TN The degree of the Bezier curve (number of control points is N + 1).
-     * @tparam TPointT The geometric point type. Must support binary operator+, operator-,
-     *                and scalar operator*(double).
+     * @tparam TPointT The geometric point type, following gecko's point/vector affine-space split
+     *                (e.g. gecko::Point3d): `TPointT - TPointT` yields a difference/vector type `V`,
+     *                `V * double` yields `V`, and `TPointT + V` yields `TPointT`.
+     * @note derivative()/value_derivative()/project()/projectPoint() are not yet updated to this
+     *       affine-space convention (they still assume `TPointT` itself supports `operator+`/
+     *       `operator*(double)` directly, which gecko::Point3d does not) and are unused by the
+     *       `block` module; only value()/operator() are relied upon there.
      */
     template<std::size_t TN, typename TPointT>
     class BezierCurve {
@@ -25,6 +30,14 @@ namespace gecko {
 
         /** @brief The total number of control points defining the curve (N + 1). */
         static constexpr std::size_t NumControlPoints = TN + 1;
+
+        /**
+         * @brief Default constructor. Control points default-initialize to `TPointT{}`.
+         * @note Needed so this type can be used as a CGAL `Cell_attribute` info payload (default-
+         *       constructible is a hard CGAL requirement); the curve is meaningless until its
+         *       control points are set via operator[]/control_points().
+         */
+        BezierCurve() = default;
 
         /**
          * @brief Constructor. Constructs a Bezier curve from an array of control points.
@@ -244,9 +257,12 @@ namespace gecko {
          * @param AP1 Start point (t = 0.0).
          * @param AP2 End point (t = 1.0).
          * @param AT Interpolation factor.
-         * @return Interpolated point: (1 - t) * AP1 + t * AP2.
+         * @return Interpolated point: AP1 + t * (AP2 - AP1), written via the point/vector affine
+         *         operations (`-`/`+`/vector`*double`) rather than a direct weighted sum of points,
+         *         since gecko::Point3d (the typical TPointT) has no `operator+(Point3d)` or
+         *         `operator*(double)` of its own — only affine point-vector arithmetic.
          */
-        static TPointT lerp(const TPointT &AP1, const TPointT &AP2, double AT) { return AP1 * (1.0 - AT) + AP2 * AT; }
+        static TPointT lerp(const TPointT &AP1, const TPointT &AP2, double AT) { return AP1 + (AP2 - AP1) * AT; }
 
         /**
          * @brief Helper function to compute the K-th derivative curve recursively.
