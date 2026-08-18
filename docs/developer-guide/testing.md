@@ -4,7 +4,7 @@
 
 - CMake >= 3.20
 - A C++20/23 compiler (GCC, Clang, MSVC/AppleClang)
-- [Catch2](https://github.com/catchorg/Catch2) v3 — bundled under `external/catch2`, built automatically
+- [Catch2](https://github.com/catchorg/Catch2) v3 — bundled under `external/Catch2`, built automatically
 - For code coverage reports: [`lcov`](https://github.com/linux-test-project/lcov) and `genhtml`
   (installed together, e.g. `brew install lcov` on macOS, `apt install lcov` on Debian/Ubuntu)
 

@@ -56,7 +56,7 @@ target_include_directories(json_dep INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/extern
 # Catch2 v3
 set(CATCH_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/catch2)
+add_subdirectory(external/Catch2)
 
 
 # =====================================================
