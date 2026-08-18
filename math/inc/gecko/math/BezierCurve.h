@@ -4,6 +4,9 @@
 #include <utility>
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <limits>
 
 namespace gecko {
     /**
