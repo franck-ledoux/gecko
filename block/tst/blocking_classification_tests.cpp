@@ -385,4 +385,7 @@ TEST_CASE("hex_block_classification_against_real_multi_volume_gmsh_file", "[Bloc
     for (const auto &target : block->info().geom_targets) {
         REQUIRE(target.first == GroupDim::Dim3);
     }
+
+    auto mesh = blocking.to_mesh(10);
+    REQUIRE(mesh.nb_cells() == 1000);
 }

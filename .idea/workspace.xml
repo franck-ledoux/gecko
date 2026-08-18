@@ -32,6 +32,7 @@
       <config projectName="gecko" targetName="test_geometry" />
       <config projectName="gecko" targetName="format-check" />
       <config projectName="gecko" targetName="docs" />
+      <config projectName="gecko" targetName="test_block" />
       <config projectName="gecko" targetName="docs-format-check" />
       <config projectName="gecko" targetName="test_io" />
       <config projectName="gecko" targetName="test_math" />
@@ -44,12 +45,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="dc13383c-79df-4518-8556-778986223aaf" name="Changes" comment="Update with ultimaille">
-      <change beforePath="$PROJECT_DIR$/.idea/ctestState.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/ctestState.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/geom/inc/gecko/geom/FacetedGeometry.h" beforeDir="false" afterPath="$PROJECT_DIR$/geom/inc/gecko/geom/FacetedGeometry.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/geom/tst/geometry_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/geom/tst/geometry_test.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/geom_itf/inc/gecko/geom_itf/Concepts.h" beforeDir="false" afterPath="$PROJECT_DIR$/geom_itf/inc/gecko/geom_itf/Concepts.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/block/tst/blocking_classification_tests.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/block/tst/blocking_classification_tests.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -67,7 +64,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="main" />
+        <entry key="$PROJECT_DIR$" value="22-linear-and-curvilinear-blocking" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -201,8 +198,8 @@
     "cidr.known.project.marker": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "ctest.advertisement.all.test.configuration.is.created": "true",
-    "git-widget-placeholder": "21-improvement-of-the-2d3d-faceted-model",
-    "git.auto.fetch.suggestion.counter": "1",
+    "git-widget-placeholder": "main",
+    "git.auto.fetch.suggestion.counter": "2",
     "last_opened_file_path": "/Users/bibi/Developpement/gecko",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
@@ -228,16 +225,10 @@
       <recent name="$PROJECT_DIR$/gmds_core" />
     </key>
   </component>
-  <component name="RunManager" selected="Catch.All in geometry_test.cpp">
+  <component name="RunManager" selected="Catch.hex_block_classification_against_real_multi_volume_gmsh_file">
     <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
       <method v="2">
         <option name="CLION.EXTERNAL.BUILD" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="All in geometry_test.cpp" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_geometry" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_geometry" TEST_PATTERN="[#geometry_test]" TEST_MODE="PATTERN">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-        <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
     <configuration name="FacetedGeometry_FromGmsh2DFile" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_geometry" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_geometry" TEST_CLASS="[facetedgeometry]" TEST_METHOD="FacetedGeometry_FromGmsh2DFile" TEST_MODE="SUITE_TEST">
@@ -259,6 +250,18 @@
       </method>
     </configuration>
     <configuration name="geometry" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_geometry" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_geometry" TEST_CLASS="[geometrytestsuite]" TEST_METHOD="geometry" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="hex_block_classification_against_real_multi_volume_gmsh_file" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_block" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_block" TEST_CLASS="[blocktestsuite]" TEST_METHOD="hex_block_classification_against_real_multi_volume_gmsh_file" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_block" type="CMakeCatchTestRunConfigurationType" factoryName="Catch Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="gecko" TARGET_NAME="test_block" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="gecko" RUN_TARGET_NAME="test_block" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
@@ -342,7 +345,8 @@
       <item itemvalue="Catch.test_mesh" />
       <item itemvalue="Catch.test_utils" />
       <item itemvalue="Catch.test_io" />
-      <item itemvalue="Catch.All in geometry_test.cpp" />
+      <item itemvalue="Catch.test_block" />
+      <item itemvalue="Catch.hex_block_classification_against_real_multi_volume_gmsh_file" />
       <item itemvalue="Catch.FacetedGeometry_FromGmsh2DFile" />
       <item itemvalue="Catch.geometry" />
       <item itemvalue="Catch.bezier_curve_degree_2" />
@@ -361,11 +365,11 @@
     </list>
     <recent_temporary>
       <list>
-        <item itemvalue="Catch.All in geometry_test.cpp" />
-        <item itemvalue="Catch.FacetedGeometry_FromGmsh2DFile" />
+        <item itemvalue="Catch.hex_block_classification_against_real_multi_volume_gmsh_file" />
         <item itemvalue="Catch.geom" />
         <item itemvalue="Catch.bezier_curve_degree_2" />
         <item itemvalue="Catch.geometry" />
+        <item itemvalue="Catch.FacetedGeometry_FromGmsh2DFile" />
       </list>
     </recent_temporary>
   </component>
@@ -429,7 +433,7 @@
                   <entry key="branch">
                     <value>
                       <list>
-                        <option value="feature/discrete-geometry-gmsh" />
+                        <option value="main" />
                       </list>
                     </value>
                   </entry>
