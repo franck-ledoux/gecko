@@ -1,6 +1,6 @@
 # GECKO
 
-[![CI](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+[![Build & Test](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
 [![Coverage](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml)
 
 GECKO stands for hi**G**h ord**E**r blo**C**K t**O**olkit. It provides data structures and
