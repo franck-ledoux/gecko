@@ -30,16 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            generator: Ninja
-          - os: macos-latest
-            generator: Ninja
-          - os: windows-latest
-            # No Ninja install step needed: windows-latest ships MSBuild/VS2022 already, so the
-            # native multi-config generator avoids an extra toolchain-install step and any
-            # vcvars/Developer-Prompt environment dance that Ninja+cl.exe would require.
-            generator: "Visual Studio 17 2022"
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -55,6 +46,17 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja
 
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      - name: Set up MSVC developer environment (Windows)
+        # Ninja doesn't locate cl.exe/link.exe on its own the way the Visual Studio generator
+        # would; this puts them (and the matching headers/libs) on PATH/INCLUDE/LIB for the
+        # subsequent Configure/Build steps, same effect as running from a Developer Command Prompt.
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -64,19 +66,17 @@ jobs:
         run: pip install -r python/requirements-test.txt
 
       - name: Configure
-        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_PYTHON=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_PYTHON=ON
 
       - name: Build
         # --parallel 2: the standard GitHub-hosted runners are 2-core/7GB RAM; unbounded
         # parallelism can schedule enough concurrent heavy CGAL/Boost-template compiles
         # (block/tst in particular) to exceed that and get the compiler OOM-killed (verified on
         # Linux/GCC; kept conservative here across all 3 platforms for the same reason).
-        # --config Debug is a no-op for single-config generators (Ninja) and selects the Debug
-        # configuration for the multi-config Visual Studio generator.
-        run: cmake --build build --config Debug --parallel 2
+        run: cmake --build build --parallel 2
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure -C Debug
+        run: ctest --test-dir build --output-on-failure
 
   # Runs clang-format/Doxygen-completeness/mdformat checks and builds the MkDocs site. These
   # targets operate purely on source files via external tools (clang-format, doxygen, mkdocs) —
