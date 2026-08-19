@@ -1,6 +1,12 @@
 # GECKO
 
-[![Build & Test](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+**Build & Test:** Ubuntu
+[![Ubuntu](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main&job=build-test%20%28ubuntu-latest%29)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+macOS
+[![macOS](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main&job=build-test%20%28macos-latest%29)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+Windows
+[![Windows](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main&job=build-test%20%28windows-latest%29)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+<br>
 [![Coverage](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml)
 [![codecov](https://codecov.io/gh/franck-ledoux/gecko/graph/badge.svg?token=MA8EPY7I94)](https://codecov.io/gh/franck-ledoux/gecko)
 
