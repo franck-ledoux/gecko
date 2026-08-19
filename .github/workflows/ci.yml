@@ -59,8 +59,11 @@ jobs:
       - name: Install documentation toolchain
         run: pip install -r requirements-docs.txt
 
+      - name: Install Python test toolchain
+        run: pip install -r python/requirements-test.txt
+
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_PYTHON=ON
 
       - name: Build
         # -j2: the standard GitHub-hosted runner has 2 cores/7GB RAM; Ninja's default (nproc) can
@@ -89,10 +92,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build lcov
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Python test toolchain
+        run: pip install -r python/requirements-test.txt
+
       - name: Configure (coverage)
         # GECKO_CODE_COVERAGE_HTML_REPORT (not just GECKO_CODE_COVERAGE) is what actually defines
         # the code_cover_gecko target (see testing.md); the HTML output itself is unused here.
-        run: cmake -S . -B build-coverage -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGECKO_CODE_COVERAGE_HTML_REPORT=ON
+        # GECKO_BUILD_PYTHON=ON: python/src/bindings.cpp inherits the same --coverage instrumentation
+        # as the rest of the library, and test_python (run as part of ctest below) exercises it, so
+        # this one report covers the C++ library, the bindings, and everything the Python tests
+        # reach through them — no separate Python coverage tooling needed.
+        run: cmake -S . -B build-coverage -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGECKO_CODE_COVERAGE_HTML_REPORT=ON -DGECKO_BUILD_PYTHON=ON
 
       - name: Build
         run: cmake --build build-coverage -j2
