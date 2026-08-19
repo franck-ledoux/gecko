@@ -34,3 +34,11 @@ and `tst/` (Catch2 unit tests) directories:
 
 `gmds_core` also exists in the repository but is currently disabled in the root `CMakeLists.txt`
 (its `add_subdirectory` call is commented out) and is not part of the build.
+
+## Sandbox
+
+`sandbox/` is a scratch executable (`gecko_sandbox`) for local development — a small, throwaway
+`main.cpp` you're meant to edit freely while trying things out, built by default
+(`-DGECKO_BUILD_SANDBOX=OFF` to skip it). It's not installed, not linked against by any other
+module, and — unlike the modules above — not covered by the `format`/`doc-lint`/API reference
+tooling: nothing in it is public API.

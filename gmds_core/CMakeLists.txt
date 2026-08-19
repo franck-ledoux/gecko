@@ -1,7 +1,0 @@
-add_subdirectory(utils)
-add_subdirectory(math)
-add_subdirectory(ig)
-add_subdirectory(io)
-add_subdirectory(igalgo)
-add_subdirectory(cad)
-add_subdirectory(cadfac)

@@ -16,6 +16,10 @@ endif()
 # -----------------------------------------------------------------------------
 # Default: ON, can be desactivated with -DGECKO_BUILD_TESTS=OFF
 option(GECKO_BUILD_TESTS "Build the unit test of Gecko components" ON)
+# Builds the sandbox/ scratch executable — a throwaway playground for local development, not
+# installed and not part of the public API/docs. Default: ON, can be desactivated with
+# -DGECKO_BUILD_SANDBOX=OFF
+option(GECKO_BUILD_SANDBOX "Build the gecko_sandbox scratch executable" ON)
 # Option to activate/desactivate code coverage during unit testing
 option(GECKO_CODE_COVERAGE "Perform code coverage with avail. test suites"               OFF)
 option(GECKO_CODE_COVERAGE_HTML_REPORT "Activate html reporting during code covering"    OFF)
@@ -266,3 +270,7 @@ add_subdirectory(mesh)
 add_subdirectory(io)
 add_subdirectory(geom)
 add_subdirectory(block)
+
+if (GECKO_BUILD_SANDBOX)
+    add_subdirectory(sandbox)
+endif ()
