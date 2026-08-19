@@ -338,6 +338,51 @@ namespace gecko {
             return mesh;
         }
 
+        /**
+         * @brief Checks whether this blocking is purely 2D (contains no 3-cell/hex block) — the
+         * precondition every 2D editing operation requires (this class' own `delete_face()`, and
+         * the separate `FaceCollapse`/`FaceOpening`/`ChordRemoval`/`ChordInsertion` operation
+         * classes built on top of `Blocking`'s public API).
+         * @return true if the blocking has no 3-cells.
+         */
+        bool is_purely_2d() const { return nb_cells<3>() == 0; }
+
+        /**
+         * @brief Checks whether `AFace` can be deleted: currently only requires the blocking to
+         * be purely 2D (see `is_purely_2d()`) — face deletion itself has no further
+         * classification/topology constraint of its own (every face is unconditionally removable
+         * in a dimension-3 map with no 3-cells, per CGAL's `is_removable<i>` rule for `i ==
+         * dimension-1`).
+         * @param AFace The face to check (unused beyond keeping the check-then-act pairing this
+         *        module's other editing operations share).
+         * @return true if `AFace` can be deleted.
+         */
+        bool can_delete_face(Face AFace) const {
+            (void)AFace;
+            return is_purely_2d();
+        }
+
+        /**
+         * @brief Deletes `AFace` from the structure.
+         *
+         * Topology: a single `CGAL::Combinatorial_map::remove_cell<2>()` call. CGAL's own
+         * attribute reference-counting (`Decrease_attribute_functor`, run per erased dart) already
+         * garbage-collects any of `AFace`'s boundary edges/corner nodes left with zero remaining
+         * incident darts as a side effect — no separate cascading-removal pass is needed here.
+         * Edges/nodes still shared with another surviving face/edge are untouched and keep their
+         * existing classification; a cell that *is* garbage-collected simply ceases to exist along
+         * with its own classification. Geometry of every surviving cell is left exactly as it was
+         * — deleting one face doesn't change what any other cell's position/curve/surface means.
+         *
+         * @param AFace The face to delete.
+         * @pre `can_delete_face(AFace)`
+         */
+        void delete_face(Face AFace) {
+            assert(can_delete_face(AFace) &&
+                   "Blocking::delete_face: precondition violated (blocking must be purely 2D)");
+            m_cmap.template remove_cell<2>(AFace->dart());
+        }
+
         /** @brief Gives access to the underlying combinatorial map. @return The internal map. */
         Map &cmap() { return m_cmap; }
         /** @copydoc cmap() */
@@ -439,6 +484,32 @@ namespace gecko {
         }
 
         /**
+         * @brief Checks whether 2 free (unsewn) edges represent the same segment traversed in
+         * opposite directions — the correct 2-sewability condition: `dA`'s start matches `dB`'s
+         * end, and `dA`'s end matches `dB`'s start.
+         *
+         * Deliberately *not* `positions_match_reversed()`: that helper (correct for `sew_matching`'s
+         * `AK=4` hex-face case, which searches all `AK` rotations of `dB` around its own face until
+         * one aligns) compares `dA`'s start against `dB`'s *own* start, then `dA`'s end against the
+         * start of the dart *before* `dB` in `dB`'s face — a check whose 2 comparisons only land on
+         * the true pair of segment endpoints for a specific rotation of `dB`. A free edge has just
+         * one dart (no "other rotation" to try the way a face's own boundary does — walking
+         * `beta<1>` off of it moves to a *different* edge in the same face entirely, not another
+         * orientation of this one), so there's no rotation search that fixes it: the correct check
+         * has to compare directly against `dB`'s actual end/start. Using `positions_match_reversed`
+         * here was verified to silently mis-sew 2 quads sharing an edge — gluing one quad's
+         * unrelated edge to the other's — while `is_valid_topology()` still reported the corrupted
+         * map as valid (topological validity alone doesn't catch a wrong *geometric*
+         * correspondence).
+         */
+        bool free_edges_match_reversed(Dart ADartA, Dart ADartB) {
+            return m_cmap.template attribute<0>(ADartA)->info().point ==
+                       m_cmap.template attribute<0>(m_cmap.template beta<1>(ADartB))->info().point &&
+                   m_cmap.template attribute<0>(m_cmap.template beta<1>(ADartA))->info().point ==
+                       m_cmap.template attribute<0>(ADartB)->info().point;
+        }
+
+        /**
          * @brief Sews every pair of still-free, position-matching edges among all standalone quad
          * blocks' boundary edges. A hex's own 12 edges are always already 2-sewn (to their 2
          * sibling faces within that hex, done at creation time), so `is_free<2>` naturally selects
@@ -458,7 +529,7 @@ namespace gecko {
                 for (std::size_t j = i + 1; j < free_edges.size(); ++j) {
                     const Dart dB = free_edges[j];
                     if (!m_cmap.template is_free<2>(dB)) continue;
-                    if (positions_match_reversed(dA, dB, 2)) {
+                    if (free_edges_match_reversed(dA, dB)) {
                         m_cmap.template sew<2>(dA, dB);
                         break;
                     }
