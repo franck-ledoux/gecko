@@ -1,6 +1,8 @@
 site_name: Gecko
 site_description: Developer documentation for the Gecko meshing toolkit
 site_url: https://franck-ledoux.github.io/gecko/
+repo_url: https://github.com/franck-ledoux/gecko
+repo_name: franck-ledoux/gecko
 docs_dir: docs
 site_dir: site
 
