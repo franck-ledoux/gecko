@@ -130,3 +130,34 @@ jobs:
 
       - name: Build documentation site
         run: cmake --build build --target docs
+
+      # Only prepared for deployment on an actual push to main — deploy-docs (below) is the job
+      # that decides whether to actually publish it. PR runs still build+lint the site above, just
+      # without uploading it, so there's no artifact-storage cost for docs that were never public.
+      - name: Setup Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # Publishes the MkDocs site built by lint-docs to GitHub Pages. Separate job (rather than a
+  # step in lint-docs) because GitHub Pages deployment needs its own environment/permissions
+  # scope, and gating via `needs` + the same push-to-main condition keeps PR runs deploy-free.
+  deploy-docs:
+    needs: lint-docs
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
