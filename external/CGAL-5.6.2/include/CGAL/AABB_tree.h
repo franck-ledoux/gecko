@@ -553,10 +553,7 @@ public:
         traits.intersection(query, singleton_data());
         break;
       default: // if(size() >= 2)
-        // Explicit empty <> required: newer Clang (observed on GitHub's macos-latest runner, not
-        // reproduced with local Xcode 15/AppleClang 15) rejects the `template` disambiguator on a
-        // call that relies purely on argument deduction with no explicit template arguments.
-        root_node()->template traversal_with_priority_and_group_traversal<>(m_primitives, query, traits, m_primitives.size(), 0, group_traversal_bound);
+        root_node()->template traversal_with_priority_and_group_traversal(m_primitives, query, traits, m_primitives.size(), 0, group_traversal_bound);
       }
     }
 

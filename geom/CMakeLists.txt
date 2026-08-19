@@ -22,11 +22,6 @@ target_sources(gecko_geom_lib INTERFACE
 
 # Dependency to other Gecko modules
 target_link_libraries(gecko_geom_lib INTERFACE Gecko::Utils Gecko::Math Gecko::GeomItf Gecko::Mesh Gecko::Io)
-# CGAL::AABB_tree (GPL-3.0-or-later, combinable with Gecko's AGPL-3.0 license under GPLv3/AGPLv3
-# section 13) accelerates FacetedSurface's closest-point queries; see FacetedEntities.h.
-# BUILD_INTERFACE-only: cgal_dep/boost_dep are vendored, non-installed INTERFACE libraries, so
-# they can't be part of gecko_geom_lib's install(EXPORT ...) interface (see CMakeLists.txt below).
-target_link_libraries(gecko_geom_lib INTERFACE $<BUILD_INTERFACE:cgal_dep> $<BUILD_INTERFACE:boost_dep>)
 # Require C++23
 target_compile_features(gecko_geom_lib INTERFACE cxx_std_23)
 # -----------------------------------------------------------------------------
