@@ -311,6 +311,8 @@ TEST_CASE("hex_block_to_mesh_at_s1_can_be_exported_to_vtk_legacy", "[BlockTestSu
     std::ostringstream ss;
     ss << in.rdbuf();
     const std::string content = ss.str();
+    // Close before removing: Windows (unlike POSIX) refuses to delete a file with an open handle.
+    in.close();
     std::filesystem::remove(path);
 
     REQUIRE(content.find("DATASET UNSTRUCTURED_GRID") != std::string::npos);
