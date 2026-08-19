@@ -112,8 +112,10 @@ jobs:
             --ignore-errors unused
 
       - name: Upload to Codecov
+        # No token: the Codecov GitHub App is installed on this repo, which authenticates the
+        # upload on its own — a static CODECOV_TOKEN secret isn't needed (and repeatedly rejected
+        # as "Repository not found" when one was supplied, since it wasn't actually required).
         uses: codecov/codecov-action@v7
         with:
           files: build-coverage/coverage.filtered.info
-          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
