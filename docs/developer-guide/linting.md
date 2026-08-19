@@ -38,8 +38,8 @@ cmake --build build --target format         # rewrites files in place
 The style is defined in `.clang-format` at the repository root (4-space indent, right-aligned
 `&`/`*`, one-statement-per-line, ...) — run `clang-format -i --style=file <file>` on a single file
 if you don't want to reformat everything. It covers the headers and tests
-of the modules currently wired into the build (`utils`, `math`, `geom_itf`, `geom`, `mesh`);
-`block` and `gmds_core` are excluded, matching their exclusion from the build itself (see
+of the modules currently wired into the build (`utils`, `math`, `geom_itf`, `geom`, `mesh`, `io`,
+`block`); `gmds_core` is excluded, matching its exclusion from the build itself (see
 [Project layout](../index.md#project-layout)).
 
 ## Markdown formatting

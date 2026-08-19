@@ -4,7 +4,7 @@
 
 - CMake >= 3.20
 - A C++20/23 compiler (GCC, Clang, MSVC/AppleClang)
-- [Catch2](https://github.com/catchorg/Catch2) v3 — bundled under `external/catch2`, built automatically
+- [Catch2](https://github.com/catchorg/Catch2) v3 — bundled under `external/Catch2`, built automatically
 - For code coverage reports: [`lcov`](https://github.com/linux-test-project/lcov) and `genhtml`
   (installed together, e.g. `brew install lcov` on macOS, `apt install lcov` on Debian/Ubuntu)
 
@@ -97,5 +97,6 @@ The `code_cover_gecko` target resets counters, runs `ctest`, then produces:
 
 !!! note
     Only the modules currently wired into the root `CMakeLists.txt`
-    (`utils`, `math`, `geom_itf`, `mesh`, `geom`) are covered. `block` and `gmds_core` are excluded
-    from the build (see [Project layout](../index.md#project-layout)) and therefore from coverage.
+    (`utils`, `math`, `geom_itf`, `mesh`, `geom`, `io`, `block`) are covered. `gmds_core` is
+    excluded from the build (see [Project layout](../index.md#project-layout)) and therefore from
+    coverage.

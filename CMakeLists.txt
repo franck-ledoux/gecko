@@ -16,6 +16,13 @@ endif()
 # -----------------------------------------------------------------------------
 # Default: ON, can be desactivated with -DGECKO_BUILD_TESTS=OFF
 option(GECKO_BUILD_TESTS "Build the unit test of Gecko components" ON)
+# Builds the sandbox/ scratch executable — a throwaway playground for local development, not
+# installed and not part of the public API/docs. Default: ON, can be desactivated with
+# -DGECKO_BUILD_SANDBOX=OFF
+option(GECKO_BUILD_SANDBOX "Build the gecko_sandbox scratch executable" ON)
+# Builds the python/ pybind11 module and its pytest suite. Default: OFF, since it needs a Python
+# development environment (Python.h) that isn't guaranteed present; CI turns it ON explicitly.
+option(GECKO_BUILD_PYTHON "Build the gecko_py Python bindings and their tests" OFF)
 # Option to activate/desactivate code coverage during unit testing
 option(GECKO_CODE_COVERAGE "Perform code coverage with avail. test suites"               OFF)
 option(GECKO_CODE_COVERAGE_HTML_REPORT "Activate html reporting during code covering"    OFF)
@@ -56,7 +63,12 @@ target_include_directories(json_dep INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/extern
 # Catch2 v3
 set(CATCH_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/catch2)
+add_subdirectory(external/Catch2)
+
+# pybind11 (only pulled in — and only requires a Python dev environment — when actually needed)
+if (GECKO_BUILD_PYTHON)
+    add_subdirectory(external/pybind11)
+endif ()
 
 
 # =====================================================
@@ -190,6 +202,7 @@ if (GECKO_BUILD_LINT)
             ${CMAKE_SOURCE_DIR}/mesh/inc/*.h ${CMAKE_SOURCE_DIR}/mesh/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/io/inc/*.h ${CMAKE_SOURCE_DIR}/io/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/block/inc/*.h ${CMAKE_SOURCE_DIR}/block/tst/*.cpp
+            ${CMAKE_SOURCE_DIR}/python/src/*.cpp
     )
     file(GLOB_RECURSE GECKO_MARKDOWN_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/docs/*.md)
     list(APPEND GECKO_MARKDOWN_SOURCES ${CMAKE_SOURCE_DIR}/README.md)
@@ -266,3 +279,11 @@ add_subdirectory(mesh)
 add_subdirectory(io)
 add_subdirectory(geom)
 add_subdirectory(block)
+
+if (GECKO_BUILD_SANDBOX)
+    add_subdirectory(sandbox)
+endif ()
+
+if (GECKO_BUILD_PYTHON)
+    add_subdirectory(python)
+endif ()

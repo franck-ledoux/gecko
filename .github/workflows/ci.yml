@@ -1,0 +1,82 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Ubuntu's apt package (1.9.8 as of 24.04) mis-parses this codebase's C++20 concept-constrained
+  # templates and reports hundreds of false "undocumented" warnings across whole classes (verified:
+  # 1.9.8/1.10.0/1.12.0 all produce 200+ false positives, 1.13.2 produces 0, matching local dev
+  # environments' modern Doxygen). Pin a real release instead of relying on the distro package.
+  DOXYGEN_VERSION: "1.13.2"
+  # Ubuntu's apt package (18 as of 24.04) predates .clang-format's BreakTemplateDeclarations key
+  # and fails to even parse the config file. Match local dev's clang-format (22.x) via LLVM's own
+  # apt repo instead of the distro package.
+  LLVM_VERSION: "22"
+
+jobs:
+  build-test-lint-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build/lint toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build lcov
+
+      - name: Install pinned clang-format ${{ env.LLVM_VERSION }}
+        # update-alternatives isn't used here: the runner image already registers its own
+        # clang-format alternative (observed to win regardless of priority/--install). Instead,
+        # symlink into a fresh directory prepended to PATH, so it's found first unambiguously.
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          sudo add-apt-repository -y "deb https://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main"
+          sudo apt-get update
+          sudo apt-get install -y "clang-format-${LLVM_VERSION}"
+          mkdir -p "$HOME/.local/pinned-bin"
+          ln -sf "/usr/bin/clang-format-${LLVM_VERSION}" "$HOME/.local/pinned-bin/clang-format"
+          echo "$HOME/.local/pinned-bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned Doxygen ${{ env.DOXYGEN_VERSION }}
+        run: |
+          curl -sL "https://github.com/doxygen/doxygen/releases/download/Release_${DOXYGEN_VERSION//./_}/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz" -o doxygen.tar.gz
+          tar -xzf doxygen.tar.gz
+          echo "$PWD/doxygen-${DOXYGEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install documentation toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: Install Python test toolchain
+        run: pip install -r python/requirements-test.txt
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_PYTHON=ON
+
+      - name: Build
+        # -j2: the standard GitHub-hosted runner has 2 cores/7GB RAM; Ninja's default (nproc) can
+        # schedule enough concurrent heavy CGAL/Boost-template compiles (block/tst in particular) to
+        # exceed that and get cc1plus OOM-killed.
+        run: cmake --build build -j2
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Lint (format, Doxygen completeness, Markdown format)
+        run: cmake --build build --target lint
+
+      - name: Build documentation site
+        run: cmake --build build --target docs

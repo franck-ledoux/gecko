@@ -1,5 +1,9 @@
 # GECKO
 
+[![Build & Test](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+[![Coverage](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml)
+[![codecov](https://codecov.io/gh/franck-ledoux/gecko/graph/badge.svg?token=MA8EPY7I94)](https://codecov.io/gh/franck-ledoux/gecko)
+
 GECKO stands for hi**G**h ord**E**r blo**C**K t**O**olkit. It provides data structures and
 algorithms to easily modify a block structure used for discretizing a geometrical domain with a
 hexahedral mesh.

@@ -16,6 +16,7 @@ very documentation, and how code/docs formatting is enforced.
   CMake targets that keep code and docs consistent.
 - Browse the [API Reference](gecko/annotated.md) for the full class and namespace reference,
   generated directly from the Doxygen comments in the source code.
+- Using Gecko from Python? See the [Python Bindings](user-guide/python.md) user guide.
 
 ## Project layout
 
@@ -34,3 +35,17 @@ and `tst/` (Catch2 unit tests) directories:
 
 `gmds_core` also exists in the repository but is currently disabled in the root `CMakeLists.txt`
 (its `add_subdirectory` call is commented out) and is not part of the build.
+
+## Sandbox
+
+`sandbox/` is a scratch executable (`gecko_sandbox`) for local development — a small, throwaway
+`main.cpp` you're meant to edit freely while trying things out, built by default
+(`-DGECKO_BUILD_SANDBOX=OFF` to skip it). It's not installed, not linked against by any other
+module, and — unlike the modules above — not covered by the `format`/`doc-lint`/API reference
+tooling: nothing in it is public API.
+
+## Python bindings
+
+`python/` builds a `gecko` Python extension module (pybind11), opt-in via `-DGECKO_BUILD_PYTHON=ON`
+— currently an early scaffold, growing over time. See the [Python Bindings](user-guide/python.md)
+guide for how to build it, use it, and run its test suite.

@@ -1,0 +1,89 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build/coverage toolchain
+        # Wrapped in a retry loop with a per-attempt timeout: this step has been observed to hang
+        # indefinitely (not fail — hang) on an otherwise-identical apt-get command that never once
+        # got stuck in the sibling ci.yml workflow, across 3 consecutive fresh-runner attempts.
+        # `timeout` guarantees a stuck attempt gets killed and retried instead of exhausting the
+        # job's multi-hour default timeout.
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 120 sudo apt-get update && timeout 180 sudo apt-get install -y ninja-build lcov; then
+              exit 0
+            fi
+            echo "Attempt ${attempt} failed or timed out; retrying in 15s..."
+            sleep 15
+          done
+          echo "apt-get failed after 3 attempts"
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Python test toolchain
+        run: pip install -r python/requirements-test.txt
+
+      - name: Configure (coverage)
+        # GECKO_CODE_COVERAGE_HTML_REPORT (not just GECKO_CODE_COVERAGE) is what actually defines
+        # the code_cover_gecko target (see testing.md); the HTML output itself is unused here.
+        # GECKO_BUILD_PYTHON=ON: python/src/bindings.cpp inherits the same --coverage instrumentation
+        # as the rest of the library, and test_python (run as part of ctest below) exercises it, so
+        # this one report covers the C++ library, the bindings, and everything the Python tests
+        # reach through them — no separate Python coverage tooling needed (its own glue code is
+        # filtered back out below, same as sandbox/'s — see "Filter" step).
+        run: cmake -S . -B build-coverage -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGECKO_CODE_COVERAGE_HTML_REPORT=ON -DGECKO_BUILD_PYTHON=ON
+
+      - name: Build
+        run: cmake --build build-coverage -j2
+
+      - name: Generate coverage report
+        run: cmake --build build-coverage --target code_cover_gecko
+
+      - name: Filter out vendored/test/scratch paths
+        # code_cover_gecko.info is the *unfiltered* lcov capture: CodeCoverage.cmake's own
+        # COVERAGE_LCOV_EXCLUDES filtering step writes a separate .info.cleaned file that only
+        # feeds genhtml and is then deleted, never overwriting the file it advertises as the
+        # "saved" report. Apply the same exclusions ourselves before uploading — plus python/src
+        # and sandbox/src, neither of which is library code (glue/scratch, not part of the public
+        # API), so their coverage shouldn't count toward the reported rate.
+        run: |
+          lcov --remove build-coverage/code_cover_gecko.info \
+            '/usr/*' '*/external/*' '*/test_data/*' '*/tst/*' '*/docs/*' \
+            '*/python/src/*' '*/sandbox/src/*' \
+            --output-file build-coverage/coverage.filtered.info \
+            --ignore-errors unused
+          # Remove the unfiltered capture so codecov-action's own auto-discovery (see "Upload"
+          # below) can't pick it up alongside the filtered file we actually want uploaded.
+          rm -f build-coverage/code_cover_gecko.info
+
+      - name: Upload to Codecov
+        # No token: the Codecov GitHub App is installed on this repo, which authenticates the
+        # upload on its own — a static CODECOV_TOKEN secret isn't needed (and repeatedly rejected
+        # as "Repository not found" when one was supplied, since it wasn't actually required).
+        # disable_search: true — otherwise codecov-action auto-discovers *any* coverage-looking
+        # file under the checkout (including the since-deleted raw capture, had it still been
+        # there) and uploads it too, silently re-adding everything the filtering above just
+        # removed.
+        uses: codecov/codecov-action@v7
+        with:
+          files: build-coverage/coverage.filtered.info
+          disable_search: true
+          fail_ci_if_error: true
