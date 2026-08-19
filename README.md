@@ -1,12 +1,8 @@
 # GECKO
 
-**Build & Test:** Ubuntu
-[![Ubuntu](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main&job=build-test%20%28ubuntu-latest%29)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
-macOS
-[![macOS](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main&job=build-test%20%28macos-latest%29)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
-Windows
-[![Windows](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml/badge.svg?branch=main&job=build-test%20%28windows-latest%29)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
-<br>
+[![Ubuntu](https://img.shields.io/github/actions/workflow/status/franck-ledoux/gecko/ci.yml?branch=main&event=push&job=build-test%20%28ubuntu-latest%29&label=Ubuntu)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+[![macOS](https://img.shields.io/github/actions/workflow/status/franck-ledoux/gecko/ci.yml?branch=main&event=push&job=build-test%20%28macos-latest%29&label=macOS)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
+[![Windows](https://img.shields.io/github/actions/workflow/status/franck-ledoux/gecko/ci.yml?branch=main&event=push&job=build-test%20%28windows-latest%29&label=Windows)](https://github.com/franck-ledoux/gecko/actions/workflows/ci.yml)
 [![Coverage](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/franck-ledoux/gecko/actions/workflows/coverage.yml)
 [![codecov](https://codecov.io/gh/franck-ledoux/gecko/graph/badge.svg?token=MA8EPY7I94)](https://codecov.io/gh/franck-ledoux/gecko)
 
@@ -36,7 +32,8 @@ and is kept up to date there rather than duplicated here:
 - [Linting & Formatting](docs/developer-guide/linting.md)
 
 For the full experience (searchable, with the API reference generated from the source code
-comments), build and browse the site instead of reading the raw Markdown:
+comments), browse the published site — **<https://franck-ledoux.github.io/gecko/>**, rebuilt from
+`main` on every push — instead of reading the raw Markdown. To build and browse it locally instead:
 
 ```bash
 cmake --build build --target docs-serve   # http://127.0.0.1:8000, live-reloading
