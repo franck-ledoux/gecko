@@ -67,6 +67,9 @@ namespace gecko::biy {
     private:
         /** @brief Registers the model's own facets (triangles, and tets when the file had any). */
         void register_model();
+        /** @brief Freezes the scene's bounding box/length scale to the model, so later edits to
+         * the blocking can't move the ground plane or rescale the view. */
+        void freeze_scene_extents();
         /** @brief Switches what the left mouse button does, turning Polyscope's own navigation on
          * or off to match. */
         void set_mouse_mode(MouseMode mode);

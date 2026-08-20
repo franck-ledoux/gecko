@@ -66,6 +66,17 @@ namespace gecko::biy {
             polyscope::getVolumeMesh(MODEL_VOLUME)->setEnabled(false);
         }
         polyscope::view::resetCameraToHomeView();
+        freeze_scene_extents();
+    }
+
+    void BiyApp::freeze_scene_extents() {
+        // Called once the model is registered, so the scene's bounding box and length scale are the
+        // model's. From here on Polyscope stops recomputing them as structures come and go — which
+        // is what keeps the ground plane still: its height is derived from that bounding box, so
+        // without this, creating a block or dragging one corner outwards slides the ground (and
+        // rescales the view) out from under the model. The blocking is meant to be edited freely;
+        // the scene it's edited in should not move in response.
+        polyscope::options::automaticallyComputeSceneExtents = false;
     }
 
     python::BlockingFacade &BiyApp::blocking() {

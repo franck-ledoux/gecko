@@ -65,6 +65,11 @@ release. Every edge, face and block touching the corner is refitted live, so the
 deforms as you drag. Dragging does not re-classify — run **Classify** afterwards to snap the moved
 corners back onto the geometry.
 
+The scene itself stays put while you edit. Polyscope normally recomputes the scene's bounding box
+and length scale whenever a structure changes, which drags the ground plane along with it — so biy
+freezes both to the model once it's loaded (`options::automaticallyComputeSceneExtents`). Growing a
+block, or pulling a corner far out, no longer shifts the ground or rescales the view.
+
 ## Configuration
 
 At startup biy reads `biy_config.json` from the current directory. The file is optional, and may
