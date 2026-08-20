@@ -42,12 +42,12 @@ window draws, so a change made either way shows up immediately in the other.
 
 ## The panel
 
-| Button | What it does |
-| --- | --- |
-| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin |
-| Build connectivity | Sews coincident blocks together (see `Blocking::build_connectivity`) |
-| Classify | Snaps the blocking onto the model's vertices/curves/surfaces, within the given tolerance |
-| Export VTK | Writes the generated mesh to `biy_blocking.vtk` |
+| Button              | What it does                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin                 |
+| Build connectivity  | Sews coincident blocks together (see `Blocking::build_connectivity`)                     |
+| Classify            | Snaps the blocking onto the model's vertices/curves/surfaces, within the given tolerance |
+| Export VTK          | Writes the generated mesh to `biy_blocking.vtk`                                          |
 
 `subdivisions` controls how finely the blocking is meshed for display and export: `1` shows the raw
 block structure, higher values show the mesh it generates. **Show block edges** draws the block
@@ -59,13 +59,13 @@ curves, as opposed to the subdivision lines of the mesh.
 Block corners are colored by what `classify()` put them on, so the state of a blocking being fitted
 to its model is readable at a glance:
 
-| Corner | Classified on |
-| --- | --- |
+| Corner | Classified on                                                        |
+| ------ | -------------------------------------------------------------------- |
 | Violet | nothing yet — `classify()` hasn't run, or found nothing in tolerance |
-| Yellow | a model vertex |
-| Red | a model curve |
-| Blue | a model surface |
-| Green | a model volume |
+| Yellow | a model vertex                                                       |
+| Red    | a model curve                                                        |
+| Blue   | a model surface                                                      |
+| Green  | a model volume                                                       |
 
 The corner being dragged is drawn white and larger, so it can't be confused with any of these.
 
@@ -82,10 +82,10 @@ The corner being dragged is drawn white and larger, so it can't be confused with
 The left mouse button does one of two things, picked with the **mouse mode** radio buttons at the
 top of the panel or with a keypress:
 
-| Mode | Key | Left button |
-| --- | --- | --- |
+| Mode   | Key | Left button                                     |
+| ------ | --- | ----------------------------------------------- |
 | Camera | `C` | Polyscope's usual navigation: rotate, pan, zoom |
-| Edit | `E` | Picks up a block corner and moves it |
+| Edit   | `E` | Picks up a block corner and moves it            |
 
 The two are a genuine mode rather than a modifier like `Ctrl`+drag, because of how Polyscope is
 built: it processes camera navigation at the top of each frame, *before* the per-frame user
@@ -130,20 +130,20 @@ is a copy of the defaults:
 }
 ```
 
-| Key | Meaning |
-| --- | --- |
-| `corner_radius` | Size of a block corner at rest |
-| `corner_highlight_radius` | Size of the corner being dragged |
-| `corner_highlight_color` | Color of the corner being dragged, RGB in `[0,1]` |
-| `corner_color_unclassified` | Color of a corner not classified onto anything |
-| `corner_color_on_vertex` | Color of a corner classified on a model vertex |
-| `corner_color_on_curve` | Color of a corner classified on a model curve |
-| `corner_color_on_surface` | Color of a corner classified on a model surface |
-| `corner_color_on_volume` | Color of a corner classified on a model volume |
-| `model_transparency` | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
-| `show_block_edges` | Whether block edges are drawn at startup |
-| `block_edge_radius` | Thickness of the block edges |
-| `block_edge_color` | Color of the block edges, RGB in `[0,1]` |
+| Key                         | Meaning                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `corner_radius`             | Size of a block corner at rest                                                           |
+| `corner_highlight_radius`   | Size of the corner being dragged                                                         |
+| `corner_highlight_color`    | Color of the corner being dragged, RGB in `[0,1]`                                        |
+| `corner_color_unclassified` | Color of a corner not classified onto anything                                           |
+| `corner_color_on_vertex`    | Color of a corner classified on a model vertex                                           |
+| `corner_color_on_curve`     | Color of a corner classified on a model curve                                            |
+| `corner_color_on_surface`   | Color of a corner classified on a model surface                                          |
+| `corner_color_on_volume`    | Color of a corner classified on a model volume                                           |
+| `model_transparency`        | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
+| `show_block_edges`          | Whether block edges are drawn at startup                                                 |
+| `block_edge_radius`         | Thickness of the block edges                                                             |
+| `block_edge_color`          | Color of the block edges, RGB in `[0,1]`                                                 |
 
 Radii are Polyscope *relative* values — a fraction of the scene's bounding box — so they stay
 sensible whatever units the model uses.

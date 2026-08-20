@@ -96,7 +96,9 @@ The `code_cover_gecko` target resets counters, runs `ctest`, then produces:
 - `build-coverage/code_cover_gecko/index.html` — the HTML report; open it in a browser.
 
 !!! note
-    Only the modules currently wired into the root `CMakeLists.txt`
-    (`utils`, `math`, `geom_itf`, `mesh`, `geom`, `io`, `block`) are covered. `gmds_core` is
-    excluded from the build (see [Project layout](../index.md#project-layout)) and therefore from
-    coverage.
+    Coverage runs with `-DGECKO_BUILD_PYTHON=ON` (see `.github/workflows/coverage.yml`), so the
+    library modules (`utils`, `math`, `geom_itf`, `mesh`, `geom`, `io`, `block`) and the `python/`
+    bindings are all covered — running the Python test suite exercises the same instrumented C++
+    build as the C++ suites do (see [Python Bindings](../user-guide/python.md#code-coverage)).
+    `biy/` is excluded, since it isn't built in CI at all (see
+    [Project layout](../index.md#project-layout)).

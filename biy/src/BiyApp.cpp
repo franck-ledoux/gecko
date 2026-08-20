@@ -111,15 +111,16 @@ namespace gecko::biy {
         const auto dims = m_blocking->node_classification_dims();
         std::vector<glm::vec3> colors;
         colors.reserve(dims.size());
-        for (const int dim : dims) colors.push_back(to_glm(m_config.color_for(dim)));
+        for (const int dim : dims)
+            colors.push_back(to_glm(m_config.color_for(dim)));
         cloud->addColorQuantity("classification", colors)->setEnabled(true);
 
         if (m_dragged_node) show_highlight(m_dragged_node);
 
         const auto edge_points = m_blocking->edge_vertices(m_edge_samples);
         if (!edge_points.empty()) {
-            auto *edges = polyscope::registerCurveNetwork(BLOCK_EDGES, edge_points,
-                                                          m_blocking->edge_segments(m_edge_samples));
+            auto *edges =
+                polyscope::registerCurveNetwork(BLOCK_EDGES, edge_points, m_blocking->edge_segments(m_edge_samples));
             edges->setRadius(m_config.block_edge_radius);
             edges->setColor(to_glm(m_config.block_edge_color));
             edges->setEnabled(m_show_block_edges);
@@ -184,13 +185,13 @@ namespace gecko::biy {
 
         // HEX8 ordering: bottom perimeter 0-1-2-3, top perimeter 4-5-6-7 directly above.
         const std::vector<std::array<double, 3>> corners{{lo[0], lo[1], lo[2]},
-                                                          {hi[0], lo[1], lo[2]},
-                                                          {hi[0], hi[1], lo[2]},
-                                                          {lo[0], hi[1], lo[2]},
-                                                          {lo[0], lo[1], hi[2]},
-                                                          {hi[0], lo[1], hi[2]},
-                                                          {hi[0], hi[1], hi[2]},
-                                                          {lo[0], hi[1], hi[2]}};
+                                                         {hi[0], lo[1], lo[2]},
+                                                         {hi[0], hi[1], lo[2]},
+                                                         {lo[0], hi[1], lo[2]},
+                                                         {lo[0], lo[1], hi[2]},
+                                                         {hi[0], lo[1], hi[2]},
+                                                         {hi[0], hi[1], hi[2]},
+                                                         {lo[0], hi[1], hi[2]}};
         blocking().create_hex_block(corners);
         refresh_view();
         m_status = "Created bounding box";
@@ -218,9 +219,8 @@ namespace gecko::biy {
         if (ImGui::RadioButton("Camera (C)", m_mode == MouseMode::Camera)) set_mouse_mode(MouseMode::Camera);
         ImGui::SameLine();
         if (ImGui::RadioButton("Edit (E)", m_mode == MouseMode::Edit)) set_mouse_mode(MouseMode::Edit);
-        ImGui::TextWrapped(m_mode == MouseMode::Edit
-                               ? "Drag a block corner to move it. Camera navigation is off."
-                               : "Rotate/pan/zoom the view. Switch to Edit to move corners.");
+        ImGui::TextWrapped(m_mode == MouseMode::Edit ? "Drag a block corner to move it. Camera navigation is off."
+                                                     : "Rotate/pan/zoom the view. Switch to Edit to move corners.");
         ImGui::Separator();
 
         if (ImGui::Button("Create bounding box")) create_bounding_box(0.1);
@@ -314,9 +314,8 @@ namespace gecko::biy {
         if (m_dragged_node) {
             if (io.MouseDown[0]) {
                 const auto current = m_blocking->node_position(*m_dragged_node);
-                const glm::vec3 anchor(static_cast<float>(current[0]),
-                                       static_cast<float>(current[1]),
-                                       static_cast<float>(current[2]));
+                const glm::vec3 anchor(
+                    static_cast<float>(current[0]), static_cast<float>(current[1]), static_cast<float>(current[2]));
                 const glm::vec3 target = screen_to_plane({io.MousePos.x, io.MousePos.y}, anchor);
                 m_blocking->move_node(*m_dragged_node, target.x, target.y, target.z);
                 refresh_view();

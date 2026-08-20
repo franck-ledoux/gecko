@@ -37,10 +37,9 @@ cmake --build build --target format         # rewrites files in place
 
 The style is defined in `.clang-format` at the repository root (4-space indent, right-aligned
 `&`/`*`, one-statement-per-line, ...) — run `clang-format -i --style=file <file>` on a single file
-if you don't want to reformat everything. It covers the headers and tests
-of the modules currently wired into the build (`utils`, `math`, `geom_itf`, `geom`, `mesh`, `io`,
-`block`); `gmds_core` is excluded, matching its exclusion from the build itself (see
-[Project layout](../index.md#project-layout)).
+if you don't want to reformat everything. It covers the headers and tests of the library modules
+(`utils`, `math`, `geom_itf`, `geom`, `mesh`, `io`, `block`), plus every source file under
+`python/src/` and `biy/src/` — the whole first-party C++ tree.
 
 ## Markdown formatting
 
@@ -59,9 +58,11 @@ auto-generated API Reference pages are not part of the repository and are never 
 cmake --build build --target doc-lint
 ```
 
-This runs Doxygen against `Doxyfile.lint` (at the repository root) with `WARN_IF_UNDOCUMENTED`,
-`WARN_IF_DOC_ERROR` and `WARN_NO_PARAMDOC` enabled and `WARN_AS_ERROR = FAIL_ON_WARNINGS`, so it
-fails the build on:
+This runs Doxygen against `Doxyfile.lint` (at the repository root, `INPUT` restricted to the
+library modules' `inc/` directories — `python/src/` and `biy/src/` are internal glue, not public
+API, and are excluded here even though `format`/`format-check` above do cover them) with
+`WARN_IF_UNDOCUMENTED`, `WARN_IF_DOC_ERROR` and `WARN_NO_PARAMDOC` enabled and
+`WARN_AS_ERROR = FAIL_ON_WARNINGS`, so it fails the build on:
 
 - undocumented public classes/structs/members/functions,
 - `@param`/`@tparam` names that don't match the actual signature,
