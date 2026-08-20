@@ -383,6 +383,61 @@ namespace gecko {
             m_cmap.template remove_cell<2>(AFace->dart());
         }
 
+        /**
+         * @brief Rebuilds `AFace`'s stored Coons surface from its *current* 4 boundary edges'
+         * curves — geometry only, no classification change. For an editing operation (e.g.
+         * `FaceCollapse`) that has just reshaped one or more of `AFace`'s boundary edges through
+         * `Blocking`'s public API, this brings `AFace`'s own stored surface back in sync with them
+         * — the same rebuild `classify()` already performs internally for every face as part of
+         * its own full re-classify pass (see `classify_and_rebuild_face()`), exposed here as a
+         * standalone, classification-independent primitive.
+         * @param AFace The face whose surface to rebuild.
+         */
+        void rebuild_face_geometry(Face AFace) {
+            const Dart fd = AFace->dart();
+            std::array<Node, 4> local_nodes{};
+            Dart walk = fd;
+            for (std::size_t c = 0; c < 4; ++c) {
+                local_nodes[c] = m_cmap.template attribute<0>(walk);
+                walk = m_cmap.template beta<1>(walk);
+            }
+
+            std::array<TEdgeCurve, 4> curves{};
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                const int a = node_index(local_nodes, m_cmap.template attribute<0>(it));
+                const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const std::size_t k = find_edge(QUAD_EDGES, a, b);
+                const Edge e = m_cmap.template attribute<1>(it);
+                curves[k] = oriented_curve(e->info().curve,
+                                           local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]->info().point);
+            }
+            AFace->info().surface = coons_surface_from_edges(curves[0], curves[2], curves[3], curves[1]);
+        }
+
+        /**
+         * @brief Builds a straight `TEdgeCurve` between 2 points: `NumControlPoints` control
+         * points, linearly interpolated. Public (rather than an internal-only helper) since every
+         * editing operation that reshapes an edge needs the same "start fresh with a straight
+         * segment" primitive `create_quad_block`/`create_hex_block` already use, e.g. `FaceCollapse`
+         * rebuilding a merged edge's curve.
+         * @param AA Start point (parameter 0).
+         * @param AB End point (parameter 1).
+         * @return The straight curve.
+         */
+        static TEdgeCurve straight_curve(const Point3d &AA, const Point3d &AB) {
+            TEdgeCurve curve;
+            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            const Vector3d ab(AA, AB);
+            for (std::size_t i = 0; i < n; ++i) {
+                const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
+                curve[i] = AA + ab * t;
+            }
+            return curve;
+        }
+
         /** @brief Gives access to the underlying combinatorial map. @return The internal map. */
         Map &cmap() { return m_cmap; }
         /** @copydoc cmap() */
@@ -744,19 +799,7 @@ namespace gecko {
             const auto result = classify_position(GroupDim::Dim2, center, ATolCurveSurface, ATolCurveSurface);
             AFace->info().geom_targets = result.targets;
 
-            std::array<TEdgeCurve, 4> curves{};
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
-                 it != itend;
-                 ++it) {
-                const int a = node_index(local_nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
-                const std::size_t k = find_edge(QUAD_EDGES, a, b);
-                const Edge e = m_cmap.template attribute<1>(it);
-                curves[k] = oriented_curve(e->info().curve,
-                                           local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]->info().point);
-            }
-            AFace->info().surface = coons_surface_from_edges(curves[0], curves[2], curves[3], curves[1]);
+            rebuild_face_geometry(AFace);
         }
 
         /**
@@ -1184,24 +1227,6 @@ namespace gecko {
          * @return The created face.
          */
         Face create_face() { return m_cmap.template create_attribute<2>(); }
-
-        /**
-         * @brief Builds a straight `TEdgeCurve` between 2 points: `NumControlPoints` control
-         * points, linearly interpolated.
-         * @param AA Start point (parameter 0).
-         * @param AB End point (parameter 1).
-         * @return The straight curve.
-         */
-        static TEdgeCurve straight_curve(const Point3d &AA, const Point3d &AB) {
-            TEdgeCurve curve;
-            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
-            const Vector3d ab(AA, AB);
-            for (std::size_t i = 0; i < n; ++i) {
-                const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
-                curve[i] = AA + ab * t;
-            }
-            return curve;
-        }
 
         /**
          * @brief Finds the index of the entry in @p AEdges whose (from,to) pair matches
