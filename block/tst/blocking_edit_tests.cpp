@@ -128,3 +128,36 @@ TEST_CASE("delete_face_on_a_standalone_face_removes_everything", "[BlockTestSuit
     REQUIRE(blocking.nb_cells<1>() == 0);
     REQUIRE(blocking.nb_cells<2>() == 0);
 }
+
+
+TEST_CASE("delete_face_between_3_faces", "[BlockTestSuite]") {
+    const FacetedGeometry geom = make_minimal_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+
+    // Quad A: [0,1]x[0,1]. Quad B: [1,2]x[0,1], Quad C: [2,3]x[0,1]
+    const std::array<Point3d, 4> corners_a = {
+        Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)};
+    const std::array<Point3d, 4> corners_b = {
+        Point3d(1.0, 0.0, 0.0), Point3d(2.0, 0.0, 0.0), Point3d(2.0, 1.0, 0.0), Point3d(1.0, 1.0, 0.0)};
+    const std::array<Point3d, 4> corners_c = {
+        Point3d(2.0, 0.0, 0.0), Point3d(3.0, 0.0, 0.0), Point3d(3.0, 1.0, 0.0), Point3d(2.0, 1.0, 0.0)};
+
+    blocking.create_quad_block(corners_a);
+    const auto face_b = blocking.create_quad_block(corners_b);
+    blocking.create_quad_block(corners_c);
+    blocking.build_connectivity();
+
+    // Baseline, matching blocking_connectivity_tests.cpp's equivalent fixture: 8 nodes, 8 edges, 2 faces.
+    REQUIRE(blocking.nb_cells<0>() == 8);
+    REQUIRE(blocking.nb_cells<1>() == 10);
+    REQUIRE(blocking.nb_cells<2>() == 3);
+
+    REQUIRE(blocking.can_delete_face(face_b));
+    blocking.delete_face(face_b);
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.nb_cells<0>() == 8);
+    REQUIRE(blocking.nb_cells<1>() == 8);
+    REQUIRE(blocking.nb_cells<2>() == 2);
+
+}
