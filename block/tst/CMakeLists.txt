@@ -5,7 +5,8 @@ add_executable(test_block
         blocking_curve_evaluation_tests.cpp
         blocking_edit_tests.cpp
         blocking_mesh_generation_tests.cpp
-        cell_data_tests.cpp)
+        cell_data_tests.cpp
+        face_collapse_tests.cpp)
 target_link_libraries(test_block PRIVATE
     Gecko::Block
     Gecko::Geom
