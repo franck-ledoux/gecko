@@ -61,6 +61,44 @@ namespace gecko::python {
 
     int GeomModelFacade::group_dim(int id) const { return static_cast<int>(find_group(*m_model, id).dimension); }
 
+    std::vector<std::array<double, 3>> GeomModelFacade::mesh_vertices() const {
+        const auto &mesh = m_model->mesh();
+        std::vector<std::array<double, 3>> vertices;
+        vertices.reserve(mesh.nb_nodes());
+        for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+            const auto &p = mesh.node(NodeId{i});
+            vertices.push_back({p.x(), p.y(), p.z()});
+        }
+        return vertices;
+    }
+
+    std::vector<std::array<int, 3>> GeomModelFacade::mesh_triangles() const {
+        const auto &mesh = m_model->mesh();
+        std::vector<std::array<int, 3>> triangles;
+        triangles.reserve(mesh.nb_faces());
+        for (UInt i = 0; i < mesh.nb_faces(); ++i) {
+            const auto nodes = mesh.face_nodes(FaceId{i});
+            triangles.push_back({static_cast<int>(nodes[0].value),
+                                 static_cast<int>(nodes[1].value),
+                                 static_cast<int>(nodes[2].value)});
+        }
+        return triangles;
+    }
+
+    std::vector<std::array<int, 4>> GeomModelFacade::mesh_tets() const {
+        const auto &mesh = m_model->mesh();
+        std::vector<std::array<int, 4>> tets;
+        tets.reserve(mesh.nb_cells());
+        for (UInt i = 0; i < mesh.nb_cells(); ++i) {
+            const auto nodes = mesh.cell_nodes(CellId{i});
+            tets.push_back({static_cast<int>(nodes[0].value),
+                            static_cast<int>(nodes[1].value),
+                            static_cast<int>(nodes[2].value),
+                            static_cast<int>(nodes[3].value)});
+        }
+        return tets;
+    }
+
     std::vector<std::pair<int, int>> GeomModelFacade::group_entities(int id) const {
         std::vector<std::pair<int, int>> result;
         if (id < 0) return result;

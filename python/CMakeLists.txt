@@ -7,6 +7,7 @@ find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
 pybind11_add_module(gecko
         src/bindings.cpp
+        src/PyGeckoBindings.cpp
         src/GeomModelFacade.cpp
         src/BlockingFacade.cpp
 )

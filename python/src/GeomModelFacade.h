@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -70,6 +71,24 @@ namespace gecko::python {
          *         a known group id.
          */
         [[nodiscard]] std::vector<std::pair<int, int>> group_entities(int id) const;
+
+        /**
+         * @brief Gets the positions of every node of the model's backing (faceted) mesh.
+         * @return One (x,y,z) triple per node, indexable by the indices mesh_triangles()/
+         *         mesh_tets() return.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> mesh_vertices() const;
+        /**
+         * @brief Gets the triangles of the model's backing mesh.
+         * @return One triple of mesh_vertices() indices per triangle; empty if the model has none.
+         */
+        [[nodiscard]] std::vector<std::array<int, 3>> mesh_triangles() const;
+        /**
+         * @brief Gets the tetrahedra of the model's backing mesh.
+         * @return One quadruple of mesh_vertices() indices per tetrahedron; empty if the model was
+         *         read from a boundary-representation (triangles-only) file.
+         */
+        [[nodiscard]] std::vector<std::array<int, 4>> mesh_tets() const;
 
         /**
          * @brief Gives access to the wrapped model. Not exposed to Python — used only by

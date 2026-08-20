@@ -127,6 +127,14 @@ namespace gecko {
         }
 
         /**
+         * @brief Gives access to the backing mesh every entity of this model was reconstructed
+         * from — the triangles/tetrahedra themselves, as opposed to the entities grouping them.
+         * Needed to display the model (see biy/) or otherwise consume its raw facets.
+         * @return The backing mesh.
+         */
+        [[nodiscard]] const SimplicialMesh &mesh() const noexcept { return *m_mesh; }
+
+        /**
          * @brief Gets a zero-copy view onto every physical group of the model, regardless of dimension.
          * @return A span of groups.
          */
