@@ -1,13 +1,17 @@
 # Python Bindings
 
 Gecko ships a `gecko` Python extension module built with [pybind11](https://pybind11.readthedocs.io/).
-It's currently an early scaffold — enough to prove the build/test/coverage/documentation pipeline
-works end-to-end — rather than a full binding of the C++ API; the surface area will grow from here.
+Rather than binding every internal C++ class, it exposes a small number of **façade manager
+classes** — `GeomModel` and `Blocking` today — in the spirit of
+[gmsh's Python API](https://gmsh.info/doc/texinfo/gmsh.html#Gmsh-API): every façade method takes
+and returns only primitive types (`str`, `int`, `float`, and lists/tuples of those). Internal C++
+types (`Point3d`, CGAL dart/attribute handles, `UnstructuredMesh`, ...) never cross into Python;
+faces and blocks are identified to Python solely by plain `int` ids assigned by the façade.
 
 !!! note
-    This page, and the example on it, is exercised by [`python/tst/test_hello.py`](https://github.com/franck-ledoux/gecko/blob/main/python/tst/test_hello.py),
-    which CI runs on every push. If this page and the actual behavior ever drift apart, that test
-    (and therefore CI) fails — so what's documented here is always what the code actually does.
+    This page, and the examples on it, are exercised by [`python/tst/`](https://github.com/franck-ledoux/gecko/tree/main/python/tst),
+    which CI runs on every push. If this page and the actual behavior ever drift apart, those tests
+    (and therefore CI) fail — so what's documented here is always what the code actually does.
 
 ## Building
 
@@ -32,6 +36,50 @@ PYTHONPATH=build/python python3 -c "import gecko; print(gecko.hello())"
 
 ```
 Hello from gecko!
+```
+
+### GeomModel
+
+`GeomModel` loads a geometric model from a Gmsh MSH file (triangles for a boundary representation,
+tetrahedra to also reconstruct volumes) and lets you inspect its entities and physical groups:
+
+```python
+import gecko
+
+model = gecko.GeomModel("my_model.msh")
+print(model.nb_vertices(), model.nb_curves(), model.nb_surfaces(), model.nb_volumes())
+print(model.surface_tags())          # e.g. [1, 2, 3]
+
+for group_id in model.group_ids():
+    print(model.group_name(group_id), model.group_dim(group_id))
+    print(model.group_entities(group_id))  # [(dim, entity_tag), ...]
+```
+
+### Blocking
+
+`Blocking` builds a structured quad/hex blocking against a `GeomModel`. Block corners are passed
+as lists of `(x, y, z)` tuples; created faces/blocks are identified by the `int` id `Blocking`
+hands back. `degree=1` (the default) gives straight edges; `degree=3` gives cubic-Bezier edges that
+`classify()` can bend onto curved geometry.
+
+```python
+import gecko
+
+model = gecko.GeomModel("my_model.msh")
+blocking = gecko.Blocking(model)  # model must stay alive for as long as blocking is used
+
+face_a = blocking.create_quad_block([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)])
+face_b = blocking.create_quad_block([(1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)])
+blocking.build_connectivity()  # sews the shared edge between face_a and face_b
+
+blocking.classify(tol_vertex=1e-6)  # snap onto model's vertices/curves/surfaces
+
+print(blocking.nb_cells(2), blocking.is_valid_topology())
+
+if blocking.can_delete_face(face_a):
+    blocking.delete_face(face_a)
+
+blocking.write_vtk(subdivisions=4, path="blocking.vtk")
 ```
 
 ## Running the tests
