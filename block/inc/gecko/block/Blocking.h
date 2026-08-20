@@ -793,12 +793,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Rebuilds one face's stored surface via `coons_surface_from_edges()` from its 4
-         * boundary edges' current curves, leaving its classification untouched — the pure-geometry
-         * half of `classify_and_rebuild_face()`, also used on its own by `move_node()`.
-         * @param AFace The face to rebuild.
-         */
-        /**
          * @brief Checks whether @p ANode is one of @p AFace's 4 corners.
          * @param AFace The face to inspect.
          * @param ANode The node to look for.
@@ -830,6 +824,12 @@ namespace gecko {
             return false;
         }
 
+        /**
+         * @brief Rebuilds one face's stored surface via `coons_surface_from_edges()` from its 4
+         * boundary edges' current curves, leaving its classification untouched — the pure-geometry
+         * half of `classify_and_rebuild_face()`, also used on its own by `move_node()`.
+         * @param AFace The face to rebuild.
+         */
         void rebuild_face_surface(Face AFace) {
             const Dart fd = AFace->dart();
             std::array<Node, 4> local_nodes{};

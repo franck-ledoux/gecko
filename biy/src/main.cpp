@@ -27,7 +27,8 @@ int main(int argc, char **argv) {
         // Verification aid: render a few frames, save what the window shows, and exit — lets the
         // rendering path be checked without a human at the keyboard.
         if (const char *shot = std::getenv("BIY_SCREENSHOT")) {
-            for (int i = 0; i < 5; ++i) polyscope::frameTick();
+            for (int i = 0; i < 5; ++i)
+                polyscope::frameTick();
             polyscope::screenshot(shot);
             console.stop();
             std::cout << "Wrote screenshot to " << shot << " — press Enter to exit.\n" << std::flush;

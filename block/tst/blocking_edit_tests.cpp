@@ -129,7 +129,6 @@ TEST_CASE("delete_face_on_a_standalone_face_removes_everything", "[BlockTestSuit
     REQUIRE(blocking.nb_cells<2>() == 0);
 }
 
-
 TEST_CASE("delete_face_between_3_faces", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_minimal_geom_model();
     Blocking<FacetedGeometry> blocking(geom);
@@ -159,5 +158,4 @@ TEST_CASE("delete_face_between_3_faces", "[BlockTestSuite]") {
     REQUIRE(blocking.nb_cells<0>() == 8);
     REQUIRE(blocking.nb_cells<1>() == 8);
     REQUIRE(blocking.nb_cells<2>() == 2);
-
 }

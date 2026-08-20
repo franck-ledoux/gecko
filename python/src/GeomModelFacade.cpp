@@ -16,35 +16,40 @@ namespace gecko::python {
     std::vector<int> GeomModelFacade::vertex_tags() const {
         std::vector<int> tags;
         tags.reserve(m_model->nb_vertices());
-        for (const auto &v : m_model->vertices()) tags.push_back(v.entity_tag());
+        for (const auto &v : m_model->vertices())
+            tags.push_back(v.entity_tag());
         return tags;
     }
 
     std::vector<int> GeomModelFacade::curve_tags() const {
         std::vector<int> tags;
         tags.reserve(m_model->nb_curves());
-        for (const auto &c : m_model->curves()) tags.push_back(c.entity_tag());
+        for (const auto &c : m_model->curves())
+            tags.push_back(c.entity_tag());
         return tags;
     }
 
     std::vector<int> GeomModelFacade::surface_tags() const {
         std::vector<int> tags;
         tags.reserve(m_model->nb_surfaces());
-        for (const auto &s : m_model->surfaces()) tags.push_back(s.entity_tag());
+        for (const auto &s : m_model->surfaces())
+            tags.push_back(s.entity_tag());
         return tags;
     }
 
     std::vector<int> GeomModelFacade::volume_tags() const {
         std::vector<int> tags;
         tags.reserve(m_model->nb_volumes());
-        for (const auto &v : m_model->volumes()) tags.push_back(v.entity_tag());
+        for (const auto &v : m_model->volumes())
+            tags.push_back(v.entity_tag());
         return tags;
     }
 
     std::vector<int> GeomModelFacade::group_ids() const {
         std::vector<int> ids;
         ids.reserve(m_model->groups().size());
-        for (const auto &g : m_model->groups()) ids.push_back(static_cast<int>(g.id.value));
+        for (const auto &g : m_model->groups())
+            ids.push_back(static_cast<int>(g.id.value));
         return ids;
     }
 
@@ -78,9 +83,8 @@ namespace gecko::python {
         triangles.reserve(mesh.nb_faces());
         for (UInt i = 0; i < mesh.nb_faces(); ++i) {
             const auto nodes = mesh.face_nodes(FaceId{i});
-            triangles.push_back({static_cast<int>(nodes[0].value),
-                                 static_cast<int>(nodes[1].value),
-                                 static_cast<int>(nodes[2].value)});
+            triangles.push_back(
+                {static_cast<int>(nodes[0].value), static_cast<int>(nodes[1].value), static_cast<int>(nodes[2].value)});
         }
         return triangles;
     }
@@ -103,8 +107,9 @@ namespace gecko::python {
         std::vector<std::pair<int, int>> result;
         if (id < 0) return result;
         for (const auto &entity : m_model->entities(GroupId{static_cast<std::uint32_t>(id)})) {
-            std::visit([&result](const auto *e) { result.emplace_back(static_cast<int>(e->dimension()), e->entity_tag()); },
-                       entity);
+            std::visit(
+                [&result](const auto *e) { result.emplace_back(static_cast<int>(e->dimension()), e->entity_tag()); },
+                entity);
         }
         return result;
     }
