@@ -974,7 +974,158 @@ namespace gecko {
             samples[0] = p0;
             samples[n - 1] = p1;
 
+            // On a curve the geometry also dictates which *direction* the edge must leave its ends
+            // in, and honouring that matters as much as passing through the right points — a fit
+            // free to choose its end tangents picks badly wrong ones (~30 degrees out on a plain
+            // circular arc). On a surface there is no single such direction, so plain interpolation
+            // stands.
+            if (result.nearest_dim == GroupDim::Dim1) {
+                const auto *curve = m_geom_model->curve_by_tag(result.nearest_tag);
+                if (curve != nullptr) {
+                    // Far more samples than there are unknowns, and parameterized by their own
+                    // spacing rather than uniformly: a point projected from the chord at parameter
+                    // `t` does not sit at parameter `t` along the geometry, and assuming it does
+                    // biases the fit (it leaves the tangents pointing the right way but too short).
+                    std::vector<Point3d> dense;
+                    dense.reserve(4 * n);
+                    for (std::size_t i = 0; i < 4 * n; ++i) {
+                        const double t = static_cast<double>(i) / static_cast<double>(4 * n - 1);
+                        Point3d s = p0 + chord * t;
+                        project_onto(result.nearest_dim, result.nearest_tag, s);
+                        dense.push_back(s);
+                    }
+                    dense.front() = p0;
+                    dense.back() = p1;
+
+                    AEdge->info().curve = tangent_constrained_curve(dense,
+                                                                    chord_length_parameters(dense),
+                                                                    oriented_tangent(curve->tangent(p0), chord),
+                                                                    oriented_tangent(curve->tangent(p1), chord));
+                    return;
+                }
+            }
             AEdge->info().curve = interpolating_curve(samples);
+        }
+
+        /**
+         * @brief Assigns each of @p APoints a curve parameter in `[0,1]` proportional to the
+         * distance travelled along them — the standard chord-length parameterization, which matches
+         * where points actually fall along a curve far better than spacing them uniformly.
+         * @param APoints The sample points, in order.
+         * @return One parameter per point, starting at 0 and ending at 1. All zero for a degenerate
+         *         (zero-length) sample run.
+         */
+        static std::vector<double> chord_length_parameters(const std::vector<Point3d> &APoints) {
+            std::vector<double> parameters(APoints.size(), 0.0);
+            for (std::size_t i = 1; i < APoints.size(); ++i) {
+                parameters[i] = parameters[i - 1] + Vector3d(APoints[i - 1], APoints[i]).norm();
+            }
+            const double total = parameters.back();
+            if (total <= 0.0) return parameters;
+            for (double &p : parameters) {
+                p /= total;
+            }
+            return parameters;
+        }
+
+        /**
+         * @brief Flips @p ATangent, whose sign is arbitrary (see `FacetedCurve::tangent()`), to
+         * travel the same way as @p AChord.
+         * @param ATangent The tangent to orient.
+         * @param AChord The direction of travel along the edge.
+         * @return The oriented tangent.
+         */
+        static Vector3d oriented_tangent(const Vector3d &ATangent, const Vector3d &AChord) {
+            return (ATangent.dot(AChord) < 0.0) ? -ATangent : ATangent;
+        }
+
+        /**
+         * @brief Builds the curve leaving @p ASamples' 2 endpoints along @p AStartTangent and
+         * @p AEndTangent, fitted as closely as possible to the interior samples.
+         *
+         * The end tangents are imposed exactly by construction: a Bezier's start tangent is
+         * `P1 - P0` and its end tangent `Pn - P(n-1)`, so pinning `P1 = P0 + a * AStartTangent` and
+         * `P(n-1) = Pn - b * AEndTangent` fixes both directions whatever `a` and `b` turn out to be.
+         * Those 2 lengths are then the only freedom left (for degree 3; higher degrees keep their
+         * extra middle control points free too), and are chosen by least squares against the
+         * interior samples — the classic tangent-constrained Bezier fit.
+         *
+         * @param ASamples The points to fit, first and last being the endpoints.
+         * @param AParameters The curve parameter each sample should be reproduced at, one per entry
+         *        of @p ASamples — see `chord_length_parameters()`.
+         * @param AStartTangent Unit direction the curve must leave `ASamples.front()` in.
+         * @param AEndTangent Unit direction the curve must arrive at `ASamples.back()` in.
+         * @return The fitted curve. Falls back to plain interpolation if either tangent is null (a
+         *         degenerate faceting) or the fit is singular.
+         */
+        static TEdgeCurve tangent_constrained_curve(const std::vector<Point3d> &ASamples,
+                                                    const std::vector<double> &AParameters,
+                                                    const Vector3d &AStartTangent,
+                                                    const Vector3d &AEndTangent) {
+            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            constexpr std::size_t degree = n - 1;
+            std::array<Point3d, n> ends{};
+            ends[0] = ASamples.front();
+            ends[n - 1] = ASamples.back();
+            if constexpr (n < 3) {
+                return interpolating_curve(ends);
+            } else {
+                if (AStartTangent.norm_sq() < 1e-24 || AEndTangent.norm_sq() < 1e-24) {
+                    return interpolating_curve(ends);
+                }
+
+                const Point3d &p0 = ASamples.front();
+                const Point3d &pn = ASamples.back();
+
+                // Least squares over the interior samples for the 2 tangent lengths. Each sample
+                // contributes its 3 coordinates, so even degree 3 (2 unknowns) is overdetermined.
+                double ata[2][2] = {{0.0, 0.0}, {0.0, 0.0}};
+                double atb[2] = {0.0, 0.0};
+                for (std::size_t i = 1; i + 1 < ASamples.size(); ++i) {
+                    const double t = AParameters[i];
+                    // B(t) = base(t) + a * B_1(t) * start - b * B_(n-2)(t) * end, with everything
+                    // that does not depend on a or b gathered into base(t).
+                    const double ca = bernstein(degree, 1, t);
+                    const double cb = -bernstein(degree, degree - 1, t);
+                    Vector3d base = Vector3d(Point3d(0, 0, 0), p0) * (bernstein(degree, 0, t) + ca) +
+                                    Vector3d(Point3d(0, 0, 0), pn) * (bernstein(degree, degree, t) - cb);
+                    // Degree 4 and up keep middle control points of their own; leaving them on the
+                    // chord keeps this a 2-unknown fit while the ends stay exact.
+                    for (std::size_t j = 2; j + 2 < n; ++j) {
+                        const double s = static_cast<double>(j) / static_cast<double>(degree);
+                        const Point3d mid = p0 + Vector3d(p0, pn) * s;
+                        base += Vector3d(Point3d(0, 0, 0), mid) * bernstein(degree, j, t);
+                    }
+
+                    const Vector3d residual = Vector3d(Point3d(0, 0, 0), ASamples[i]) - base;
+                    const Vector3d da = AStartTangent * ca;
+                    const Vector3d db = AEndTangent * cb;
+                    ata[0][0] += da.dot(da);
+                    ata[0][1] += da.dot(db);
+                    ata[1][0] += db.dot(da);
+                    ata[1][1] += db.dot(db);
+                    atb[0] += da.dot(residual);
+                    atb[1] += db.dot(residual);
+                }
+
+                const double det = ata[0][0] * ata[1][1] - ata[0][1] * ata[1][0];
+                if (std::abs(det) < 1e-18) {
+                    return interpolating_curve(ends);
+                }
+                const double a = (atb[0] * ata[1][1] - ata[0][1] * atb[1]) / det;
+                const double b = (ata[0][0] * atb[1] - atb[0] * ata[1][0]) / det;
+
+                TEdgeCurve fitted;
+                fitted[0] = p0;
+                fitted[n - 1] = pn;
+                fitted[1] = p0 + AStartTangent * a;
+                fitted[n - 2] = pn - AEndTangent * b;
+                for (std::size_t j = 2; j + 2 < n; ++j) {
+                    const double s = static_cast<double>(j) / static_cast<double>(degree);
+                    fitted[j] = p0 + Vector3d(p0, pn) * s;
+                }
+                return fitted;
+            }
         }
 
         /**

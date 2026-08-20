@@ -1,4 +1,6 @@
 #include <array>
+#include <cmath>
+#include <numbers>
 #include <filesystem>
 #include <utility>
 #include <vector>
@@ -233,16 +235,9 @@ TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[Bloc
     const auto *curve = geom.curve_by_tag(10);
     REQUIRE(curve != nullptr);
 
-    // The exact guarantee interpolation buys: the curve *passes through* the points sampled on the
-    // geometry, at the parameters they were sampled at. Projecting the control points instead would
-    // leave the curve bowed strictly inside them, touching the geometry only at its 2 endpoints.
-    REQUIRE(curve->distance(e->info().curve.value(1.0 / 3.0)) == Approx(0.0).margin(1e-9));
-    REQUIRE(curve->distance(e->info().curve.value(2.0 / 3.0)) == Approx(0.0).margin(1e-9));
-
-    // Between those parameters it can only approximate: the samples are projections of evenly
-    // spaced chord points, which all land on the polyline's flanks, so no smooth cubic through them
-    // reaches the apex. Measure that residual against what projecting the control points would have
-    // given on the very same edge, rather than trusting a hand-picked threshold.
+    // No smooth cubic reproduces this polyline's kink, so the fit can only approximate it. Measure
+    // that residual against what projecting the control points would have given on the very same
+    // edge, rather than trusting a hand-picked threshold.
     const auto worst_distance = [&curve](const BezierCurve<3, Point3d> &ACurve) {
         double worst = 0.0;
         for (int i = 0; i <= 50; ++i) {
@@ -271,7 +266,77 @@ TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[Bloc
     REQUIRE(fitted_error < projected_error);
 
     // And it really is bent: the straight chord it started as passes 0.25 from the apex.
-    REQUIRE(e->info().curve.value(0.5).y() > 0.15);
+    REQUIRE(e->info().curve.value(0.5).y() > 0.14);
+}
+
+TEST_CASE("a_curved_edge_leaves_its_ends_along_the_geometric_curve", "[BlockTestSuite]") {
+    // A quarter circle of radius 1, finely faceted: smooth, like real CAD, and with a tangent known
+    // in closed form — at (cos a, sin a) it is (-sin a, cos a).
+    constexpr int SEGMENTS = 64;
+    SimplicialMesh mesh;
+    std::vector<NodeId> arc;
+    for (int i = 0; i <= SEGMENTS; ++i) {
+        const double a = (std::numbers::pi / 2.0) * static_cast<double>(i) / SEGMENTS;
+        arc.push_back(mesh.add_node(std::cos(a), std::sin(a), 0));
+    }
+    const auto apex = mesh.add_node(2, 2, 0);
+
+    GroupRegistry groups;
+    const auto vtx_group = groups.add_group("Vertices", GroupDim::Dim0);
+    const auto curve_group = groups.add_group("Curves", GroupDim::Dim1);
+    const auto surf_group = groups.add_group("Surf", GroupDim::Dim2);
+
+    auto &node_group = mesh.add_variable<GroupId, CellType::Node>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+    auto &node_entity = mesh.add_variable<Int, CellType::Node>(std::string(io::ENTITY_TAG_VARIABLE));
+    node_group[arc.front().value] = vtx_group;
+    node_entity[arc.front().value] = 1;
+    node_group[arc.back().value] = vtx_group;
+    node_entity[arc.back().value] = 2;
+
+    auto &edge_group = mesh.add_variable<GroupId, CellType::Edge>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+    auto &edge_entity = mesh.add_variable<Int, CellType::Edge>(std::string(io::ENTITY_TAG_VARIABLE));
+    auto &face_group = mesh.add_variable<GroupId, CellType::Face>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+    auto &face_entity = mesh.add_variable<Int, CellType::Face>(std::string(io::ENTITY_TAG_VARIABLE));
+    for (int i = 0; i < SEGMENTS; ++i) {
+        auto e = mesh.add_edge(arc[i], arc[i + 1]);
+        edge_group[e.value] = curve_group;
+        edge_entity[e.value] = 10;
+        auto f = mesh.add_face(arc[i], arc[i + 1], apex);
+        face_group[f.value] = surf_group;
+        face_entity[f.value] = 20;
+    }
+
+    const auto path = (std::filesystem::temp_directory_path() / "gecko_block_arc_test.msh").string();
+    io::SimplicialMeshWriter::write(path, mesh, groups);
+    const FacetedGeometry geom(path);
+    std::filesystem::remove(path);
+
+    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    blocking.create_quad_block({Point3d(1, 0, 0), Point3d(0, 1, 0), Point3d(2, 2, 0), Point3d(2, 0, 0)});
+    // Grabbed before classifying, since snapping nudges the corner onto the arc's own end node —
+    // which sits at (cos(pi/2), sin(pi/2)), not exactly (0,1,0), and so no longer matches by value.
+    const auto e = edge_between(blocking, Point3d(1, 0, 0), Point3d(0, 1, 0));
+    blocking.classify(1e-6, 0.5, 0.5);
+
+    REQUIRE(e->info().geom_targets[0] == std::pair{GroupDim::Dim1, Int{10}});
+
+    // A Bezier leaves its start along P1-P0. Interpolating positions alone leaves that direction
+    // unconstrained, and it comes out ~30 degrees off here; the fit pins it to the geometry's own
+    // tangent instead. What is left is the faceting's angular resolution: 90 degrees over 64
+    // segments means a chord direction sits ~0.7 degrees off the true tangent.
+    const auto &cp = e->info().curve.control_points();
+    const Vector3d start = Vector3d(cp[0], cp[1]).normalized();
+    const Vector3d end = Vector3d(cp[2], cp[3]).normalized();
+    REQUIRE(start.dot(Vector3d(0, 1, 0)) > std::cos(1.5 * std::numbers::pi / 180.0));
+    REQUIRE(end.dot(Vector3d(-1, 0, 0)) > std::cos(1.5 * std::numbers::pi / 180.0));
+
+    // Getting the ends right is most of getting the shape right: the worst deviation over the whole
+    // span measures 0.006 on this unit-radius arc, against 0.034 for a fit free to pick its own end
+    // tangents.
+    const auto *curve = geom.curve_by_tag(10);
+    for (int i = 0; i <= 100; ++i) {
+        REQUIRE(curve->distance(e->info().curve.value(static_cast<double>(i) / 100.0)) < 0.01);
+    }
 }
 
 TEST_CASE("snap_node_leaves_cells_it_does_not_touch_alone", "[BlockTestSuite]") {

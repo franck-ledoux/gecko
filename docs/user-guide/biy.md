@@ -111,12 +111,19 @@ point is simply a block corner.
 Expect the lattice to stick out beyond the block it drives — a Bezier lies inside the convex hull of
 its control points, not through them, so the handles sit outside the shape they bend.
 
-That same property is why classification **interpolates** rather than projecting control points onto
-the geometry. Moving a control point onto a geometric curve does not put the *curve* there: it
+That same property is why classification **fits** the edge rather than projecting its control points
+onto the geometry. Moving a control point onto a geometric curve does not put the *curve* there: it
 passes through its 2 endpoints only, staying strictly inside its handles, and so ends up bowed short
 of the geometry it should follow. `classify()` instead samples points on the geometry and solves for
-the control points that make the edge pass through them — which is exactly why the handles you see
-do not lie on the model.
+the control points that reproduce them — which is exactly why the handles you see do not lie on the
+model.
+
+An edge classified on a **curve** additionally leaves each of its ends along that curve's own
+tangent there, since the first handle's direction *is* the curve's starting direction. Fitting
+positions alone leaves those directions free, and they come out badly wrong — about 30° off on a
+plain circular arc, which shows up as handles splaying away from the geometry instead of running
+alongside it. A surface has no single such direction, so edges classified on one are fitted by
+position only.
 
 !!! note
     Green (volume) is not one of the four states you might expect, but `classify()` does produce it,

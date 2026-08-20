@@ -74,6 +74,10 @@ namespace gecko {
             {
                 model.curve_by_tag(tag)
             } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().curves())> *>;
+            // Curves alone must also report a direction: fitting a curved block edge onto one needs
+            // its tangent at the edge's ends, and unlike a point projection there is no meaningful
+            // counterpart of this on a vertex, surface or volume.
+            { model.curve_by_tag(tag)->tangent(std::declval<const Point3d &>()) } -> std::same_as<Vector3d>;
             {
                 model.surface_by_tag(tag)
             } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().surfaces())> *>;

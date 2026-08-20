@@ -129,6 +129,37 @@ namespace gecko {
          */
         [[nodiscard]] double distance(const Point3d &p) const { return Vector3d(closest_point(p), p).norm(); }
 
+        /**
+         * @brief Gets the unit direction of this curve at the point of it closest to @p p.
+         *
+         * The direction of the polyline segment carrying that closest point, so it approximates the
+         * true tangent to within the faceting's own angular resolution. Its **sign is arbitrary** —
+         * the segment's own node order, which carries no meaning here — so callers wanting a
+         * tangent oriented along some travel direction must flip it themselves.
+         *
+         * Needed to fit a curved block edge whose *ends* meet a geometric curve at the right angle
+         * (see `Blocking::refit_edge()`); interpolating positions alone leaves the tangents free to
+         * come out badly wrong.
+         *
+         * @param p Query point.
+         * @return The unit direction, or the null vector if the closest segment is degenerate.
+         */
+        [[nodiscard]] Vector3d tangent(const Point3d &p) const {
+            double best = std::numeric_limits<double>::max();
+            Vector3d direction;
+            for (EdgeId e : m_edges) {
+                const auto nodes = m_mesh->edge_nodes(e);
+                const Point3d a = m_mesh->node(nodes[0]);
+                const Point3d b = m_mesh->node(nodes[1]);
+                const double d = Vector3d(closest_point_on_segment(p, a, b), p).norm();
+                if (d < best) {
+                    best = d;
+                    direction = Vector3d(a, b);
+                }
+            }
+            return direction.normalized();
+        }
+
         /** @brief Gets the topological dimension of this entity. @return GroupDim::Dim1. */
         [[nodiscard]] constexpr GroupDim dimension() const noexcept { return GroupDim::Dim1; }
 
