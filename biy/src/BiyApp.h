@@ -7,10 +7,22 @@
 
 #include <glm/glm.hpp>
 
+#include "BiyConfig.h"
 #include "BlockingFacade.h"
 #include "GeomModelFacade.h"
 
 namespace gecko::biy {
+
+    /**
+     * @brief What the left mouse button does. Polyscope processes its own camera navigation
+     * *before* the per-frame user callback runs, so a drag can't be intercepted after the fact —
+     * navigation has to be switched off ahead of time, which makes this a genuine mode rather than
+     * a per-event decision.
+     */
+    enum class MouseMode {
+        Camera, ///< Polyscope's usual navigation: rotate/pan/zoom the view.
+        Edit    ///< Navigation off; dragging picks up and moves a block corner.
+    };
 
     /**
      * @class BiyApp
@@ -55,6 +67,11 @@ namespace gecko::biy {
     private:
         /** @brief Registers the model's own facets (triangles, and tets when the file had any). */
         void register_model();
+        /** @brief Switches what the left mouse button does, turning Polyscope's own navigation on
+         * or off to match. */
+        void set_mouse_mode(MouseMode mode);
+        /** @brief Shows the drag highlight on one corner, or hides it when @p ANodeId is unset. */
+        void show_highlight(std::optional<int> node_id);
         /** @brief Creates a hex block spanning the model's bounding box, scaled by @p AMargin. */
         void create_bounding_box(double margin);
         /** @brief Draws the button panel. Assumes the ImGui frame is already set up. */
@@ -65,9 +82,12 @@ namespace gecko::biy {
         static glm::vec3 screen_to_plane(glm::vec2 screen_coords, const glm::vec3 &anchor);
 
         std::mutex m_mutex;
+        BiyConfig m_config;
         std::unique_ptr<python::GeomModelFacade> m_model;
         std::unique_ptr<python::BlockingFacade> m_blocking;
         std::string m_model_path;
+        /** @brief What the left mouse button currently does. */
+        MouseMode m_mode = MouseMode::Camera;
         /** @brief Node id of the corner currently being dragged, if any. */
         std::optional<int> m_dragged_node;
         /** @brief Subdivisions used when displaying the blocking (1 = raw block structure). */

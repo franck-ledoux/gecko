@@ -64,6 +64,14 @@ __pycache__/
 .pytest_cache/
 
 # ==========================================
+# Exécution de biy
+# ==========================================
+# Layout des fenêtres, réécrit par ImGui/Polyscope à chaque exécution
+imgui.ini
+# Sortie par défaut du bouton "Export VTK"
+biy_blocking.vtk
+
+# ==========================================
 # Fichiers Système / OS
 # ==========================================
 .DS_Store

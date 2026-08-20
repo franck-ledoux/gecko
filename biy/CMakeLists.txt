@@ -9,6 +9,7 @@ find_package(Python COMPONENTS Interpreter Development.Embed REQUIRED)
 add_executable(biy
         src/main.cpp
         src/BiyApp.cpp
+        src/BiyConfig.cpp
         src/PythonConsole.cpp
         # The façade + binding glue, shared verbatim with the `gecko` Python extension module. Too
         # small to be worth an installed library of its own (same call as python/CMakeLists.txt).
@@ -23,5 +24,6 @@ target_link_libraries(biy PRIVATE
         Gecko::Io
         polyscope
         pybind11::embed
+        json_dep
 )
 target_compile_features(biy PRIVATE cxx_std_23)

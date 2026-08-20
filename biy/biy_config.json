@@ -1,0 +1,6 @@
+{
+  "corner_radius": 0.01,
+  "corner_highlight_radius": 0.02,
+  "corner_color": [0.85, 0.15, 0.75],
+  "corner_highlight_color": [1.0, 0.85, 0.1]
+}

@@ -1,9 +1,11 @@
 #include "BiyApp.h"
 
 #include <algorithm>
+#include <iostream>
 #include <limits>
 
 #include <imgui.h>
+#include <polyscope/options.h>
 #include <polyscope/pick.h>
 #include <polyscope/point_cloud.h>
 #include <polyscope/polyscope.h>
@@ -20,12 +22,33 @@ namespace gecko::biy {
         constexpr const char *BLOCK_CORNERS = "block corners";
         constexpr const char *BLOCK_QUADS = "block quads";
         constexpr const char *BLOCK_HEXES = "block hexes";
+        /** @brief Overlay holding just the corner being dragged, drawn bigger and in its own color.
+         * A separate structure rather than a per-point quantity on BLOCK_CORNERS: it keeps the
+         * highlight's radius and color independent of the base cloud's, and picking still reports
+         * the base cloud underneath. */
+        constexpr const char *DRAG_HIGHLIGHT = "dragged corner";
+
+        glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
     } // namespace
 
     BiyApp::BiyApp(const std::string &model_path)
         : m_model(std::make_unique<python::GeomModelFacade>(model_path)), m_model_path(model_path) {
+        std::string config_message;
+        m_config = BiyConfig::load("biy_config.json", config_message);
+        std::cout << config_message << "\n";
         register_model();
-        m_status = "Loaded " + model_path;
+        m_status = "Loaded " + model_path + " — " + config_message;
+    }
+
+    void BiyApp::set_mouse_mode(MouseMode mode) {
+        m_mode = mode;
+        // Switched here, a whole frame before any drag is processed — Polyscope reads this at the
+        // top of its frame, before the user callback gets a say.
+        polyscope::options::doDefaultMouseInteraction = (mode == MouseMode::Camera);
+        if (mode == MouseMode::Camera && m_dragged_node) {
+            m_dragged_node.reset();
+            show_highlight(std::nullopt);
+        }
     }
 
     void BiyApp::register_model() {
@@ -60,7 +83,10 @@ namespace gecko::biy {
             const auto p = m_blocking->node_position(id);
             corners.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
         }
-        polyscope::registerPointCloud(BLOCK_CORNERS, corners);
+        auto *cloud = polyscope::registerPointCloud(BLOCK_CORNERS, corners);
+        cloud->setPointRadius(m_config.corner_radius);
+        cloud->setPointColor(to_glm(m_config.corner_color));
+        if (m_dragged_node) show_highlight(m_dragged_node);
 
         const auto vertices = m_blocking->mesh_vertices(m_subdivisions);
         const auto quads = m_blocking->mesh_quads(m_subdivisions);
@@ -77,6 +103,22 @@ namespace gecko::biy {
         } else if (polyscope::hasVolumeMesh(BLOCK_HEXES)) {
             polyscope::removeStructure(polyscope::getVolumeMesh(BLOCK_HEXES));
         }
+    }
+
+    void BiyApp::show_highlight(std::optional<int> node_id) {
+        if (!node_id || !m_blocking) {
+            if (polyscope::hasPointCloud(DRAG_HIGHLIGHT)) {
+                polyscope::removeStructure(polyscope::getPointCloud(DRAG_HIGHLIGHT));
+            }
+            return;
+        }
+
+        const auto p = m_blocking->node_position(*node_id);
+        const std::vector<glm::vec3> single{
+            {static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2])}};
+        auto *cloud = polyscope::registerPointCloud(DRAG_HIGHLIGHT, single);
+        cloud->setPointRadius(m_config.corner_highlight_radius);
+        cloud->setPointColor(to_glm(m_config.corner_highlight_color));
     }
 
     void BiyApp::create_bounding_box(double margin) {
@@ -123,6 +165,23 @@ namespace gecko::biy {
 
     void BiyApp::draw_panel() {
         ImGui::TextUnformatted(m_model_path.c_str());
+        ImGui::Separator();
+
+        // Mode: keyboard shortcuts first, so they work wherever the mouse happens to be — but not
+        // while a widget has the keyboard, or typing "1e-3" into a tolerance field would switch mode
+        // on the "e".
+        if (!ImGui::GetIO().WantCaptureKeyboard) {
+            if (ImGui::IsKeyPressed(ImGuiKey_C)) set_mouse_mode(MouseMode::Camera);
+            if (ImGui::IsKeyPressed(ImGuiKey_E)) set_mouse_mode(MouseMode::Edit);
+        }
+
+        ImGui::TextUnformatted("Mouse mode");
+        if (ImGui::RadioButton("Camera (C)", m_mode == MouseMode::Camera)) set_mouse_mode(MouseMode::Camera);
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Edit (E)", m_mode == MouseMode::Edit)) set_mouse_mode(MouseMode::Edit);
+        ImGui::TextWrapped(m_mode == MouseMode::Edit
+                               ? "Drag a block corner to move it. Camera navigation is off."
+                               : "Rotate/pan/zoom the view. Switch to Edit to move corners.");
         ImGui::Separator();
 
         if (ImGui::Button("Create bounding box")) create_bounding_box(0.1);
@@ -184,7 +243,7 @@ namespace gecko::biy {
     }
 
     void BiyApp::handle_drag() {
-        if (!m_blocking) return;
+        if (!m_blocking || m_mode != MouseMode::Edit) return;
         ImGuiIO &io = ImGui::GetIO();
 
         if (!m_dragged_node && io.MouseClicked[0] && !io.WantCaptureMouse) {
@@ -194,6 +253,7 @@ namespace gecko::biy {
                 const auto node_ids = m_blocking->node_ids();
                 if (pick.localIndex < node_ids.size()) {
                     m_dragged_node = node_ids[pick.localIndex];
+                    show_highlight(m_dragged_node);
                     m_status = "Dragging corner " + std::to_string(*m_dragged_node);
                 }
             }
@@ -201,10 +261,6 @@ namespace gecko::biy {
 
         if (m_dragged_node) {
             if (io.MouseDown[0]) {
-                // Claim the mouse for this frame so Polyscope's own trackball doesn't also rotate
-                // the camera while we're dragging a corner.
-                io.WantCaptureMouse = true;
-
                 const auto current = m_blocking->node_position(*m_dragged_node);
                 const glm::vec3 anchor(static_cast<float>(current[0]),
                                        static_cast<float>(current[1]),
@@ -215,6 +271,7 @@ namespace gecko::biy {
             } else {
                 m_status = "Moved corner " + std::to_string(*m_dragged_node);
                 m_dragged_node.reset();
+                show_highlight(std::nullopt);
             }
         }
     }

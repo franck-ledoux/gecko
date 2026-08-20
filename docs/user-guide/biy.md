@@ -45,10 +45,51 @@ block structure, higher values show the mesh it generates.
 
 ## Moving corners
 
-The block's corners are drawn as points. Drag one with the left mouse button and it follows the
-mouse in the plane facing the camera; every edge, face and block touching it is refitted live, so
-the block visibly deforms as you drag. Dragging does not re-classify — run **Classify** afterwards
-to snap the moved corners back onto the geometry.
+The left mouse button does one of two things, picked with the **mouse mode** radio buttons at the
+top of the panel or with a keypress:
+
+| Mode | Key | Left button |
+| --- | --- | --- |
+| Camera | `C` | Polyscope's usual navigation: rotate, pan, zoom |
+| Edit | `E` | Picks up a block corner and moves it |
+
+The two are a genuine mode rather than a modifier like `Ctrl`+drag, because of how Polyscope is
+built: it processes camera navigation at the top of each frame, *before* the per-frame user
+callback runs. A drag therefore can't be intercepted after the fact — navigation has to be switched
+off (`options::doDefaultMouseInteraction`) ahead of the frame the drag happens in. `Ctrl` is also
+already taken: Polyscope uses `Shift`+`Ctrl`+drag for zooming.
+
+In **Edit** mode, press the left button on a corner and it follows the mouse in the plane facing the
+camera. While held, the corner is drawn larger and in the highlight color, returning to normal on
+release. Every edge, face and block touching the corner is refitted live, so the block visibly
+deforms as you drag. Dragging does not re-classify — run **Classify** afterwards to snap the moved
+corners back onto the geometry.
+
+## Configuration
+
+At startup biy reads `biy_config.json` from the current directory. The file is optional, and may
+set only the keys it cares about; anything missing keeps its default. A malformed file is reported
+and ignored rather than being fatal. [`biy/biy_config.json`](https://github.com/franck-ledoux/gecko/blob/main/biy/biy_config.json)
+is a copy of the defaults:
+
+```json
+{
+  "corner_radius": 0.01,
+  "corner_highlight_radius": 0.02,
+  "corner_color": [0.85, 0.15, 0.75],
+  "corner_highlight_color": [1.0, 0.85, 0.1]
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `corner_radius` | Size of a block corner at rest |
+| `corner_highlight_radius` | Size of the corner being dragged |
+| `corner_color` | Color of a block corner at rest, RGB in `[0,1]` |
+| `corner_highlight_color` | Color of the corner being dragged, RGB in `[0,1]` |
+
+Radii are Polyscope *relative* values — a fraction of the scene's bounding box — so they stay
+sensible whatever units the model uses.
 
 ## The Python console
 
