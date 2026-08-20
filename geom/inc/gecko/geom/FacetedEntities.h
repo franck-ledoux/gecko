@@ -60,6 +60,14 @@ namespace gecko {
         /** @brief Gets the Gmsh elementary entity tag this vertex was reconstructed from. @return The entity tag. */
         [[nodiscard]] Int entity_tag() const noexcept { return m_entity_tag; }
 
+        /**
+         * @brief Gets the backing mesh node this vertex was reconstructed from — the counterpart of
+         * FacetedCurve::edges()/FacetedSurface::faces(), letting entity incidence be derived from
+         * shared mesh cells (see FacetedGeometry::containing_entities()).
+         * @return The mesh node id.
+         */
+        [[nodiscard]] NodeId node() const noexcept { return m_node; }
+
     private:
         const SimplicialMesh *m_mesh;
         NodeId m_node;

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <ranges>
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <gecko/geom/FacetedEntities.h>
@@ -161,6 +164,39 @@ namespace gecko {
             return m_entities_by_group[gid.value];
         }
 
+        /**
+         * @brief Gets the entity (@p dim, @p tag) itself plus every higher-dimensional entity of
+         * the model containing it — a vertex's curves and surfaces, a curve's surfaces, and the
+         * model's volumes.
+         *
+         * This is the model's B-Rep incidence, which Gmsh `$Elements` does not state anywhere:
+         * every entity here is reconstructed independently from its elementary tag (see
+         * build_entities()), so containment is instead recovered **exactly** from shared backing
+         * mesh nodes — a vertex lies on a curve when its own mesh node is one of the curve's, and a
+         * curve lies on a surface when every one of its mesh nodes is one of the surface's. Being
+         * integer set membership, this involves no tolerance and cannot be ambiguous, unlike a
+         * proximity test.
+         *
+         * Used by `Blocking::classify()` to infer what a block edge/face is classified on from the
+         * classification of its own boundary — see its "lowest common containing entity" rule.
+         *
+         * @note Assumes the faceting is conformal: a curve's mesh nodes must be *the same node ids*
+         *       as its bounding surface's. That holds for any `.msh` Gmsh produced from a single
+         *       CAD model, but not for one assembled from independently meshed parts — where this
+         *       simply reports fewer containments (never wrong ones), and callers fall back to
+         *       their own geometric heuristics.
+         *
+         * @param dim Dimension of the entity to query.
+         * @param tag `entity_tag()` of the entity to query.
+         * @return The containing entities as (dimension, entity_tag) pairs, starting with
+         *         (@p dim, @p tag) itself; empty if no entity of that dimension has that tag.
+         */
+        [[nodiscard]] std::span<const std::pair<GroupDim, Int>> containing_entities(GroupDim dim, Int tag) const {
+            const auto it = m_containing_entities.find({dim, tag});
+            return it != m_containing_entities.end() ? std::span<const std::pair<GroupDim, Int>>(it->second)
+                                                     : std::span<const std::pair<GroupDim, Int>>{};
+        }
+
     private:
         /**
          * @brief Registers a type-erased reference to @p entity into its physical group's entity
@@ -252,6 +288,86 @@ namespace gecko {
                 m_volume_by_tag[tag] = &m_volumes.back();
                 register_in_group(cell_group[ids.front().value], &m_volumes.back());
             }
+
+            build_incidence();
+        }
+
+        /**
+         * @brief Computes `containing_entities()`'s table from the entities' shared backing mesh
+         * nodes — see that method for why incidence has to be recovered rather than read.
+         */
+        void build_incidence() {
+            // Each curve's/surface's own node set, gathered once: containment is tested against
+            // these repeatedly below.
+            std::unordered_map<Int, std::unordered_set<UInt>> curve_nodes;
+            std::unordered_map<Int, std::unordered_set<UInt>> surface_nodes;
+
+            for (const auto &curve : m_curves) {
+                auto &nodes = curve_nodes[curve.entity_tag()];
+                for (const EdgeId e : curve.edges()) {
+                    for (const NodeId n : m_mesh->edge_nodes(e)) {
+                        nodes.insert(n.value);
+                    }
+                }
+            }
+            for (const auto &surface : m_surfaces) {
+                auto &nodes = surface_nodes[surface.entity_tag()];
+                for (const FaceId f : surface.faces()) {
+                    for (const NodeId n : m_mesh->face_nodes(f)) {
+                        nodes.insert(n.value);
+                    }
+                }
+            }
+
+            // Every entity contains itself, so a caller intersecting up-sets never gets an empty
+            // result purely because two boundary cells share the same classification.
+            const auto self_and = [this](GroupDim dim, Int tag) -> std::vector<std::pair<GroupDim, Int>> & {
+                auto &up = m_containing_entities[{dim, tag}];
+                up.emplace_back(dim, tag);
+                return up;
+            };
+
+            for (const auto &vertex : m_vertices) {
+                auto &up = self_and(GroupDim::Dim0, vertex.entity_tag());
+                const UInt node = vertex.node().value;
+                for (const auto &[tag, nodes] : curve_nodes) {
+                    if (nodes.contains(node)) up.emplace_back(GroupDim::Dim1, tag);
+                }
+                for (const auto &[tag, nodes] : surface_nodes) {
+                    if (nodes.contains(node)) up.emplace_back(GroupDim::Dim2, tag);
+                }
+                append_volumes(up);
+            }
+
+            for (const auto &curve : m_curves) {
+                auto &up = self_and(GroupDim::Dim1, curve.entity_tag());
+                const auto &own = curve_nodes[curve.entity_tag()];
+                for (const auto &[tag, nodes] : surface_nodes) {
+                    const bool inside = std::ranges::all_of(own, [&nodes](UInt n) { return nodes.contains(n); });
+                    if (inside) up.emplace_back(GroupDim::Dim2, tag);
+                }
+                append_volumes(up);
+            }
+
+            for (const auto &surface : m_surfaces) {
+                append_volumes(self_and(GroupDim::Dim2, surface.entity_tag()));
+            }
+
+            for (const auto &volume : m_volumes) {
+                self_and(GroupDim::Dim3, volume.entity_tag());
+            }
+        }
+
+        /**
+         * @brief Appends every volume of the model to @p AUp. `FacetedVolume` is a stub covering
+         * all of space (its `distance()` is always 0), so it contains every lower-dimensional
+         * entity unconditionally — there is no node set to test against.
+         * @param AUp The containing-entity list to append to.
+         */
+        void append_volumes(std::vector<std::pair<GroupDim, Int>> &AUp) const {
+            for (const auto &volume : m_volumes) {
+                AUp.emplace_back(GroupDim::Dim3, volume.entity_tag());
+            }
         }
 
         std::unique_ptr<SimplicialMesh> m_mesh;
@@ -265,6 +381,10 @@ namespace gecko {
         std::unordered_map<Int, const FacetedSurface *> m_surface_by_tag;
         std::unordered_map<Int, const FacetedVolume *> m_volume_by_tag;
         std::vector<std::vector<FacetedEntityRefVariant>> m_entities_by_group;
+        /** @brief `containing_entities()`'s precomputed table. A `std::map` rather than a hash map
+         * purely so `(GroupDim, Int)` works as a key without a hand-written hash — it is built once
+         * and queried a handful of times per classified cell. */
+        std::map<std::pair<GroupDim, Int>, std::vector<std::pair<GroupDim, Int>>> m_containing_entities;
     };
     static_assert(GeomModelConcept<FacetedGeometry>, "FacetedGeometry must satisfy GeomModelConcept");
 

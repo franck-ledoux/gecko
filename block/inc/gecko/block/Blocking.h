@@ -4,7 +4,10 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <iterator>
+#include <limits>
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -60,6 +63,22 @@ namespace gecko {
         using Edge = typename Map::template Attribute_handle<1>::type;
         /** @brief Handle to a node (0-cell) attribute. */
         using Node = typename Map::template Attribute_handle<0>::type;
+
+        /**
+         * @brief Per-dimension distance thresholds for snapping a blocking onto its geometric model.
+         *
+         * Three separate values rather than one because the scales genuinely differ: 2 distinct
+         * vertices are typically far closer to each other than to any curve, so a tolerance loose
+         * enough to catch a surface would snap a corner to the wrong vertex.
+         */
+        struct Tolerances {
+            /** @brief Threshold for snapping onto a vertex (dimension 0). */
+            double vertex = 0.0;
+            /** @brief Threshold for snapping onto a curve (dimension 1). */
+            double curve = 0.0;
+            /** @brief Threshold for snapping onto a surface (dimension 2), and onto a volume. */
+            double surface = 0.0;
+        };
 
         /**
          * @brief Constructor.
@@ -218,56 +237,108 @@ namespace gecko {
          * @brief Classifies every node/edge/face/block of the blocking onto `geom_model()`'s
          * vertices/curves/surfaces/volumes, then refits/rebuilds their geometry to conform.
          *
-         * For each cell of topological dimension `d`, searches `m_geom_model`'s entities of
-         * dimension `>= d` (never lower, which would over-constrain — e.g. an edge is never pinned
-         * to a single point), stopping at the lowest such dimension that has at least one entity
-         * within tolerance; every entity within tolerance at that dimension (not just the nearest)
-         * is collected into the cell's `geom_targets` — a node near a corner shared by 2+ curves
-         * ends up with 2+ targets, by design (see `CellData.h`). The single nearest of those targets
-         * is used to snap/refit the cell's own stored geometry: a node's position is projected onto
-         * it; a curved edge's interior control points (its 2 endpoints stay pinned to their own,
-         * already-classified nodes) are projected onto it; a face's/block's stored surface/volume is
-         * then rebuilt from its (now possibly curved) boundary edges/faces via
-         * `coons_surface_from_edges()`/`tfi_volume_from_faces()` — never left as a stale blend of the
-         * pre-classification straight geometry. Not incremental: every cell is reclassified and
-         * every edge/face/block geometry rebuilt from scratch on every call.
+         * **Nodes** are classified by proximity: the search runs dimension by dimension and stops at
+         * the lowest one with any entity within tolerance; every entity within tolerance at that
+         * dimension (not just the nearest) is collected into the node's `geom_targets` — a node near
+         * a corner shared by 2+ curves ends up with 2+ targets, by design (see `CellData.h`).
          *
-         * @param ATolVertex Tolerance for snapping onto a vertex (dimension-0 entity) — the tight
-         *        threshold, since 2 distinct vertices are typically much closer to each other than
-         *        to the nearest curve/surface.
-         * @param ATolCurveSurface Tolerance for snapping onto a curve/surface/volume (dimension >=
-         *        1) — typically looser than `ATolVertex`. Defaults to `ATolVertex` when left at its
-         *        default `-1.0`.
+         * **Edges and faces** are instead classified *topologically*, from their own boundary: an
+         * edge is put on the lowest-dimensional entity containing both its corners' classifications,
+         * a face on the lowest-dimensional entity containing all 4 of its edges' — see
+         * `infer_targets()`. That is what keeps a cell coherent with its boundary, which proximity
+         * cannot: sampling one point of an edge can otherwise land it on a curve neither of its
+         * endpoints touches. Proximity remains the fallback whenever the boundary can't decide (an
+         * unclassified corner, or classifications with nothing in common). **Blocks** stay pure
+         * proximity, there being only volumes at that dimension.
+         *
+         * The single nearest target is then used to snap/refit the cell's own stored geometry: a
+         * node's position is projected onto it; a curved edge's interior control points (its 2
+         * endpoints stay pinned to their own, already-classified nodes) are projected onto it; a
+         * face's/block's stored surface/volume is rebuilt from its (now possibly curved) boundary
+         * edges/faces via `coons_surface_from_edges()`/`tfi_volume_from_faces()` — never left as a
+         * stale blend of the pre-classification straight geometry.
+         *
+         * Cells are visited in increasing dimension because each level's inference consumes the
+         * previous one's result. Not incremental: every cell is reclassified and every
+         * edge/face/block geometry rebuilt from scratch on every call — see `snap_node()` for the
+         * local counterpart used while editing.
+         *
+         * @param ATolVertex Tolerance for snapping onto a vertex — the tight threshold, since 2
+         *        distinct vertices are typically much closer to each other than to any curve.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface (and onto a volume). Defaults to
+         *        the resolved curve tolerance.
          */
-        void classify(double ATolVertex, double ATolCurveSurface = -1.0) {
-            const double tol_cs = (ATolCurveSurface < 0.0) ? ATolVertex : ATolCurveSurface;
+        void classify(double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
 
             for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
                  it != itend;
                  ++it) {
-                const auto result = classify_position(GroupDim::Dim0, it->info().point, ATolVertex, tol_cs);
-                it->info().geom_targets = result.targets;
-                if (result.any()) {
-                    project_onto(result.nearest_dim, result.nearest_tag, it->info().point);
-                }
+                classify_node(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
                  it != itend;
                  ++it) {
-                refit_edge(it, tol_cs);
+                refit_edge(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                classify_and_rebuild_face(it, tol_cs);
+                classify_and_rebuild_face(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                classify_and_rebuild_block(it, tol_cs);
+                classify_and_rebuild_block(it, tol);
+            }
+        }
+
+        /**
+         * @brief Snaps one node onto the geometric model and brings every cell touching it back into
+         * agreement — the incremental counterpart of `classify()`, meant to run when a corner is
+         * released after being dragged.
+         *
+         * The node is reclassified by proximity and projected onto its nearest target, then every
+         * incident edge, face and block is reclassified and refitted exactly as `classify()` would.
+         * Because edges and faces infer their classification from their own boundary rather than
+         * from a global search, re-deciding just the cells that touch @p ANode is enough: no other
+         * cell's boundary changed, so no other cell's classification can have.
+         *
+         * @param ANode The node to snap.
+         * @param ATolVertex Tolerance for snapping onto a vertex.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface. Defaults to the resolved curve
+         *        tolerance.
+         */
+        void snap_node(Node ANode, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
+            classify_node(ANode, tol);
+
+            // Swept exhaustively for the same reason `move_node()` documents: a corner's own dart
+            // orbit doesn't reach every cell that touches it on a still-unsewn block.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                const Dart d = it->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (n0 == ANode || n1 == ANode) refit_edge(it, tol);
+            }
+
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (face_has_node(it, ANode)) classify_and_rebuild_face(it, tol);
+            }
+
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                if (block_has_node(it, ANode)) classify_and_rebuild_block(it, tol);
             }
         }
 
@@ -606,6 +677,21 @@ namespace gecko {
         }
 
         /**
+         * @brief Resolves `classify()`/`snap_node()`'s defaulted tolerance arguments: an omitted
+         * (negative) curve tolerance falls back to the vertex one, and an omitted surface tolerance
+         * to the curve one.
+         * @param ATolVertex Vertex tolerance.
+         * @param ATolCurve Curve tolerance, or negative to reuse @p ATolVertex.
+         * @param ATolSurface Surface tolerance, or negative to reuse the resolved curve tolerance.
+         * @return The resolved tolerances.
+         */
+        static Tolerances resolve_tolerances(double ATolVertex, double ATolCurve, double ATolSurface) {
+            const double curve = (ATolCurve < 0.0) ? ATolVertex : ATolCurve;
+            const double surface = (ATolSurface < 0.0) ? curve : ATolSurface;
+            return Tolerances{ATolVertex, curve, surface};
+        }
+
+        /**
          * @brief Outcome of searching `m_geom_model` for entities near a query point: every entity
          * found within tolerance (see `classify_position()`), plus the dimension/tag of the single
          * nearest one (used to actually snap/project geometry).
@@ -658,30 +744,164 @@ namespace gecko {
          * @param AMinDim Lowest entity dimension to consider (the classified cell's own topological
          *        dimension).
          * @param AP The query point.
-         * @param ATolVertex Tolerance used only when scanning vertices (dimension 0).
-         * @param ATolCurveSurface Tolerance used when scanning curves/surfaces/volumes (dimension >= 1).
+         * @param ATol The per-dimension snapping tolerances.
          * @return The classification outcome (possibly empty, if nothing is within tolerance anywhere).
          */
-        ClassifyResult
-        classify_position(GroupDim AMinDim, const Point3d &AP, double ATolVertex, double ATolCurveSurface) const {
+        ClassifyResult classify_position(GroupDim AMinDim, const Point3d &AP, const Tolerances &ATol) const {
             ClassifyResult result;
             double best = 0.0;
             if (AMinDim <= GroupDim::Dim0) {
-                scan_dimension(m_geom_model->vertices(), GroupDim::Dim0, AP, ATolVertex, result, best);
+                scan_dimension(m_geom_model->vertices(), GroupDim::Dim0, AP, ATol.vertex, result, best);
                 if (result.any()) return result;
             }
             if (AMinDim <= GroupDim::Dim1) {
-                scan_dimension(m_geom_model->curves(), GroupDim::Dim1, AP, ATolCurveSurface, result, best);
+                scan_dimension(m_geom_model->curves(), GroupDim::Dim1, AP, ATol.curve, result, best);
                 if (result.any()) return result;
             }
             if (AMinDim <= GroupDim::Dim2) {
-                scan_dimension(m_geom_model->surfaces(), GroupDim::Dim2, AP, ATolCurveSurface, result, best);
+                scan_dimension(m_geom_model->surfaces(), GroupDim::Dim2, AP, ATol.surface, result, best);
                 if (result.any()) return result;
             }
             if (AMinDim <= GroupDim::Dim3) {
-                scan_dimension(m_geom_model->volumes(), GroupDim::Dim3, AP, ATolCurveSurface, result, best);
+                // Volumes reuse the surface tolerance: a `GeomModelConcept` volume's `distance()` is
+                // free to report 0 everywhere (as `FacetedVolume`'s stub does), which makes any
+                // threshold inert here — so there is nothing a 4th tolerance could usefully control.
+                scan_dimension(m_geom_model->volumes(), GroupDim::Dim3, AP, ATol.surface, result, best);
             }
             return result;
+        }
+
+        /**
+         * @brief Classifies one node by proximity and projects it onto its nearest target, leaving
+         * it where it is when nothing is within tolerance.
+         * @param ANode The node to classify.
+         * @param ATol The per-dimension snapping tolerances.
+         */
+        void classify_node(Node ANode, const Tolerances &ATol) {
+            const auto result = classify_position(GroupDim::Dim0, ANode->info().point, ATol);
+            ANode->info().geom_targets = result.targets;
+            if (result.any()) {
+                project_onto(result.nearest_dim, result.nearest_tag, ANode->info().point);
+            }
+        }
+
+        /**
+         * @brief Gathers every geometric entity containing *any* of @p ATargets — the union of the
+         * model's `containing_entities()` over a cell's classification, which is the set of entities
+         * that cell could still be said to lie on.
+         * @param ATargets One cell's `geom_targets`.
+         * @return The union, as a sorted set.
+         */
+        std::set<std::pair<GroupDim, Int>> containing_set(const std::vector<std::pair<GroupDim, Int>> &ATargets) const {
+            std::set<std::pair<GroupDim, Int>> result;
+            for (const auto &[dim, tag] : ATargets) {
+                for (const auto &entry : m_geom_model->containing_entities(dim, tag)) {
+                    result.insert(entry);
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Infers what a cell is classified on from the classification of its own boundary:
+         * the lowest-dimensional geometric entities containing *every* boundary cell's own
+         * classification.
+         *
+         * This is what keeps a cell's classification coherent with its boundary's, which proximity
+         * alone cannot guarantee — sampling a single point of an edge can put it on a curve its own
+         * two endpoints have nothing to do with. An edge whose 2 corners sit on the same geometric
+         * curve belongs on that curve; one whose corners sit on 2 different curves bounding a common
+         * surface belongs on that surface. Intersecting the boundary's containing sets (see
+         * `containing_set()`) states exactly that, and the model computes those sets from shared
+         * backing mesh cells, so no tolerance enters here at all.
+         *
+         * Returns *every* candidate at the winning dimension rather than one, matching how
+         * `classify_position()` reports several equally-plausible targets; picking the single
+         * nearest of them for projection is `nearest_of()`'s job.
+         *
+         * @param ABoundary Each boundary cell's `geom_targets`. An empty entry (an unclassified
+         *        boundary cell) makes inference impossible, since it constrains nothing.
+         * @param AMinDim The cell's own topological dimension — it can never be classified below it.
+         * @return The inferred targets, or empty when inference is impossible (an unclassified
+         *         boundary cell, or boundary classifications with nothing in common), in which case
+         *         the caller falls back to a proximity search.
+         */
+        std::vector<std::pair<GroupDim, Int>>
+        infer_targets(const std::vector<const std::vector<std::pair<GroupDim, Int>> *> &ABoundary,
+                      GroupDim AMinDim) const {
+            if (ABoundary.empty()) return {};
+
+            std::set<std::pair<GroupDim, Int>> common;
+            bool first = true;
+            for (const auto *targets : ABoundary) {
+                if (targets->empty()) return {}; // Unclassified boundary: nothing to infer from.
+                const auto candidates = containing_set(*targets);
+                if (first) {
+                    common = candidates;
+                    first = false;
+                } else {
+                    std::set<std::pair<GroupDim, Int>> intersection;
+                    std::ranges::set_intersection(common, candidates, std::inserter(intersection, intersection.end()));
+                    common = std::move(intersection);
+                }
+                if (common.empty()) return {};
+            }
+
+            // `common` is sorted by (dimension, tag), so the first entry at or above the cell's own
+            // dimension already sits at the winning — lowest — dimension.
+            GroupDim best = GroupDim::Undefined;
+            std::vector<std::pair<GroupDim, Int>> result;
+            for (const auto &[dim, tag] : common) {
+                if (dim < AMinDim) continue;
+                if (best == GroupDim::Undefined) best = dim;
+                if (dim != best) break;
+                result.emplace_back(dim, tag);
+            }
+            return result;
+        }
+
+        /**
+         * @brief Picks the entity of @p ATargets closest to @p AP — the geometric tie-break applied
+         * when `infer_targets()` leaves several equally-valid candidates at the winning dimension
+         * (e.g. an edge lying on a curve shared by 2 surfaces), and the entity a cell's geometry is
+         * then projected onto.
+         * @param ATargets Candidate entities.
+         * @param AP Representative point of the cell.
+         * @return The nearest candidate, or `Undefined` if @p ATargets is empty.
+         */
+        ClassifyResult nearest_of(const std::vector<std::pair<GroupDim, Int>> &ATargets, const Point3d &AP) const {
+            ClassifyResult result;
+            result.targets = ATargets;
+            double best = 0.0;
+            for (const auto &[dim, tag] : ATargets) {
+                const double d = distance_to(dim, tag, AP);
+                if (!result.any() || d < best) {
+                    best = d;
+                    result.nearest_dim = dim;
+                    result.nearest_tag = tag;
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Distance from @p AP to the geometric entity identified by (@p ADim, @p ATag).
+         * @param ADim Dimension of the entity.
+         * @param ATag `entity_tag()` of the entity.
+         * @param AP The query point.
+         * @return The distance, or infinity if no such entity exists.
+         */
+        double distance_to(GroupDim ADim, Int ATag, const Point3d &AP) const {
+            if (ADim == GroupDim::Dim0) {
+                if (const auto *v = m_geom_model->vertex_by_tag(ATag)) return v->distance(AP);
+            } else if (ADim == GroupDim::Dim1) {
+                if (const auto *c = m_geom_model->curve_by_tag(ATag)) return c->distance(AP);
+            } else if (ADim == GroupDim::Dim2) {
+                if (const auto *s = m_geom_model->surface_by_tag(ATag)) return s->distance(AP);
+            } else if (ADim == GroupDim::Dim3) {
+                if (const auto *vol = m_geom_model->volume_by_tag(ATag)) return vol->distance(AP);
+            }
+            return std::numeric_limits<double>::infinity();
         }
 
         /**
@@ -703,22 +923,29 @@ namespace gecko {
         }
 
         /**
-         * @brief Classifies one edge against `m_geom_model` (dimension >= 1 only) and refits its
-         * curve: its 2 endpoints are pinned to their (already-classified) nodes' current positions,
-         * and its interior control points are re-derived by straight-line interpolation between
-         * those endpoints, then projected onto the nearest classification target, if any.
+         * @brief Classifies one edge and refits its curve: its 2 endpoints are pinned to their
+         * (already-classified) nodes' current positions, and its interior control points are
+         * re-derived by straight-line interpolation between those endpoints, then projected onto the
+         * nearest classification target, if any.
+         *
+         * Classification is inferred from the edge's own 2 corner nodes via `infer_targets()`,
+         * falling back to a proximity search at its midpoint when they can't decide (an
+         * unclassified corner, or corners with no common containing entity).
+         *
          * @param AEdge The edge to classify and refit.
-         * @param ATolCurveSurface Tolerance for the (dimension >= 1) search.
+         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
          */
-        void refit_edge(Edge AEdge, double ATolCurveSurface) {
+        void refit_edge(Edge AEdge, const Tolerances &ATol) {
             const Dart d = AEdge->dart();
             const Node n0 = m_cmap.template attribute<0>(d);
             const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
             const Point3d &p0 = n0->info().point;
             const Point3d &p1 = n1->info().point;
 
+            const Point3d midpoint = AEdge->info().curve.value(0.5);
+            const auto inferred = infer_targets({&n0->info().geom_targets, &n1->info().geom_targets}, GroupDim::Dim1);
             const auto result =
-                classify_position(GroupDim::Dim1, AEdge->info().curve.value(0.5), ATolCurveSurface, ATolCurveSurface);
+                inferred.empty() ? classify_position(GroupDim::Dim1, midpoint, ATol) : nearest_of(inferred, midpoint);
             AEdge->info().geom_targets = result.targets;
 
             constexpr std::size_t n = TEdgeCurve::NumControlPoints;
@@ -764,15 +991,21 @@ namespace gecko {
         }
 
         /**
-         * @brief Classifies one face against `m_geom_model` (dimension >= 2 only, using the face's
-         * own corner centroid) and rebuilds its stored surface via `coons_surface_from_edges()` from
-         * its 4 (now possibly refitted) boundary edges. Applies uniformly to a standalone 2D (quad)
-         * block's own face and to one of a 3D (hex) block's 6 bounding faces — both are ordinary
-         * 2-cells with exactly 4 boundary edges.
+         * @brief Classifies one face and rebuilds its stored surface via `coons_surface_from_edges()`
+         * from its 4 (now possibly refitted) boundary edges. Applies uniformly to a standalone 2D
+         * (quad) block's own face and to one of a 3D (hex) block's 6 bounding faces — both are
+         * ordinary 2-cells with exactly 4 boundary edges.
+         *
+         * Classification is inferred from those 4 edges' own classifications via `infer_targets()`
+         * (so a face all of whose edges lie on one surface lands on that surface), falling back to a
+         * proximity search at the face's corner centroid when they can't decide. Edges must
+         * therefore already be classified — `classify()` and `snap_node()` both do faces after
+         * edges for that reason.
+         *
          * @param AFace The face to classify and rebuild.
-         * @param ATolCurveSurface Tolerance for the (dimension >= 2) search.
+         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
          */
-        void classify_and_rebuild_face(Face AFace, double ATolCurveSurface) {
+        void classify_and_rebuild_face(Face AFace, const Tolerances &ATol) {
             const Dart fd = AFace->dart();
             std::array<Node, 4> local_nodes{};
             Dart walk = fd;
@@ -786,7 +1019,18 @@ namespace gecko {
                 acc += Vector3d(local_nodes[0]->info().point, node->info().point);
             }
             const Point3d center = local_nodes[0]->info().point + acc * 0.25;
-            const auto result = classify_position(GroupDim::Dim2, center, ATolCurveSurface, ATolCurveSurface);
+
+            std::vector<const std::vector<std::pair<GroupDim, Int>> *> boundary;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                boundary.push_back(&m_cmap.template attribute<1>(it)->info().geom_targets);
+            }
+
+            const auto inferred = infer_targets(boundary, GroupDim::Dim2);
+            const auto result =
+                inferred.empty() ? classify_position(GroupDim::Dim2, center, ATol) : nearest_of(inferred, center);
             AFace->info().geom_targets = result.targets;
 
             rebuild_face_surface(AFace);
@@ -862,10 +1106,14 @@ namespace gecko {
          * from the boundary `Face` attributes' own stored surfaces, which may have been rebuilt by
          * `classify_and_rebuild_face()` in an independent local orientation (reconciling the two is
          * `to_mesh()`'s seam-indexing concern, not this method's).
+         * Classification stays a plain proximity search here, unlike edges' and faces': the only
+         * entities at dimension 3 are volumes, and inferring from the block's 6 faces could only
+         * ever return those same volumes.
+         *
          * @param ABlock The block to classify and rebuild.
-         * @param ATolCurveSurface Tolerance for the (dimension >= 3) search.
+         * @param ATol The per-dimension snapping tolerances.
          */
-        void classify_and_rebuild_block(Block ABlock, double ATolCurveSurface) {
+        void classify_and_rebuild_block(Block ABlock, const Tolerances &ATol) {
             const Dart bd = ABlock->dart();
             std::array<Node, 8> local_nodes{};
             local_nodes[0] = m_cmap.template attribute<0>(bd);
@@ -882,7 +1130,7 @@ namespace gecko {
                 acc += Vector3d(local_nodes[0]->info().point, node->info().point);
             }
             const Point3d center = local_nodes[0]->info().point + acc * (1.0 / 8.0);
-            const auto result = classify_position(GroupDim::Dim3, center, ATolCurveSurface, ATolCurveSurface);
+            const auto result = classify_position(GroupDim::Dim3, center, ATol);
             ABlock->info().geom_targets = result.targets;
 
             rebuild_block_volume(ABlock);
