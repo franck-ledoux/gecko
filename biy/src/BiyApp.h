@@ -38,6 +38,11 @@ namespace gecko::biy {
      */
     class BiyApp {
     public:
+        /** @brief Highest display subdivision the panel accepts. A 3D blocking's generated mesh
+         * grows cubically with it — 20 is already 8000 hexes per block — and the window becomes
+         * unusable well before anything else complains. */
+        static constexpr int MAX_SUBDIVISIONS = 20;
+
         /**
          * @brief Constructor. Loads the geometric model and registers it for display.
          * @param model_path Path to the .msh file to load.

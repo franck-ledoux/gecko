@@ -381,8 +381,15 @@ namespace gecko::biy {
 
         ImGui::SetNextItemWidth(120.0f);
         if (ImGui::InputInt("subdivisions", &m_subdivisions)) {
-            m_subdivisions = std::max(1, m_subdivisions);
+            m_subdivisions = std::clamp(m_subdivisions, 1, MAX_SUBDIVISIONS);
             refresh_view();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("1 to %d. Each step costs cubically on a 3D blocking — %d subdivisions "
+                              "already means %d hexes per block.",
+                              MAX_SUBDIVISIONS,
+                              MAX_SUBDIVISIONS,
+                              MAX_SUBDIVISIONS * MAX_SUBDIVISIONS * MAX_SUBDIVISIONS);
         }
 
         if (ImGui::Checkbox("Show block edges", &m_show_block_edges)) refresh_view();

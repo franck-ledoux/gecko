@@ -55,7 +55,9 @@ window draws, so a change made either way shows up immediately in the other.
 | Export VTK          | Writes the generated mesh to `biy_blocking.vtk`                          |
 
 `subdivisions` controls how finely the blocking is meshed for display and export: `1` shows the raw
-block structure, higher values show the mesh it generates. **Show block edges** draws the block
+block structure, higher values show the mesh it generates. It is capped at **20**, because a 3D
+blocking's mesh grows cubically with it — 20 is already 8000 hexes per block, and the window bogs
+down before anything else does. **Show block edges** draws the block
 structure's own edges as a curve network — the edges of the blocks themselves, traced along their
 curves, as opposed to the subdivision lines of the mesh.
 
