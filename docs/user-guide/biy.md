@@ -41,7 +41,32 @@ window draws, so a change made either way shows up immediately in the other.
 | Export VTK | Writes the generated mesh to `biy_blocking.vtk` |
 
 `subdivisions` controls how finely the blocking is meshed for display and export: `1` shows the raw
-block structure, higher values show the mesh it generates.
+block structure, higher values show the mesh it generates. **Show block edges** draws the block
+structure's own edges as a curve network — the edges of the blocks themselves, traced along their
+curves, as opposed to the subdivision lines of the mesh.
+
+## Corner colors
+
+Block corners are colored by what `classify()` put them on, so the state of a blocking being fitted
+to its model is readable at a glance:
+
+| Corner | Classified on |
+| --- | --- |
+| Violet | nothing yet — `classify()` hasn't run, or found nothing in tolerance |
+| Yellow | a model vertex |
+| Red | a model curve |
+| Blue | a model surface |
+| Green | a model volume |
+
+The corner being dragged is drawn white and larger, so it can't be confused with any of these.
+
+!!! note
+    Green (volume) is not one of the four states you might expect, but `classify()` does produce it,
+    and it shows up more than you'd think on tetrahedral models: `FacetedVolume::distance()` is
+    currently a documented stub that returns `0.0` for every point (see
+    `geom/inc/gecko/geom/FacetedEntities.h`). So on a model with volumes, any corner that doesn't
+    match a vertex, curve or surface classifies onto a volume rather than staying unclassified —
+    violet then only appears before `classify()` has run.
 
 ## Moving corners
 
@@ -81,8 +106,17 @@ is a copy of the defaults:
 {
   "corner_radius": 0.01,
   "corner_highlight_radius": 0.02,
-  "corner_color": [0.85, 0.15, 0.75],
-  "corner_highlight_color": [1.0, 0.85, 0.1]
+  "corner_highlight_color": [1.0, 1.0, 1.0],
+
+  "corner_color_unclassified": [0.6, 0.2, 0.85],
+  "corner_color_on_vertex": [1.0, 0.9, 0.1],
+  "corner_color_on_curve": [0.9, 0.15, 0.15],
+  "corner_color_on_surface": [0.15, 0.4, 0.95],
+  "corner_color_on_volume": [0.2, 0.75, 0.3],
+
+  "show_block_edges": true,
+  "block_edge_radius": 0.003,
+  "block_edge_color": [0.15, 0.15, 0.15]
 }
 ```
 
@@ -90,8 +124,15 @@ is a copy of the defaults:
 | --- | --- |
 | `corner_radius` | Size of a block corner at rest |
 | `corner_highlight_radius` | Size of the corner being dragged |
-| `corner_color` | Color of a block corner at rest, RGB in `[0,1]` |
 | `corner_highlight_color` | Color of the corner being dragged, RGB in `[0,1]` |
+| `corner_color_unclassified` | Color of a corner not classified onto anything |
+| `corner_color_on_vertex` | Color of a corner classified on a model vertex |
+| `corner_color_on_curve` | Color of a corner classified on a model curve |
+| `corner_color_on_surface` | Color of a corner classified on a model surface |
+| `corner_color_on_volume` | Color of a corner classified on a model volume |
+| `show_block_edges` | Whether block edges are drawn at startup |
+| `block_edge_radius` | Thickness of the block edges |
+| `block_edge_color` | Color of the block edges, RGB in `[0,1]` |
 
 Radii are Polyscope *relative* values — a fraction of the scene's bounding box — so they stay
 sensible whatever units the model uses.
@@ -112,6 +153,8 @@ convenience, the console is the full API.
 [0, 1, 2, 3, 4, 5, 6, 7]
 >>> blocking.move_node(6, hi[0] + 1.5, hi[1] + 1.5, hi[2] + 1.0)
 >>> blocking.classify(0.3)
+>>> blocking.node_classification_dims()   # -1 free, 0 vertex, 1 curve, 2 surface, 3 volume
+[0, 1, 2, 3, 0, 0, 0, 0]
 >>> blocking.write_vtk(2, "blocking.vtk")
 ```
 

@@ -5,6 +5,7 @@
 #include <limits>
 
 #include <imgui.h>
+#include <polyscope/curve_network.h>
 #include <polyscope/options.h>
 #include <polyscope/pick.h>
 #include <polyscope/point_cloud.h>
@@ -27,6 +28,9 @@ namespace gecko::biy {
          * highlight's radius and color independent of the base cloud's, and picking still reports
          * the base cloud underneath. */
         constexpr const char *DRAG_HIGHLIGHT = "dragged corner";
+        /** @brief The block structure's own edges, traced along their curves — distinct from the
+         * subdivision lines of the mesh BLOCK_QUADS/BLOCK_HEXES show. */
+        constexpr const char *BLOCK_EDGES = "block edges";
 
         glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
     } // namespace
@@ -35,6 +39,7 @@ namespace gecko::biy {
         : m_model(std::make_unique<python::GeomModelFacade>(model_path)), m_model_path(model_path) {
         std::string config_message;
         m_config = BiyConfig::load("biy_config.json", config_message);
+        m_show_block_edges = m_config.show_block_edges;
         std::cout << config_message << "\n";
         register_model();
         m_status = "Loaded " + model_path + " — " + config_message;
@@ -96,8 +101,28 @@ namespace gecko::biy {
         }
         auto *cloud = polyscope::registerPointCloud(BLOCK_CORNERS, corners);
         cloud->setPointRadius(m_config.corner_radius);
-        cloud->setPointColor(to_glm(m_config.corner_color));
+
+        // One color per corner, by what it is classified on — the state of a blocking being fitted
+        // to a model is mostly "which corners have found their geometry yet", so it belongs on the
+        // corners themselves rather than in a side panel.
+        const auto dims = m_blocking->node_classification_dims();
+        std::vector<glm::vec3> colors;
+        colors.reserve(dims.size());
+        for (const int dim : dims) colors.push_back(to_glm(m_config.color_for(dim)));
+        cloud->addColorQuantity("classification", colors)->setEnabled(true);
+
         if (m_dragged_node) show_highlight(m_dragged_node);
+
+        const auto edge_points = m_blocking->edge_vertices(m_edge_samples);
+        if (!edge_points.empty()) {
+            auto *edges = polyscope::registerCurveNetwork(BLOCK_EDGES, edge_points,
+                                                          m_blocking->edge_segments(m_edge_samples));
+            edges->setRadius(m_config.block_edge_radius);
+            edges->setColor(to_glm(m_config.block_edge_color));
+            edges->setEnabled(m_show_block_edges);
+        } else if (polyscope::hasCurveNetwork(BLOCK_EDGES)) {
+            polyscope::removeStructure(polyscope::getCurveNetwork(BLOCK_EDGES));
+        }
 
         const auto vertices = m_blocking->mesh_vertices(m_subdivisions);
         const auto quads = m_blocking->mesh_quads(m_subdivisions);
@@ -220,6 +245,8 @@ namespace gecko::biy {
             refresh_view();
         }
 
+        if (ImGui::Checkbox("Show block edges", &m_show_block_edges)) refresh_view();
+
         if (ImGui::Button("Export VTK")) {
             const std::string out = "biy_blocking.vtk";
             m_blocking->write_vtk(m_subdivisions, out);
@@ -232,6 +259,17 @@ namespace gecko::biy {
                         m_blocking->nb_cells(1),
                         m_blocking->nb_cells(2),
                         m_blocking->nb_cells(3));
+
+            ImGui::TextUnformatted("Corners:");
+            const auto swatch = [](const std::array<float, 3> &c, const char *label) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(c[0], c[1], c[2], 1.0f), "%s", label);
+            };
+            swatch(m_config.corner_color_unclassified, "free");
+            swatch(m_config.corner_color_on_vertex, "vertex");
+            swatch(m_config.corner_color_on_curve, "curve");
+            swatch(m_config.corner_color_on_surface, "surface");
+            swatch(m_config.corner_color_on_volume, "volume");
         }
         ImGui::EndDisabled();
 

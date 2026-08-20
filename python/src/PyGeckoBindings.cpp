@@ -70,6 +70,13 @@ namespace gecko::python {
                  "(x,y,z) position of the corner node with this id.")
             .def("move_node", &BlockingFacade::move_node, py::arg("node_id"), py::arg("x"), py::arg("y"), py::arg("z"),
                  "Moves the corner node with this id, refitting every incident edge/face/block geometry.")
+            .def("node_classification_dims", &BlockingFacade::node_classification_dims,
+                 "Dimension of the entity each corner node is classified on (0 vertex, 1 curve, 2 surface, "
+                 "3 volume), or -1 if unclassified, in node_ids() order.")
+            .def("edge_vertices", &BlockingFacade::edge_vertices, py::arg("samples") = 1,
+                 "(x,y,z) sample points along every edge of the block structure, ``samples + 1`` per edge.")
+            .def("edge_segments", &BlockingFacade::edge_segments, py::arg("samples") = 1,
+                 "Index pairs joining the points edge_vertices() returns, in the same order.")
             .def("mesh_vertices", &BlockingFacade::mesh_vertices, py::arg("subdivisions") = 1,
                  "(x,y,z) position of every node of the mesh this blocking generates.")
             .def("mesh_quads", &BlockingFacade::mesh_quads, py::arg("subdivisions") = 1,

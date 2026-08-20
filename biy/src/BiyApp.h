@@ -95,6 +95,10 @@ namespace gecko::biy {
         std::optional<int> m_dragged_node;
         /** @brief Subdivisions used when displaying the blocking (1 = raw block structure). */
         int m_subdivisions = 1;
+        /** @brief Whether the block structure's own edges are currently drawn. */
+        bool m_show_block_edges = true;
+        /** @brief Samples per block edge; > 1 traces a curved edge rather than its chord. */
+        int m_edge_samples = 8;
         /** @brief Tolerance the "Classify" button passes to Blocking::classify(). */
         float m_classify_tol = 0.1f;
         /** @brief Last status/error line shown in the panel. */

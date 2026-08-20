@@ -122,6 +122,32 @@ namespace gecko::python {
         void move_node(int node_id, double x, double y, double z);
 
         /**
+         * @brief Gets what each corner node is classified on, in node_ids() order.
+         * @return One entry per node: the dimension of the geometric entity it is classified on
+         *         (0 vertex, 1 curve, 2 surface, 3 volume), or -1 if it is unclassified. Every
+         *         node is unclassified until classify() runs.
+         */
+        [[nodiscard]] std::vector<int> node_classification_dims() const;
+
+        /**
+         * @brief Samples every edge of the block structure along its own curve.
+         *
+         * Together with edge_segments(), gives the block structure's own edges as polylines —
+         * distinct from the subdivision lines of the mesh the blocking generates. For a curved
+         * (degree 3) blocking, @p samples > 1 traces the actual curve rather than its chord.
+         * @param samples Number of intervals to split each edge into (>= 1).
+         * @return One (x,y,z) triple per sample point, `samples + 1` per edge, edge after edge.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> edge_vertices(int samples) const;
+        /**
+         * @brief The segments joining the points edge_vertices() returns, in the same traversal
+         * order (call the two together, without mutating the blocking in between).
+         * @param samples Number of intervals to split each edge into (>= 1).
+         * @return One pair of edge_vertices() indices per segment.
+         */
+        [[nodiscard]] std::vector<std::array<int, 2>> edge_segments(int samples) const;
+
+        /**
          * @brief Generates the mesh reproducing the blocking and returns its node positions.
          * @param subdivisions Number of intervals to subdivide every parametric axis into (>= 1).
          * @return One (x,y,z) triple per mesh node.

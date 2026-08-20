@@ -78,6 +78,48 @@ def test_invalid_degree_raises(geom_model_path):
         gecko.Blocking(model, degree=2)
 
 
+def test_node_classification_dims(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+
+    # Nothing is classified until classify() runs.
+    assert blocking.node_classification_dims() == [-1, -1, -1, -1]
+    assert len(blocking.node_classification_dims()) == len(blocking.node_ids())
+
+    # The fixture declares exactly one model vertex (the origin) and one surface (the triangle
+    # (0,0,0)-(1,0,0)-(0,1,0)). So of the unit square's corners: (0,0,0) hits the vertex, (1,0,0)
+    # and (0,1,0) lie on the triangle itself and classify onto the surface, and (1,1,0) is outside
+    # it and stays unclassified.
+    blocking.classify(1e-6)
+    assert blocking.node_classification_dims() == [0, 2, -1, 2]
+
+
+def test_edge_polylines(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+
+    # A lone quad has 4 edges: samples+1 points and samples segments each.
+    for samples in (1, 5):
+        points = blocking.edge_vertices(samples)
+        segments = blocking.edge_segments(samples)
+        assert len(points) == 4 * (samples + 1)
+        assert len(segments) == 4 * samples
+        # Every segment must index a point that exists, and join consecutive samples.
+        for a, b in segments:
+            assert 0 <= a < len(points)
+            assert b == a + 1
+
+
+def test_edge_vertices_invalid_samples_raises(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    with pytest.raises(ValueError):
+        blocking.edge_vertices(0)
+
+
 def test_nb_cells_invalid_dim_raises(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model)

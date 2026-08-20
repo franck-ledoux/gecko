@@ -173,6 +173,67 @@ namespace gecko::python {
                    m_impl);
     }
 
+    std::vector<int> BlockingFacade::node_classification_dims() const {
+        return std::visit(
+            [](const auto &impl) {
+                std::vector<int> ids;
+                ids.reserve(impl.nodes_by_id.size());
+                for (const auto &[id, node] : impl.nodes_by_id) ids.push_back(id);
+                std::sort(ids.begin(), ids.end()); // node_ids()' order
+
+                std::vector<int> dims;
+                dims.reserve(ids.size());
+                for (const int id : ids) {
+                    const auto &targets = impl.nodes_by_id.at(id)->info().geom_targets;
+                    // Every target of a cell sits at the same dimension (see Blocking::classify),
+                    // so the first one speaks for all of them.
+                    dims.push_back(targets.empty() ? -1 : static_cast<int>(targets.front().first));
+                }
+                return dims;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::edge_vertices(int samples) const {
+        check_subdivisions(samples, "Blocking.edge_vertices");
+        return std::visit(
+            [samples](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i <= samples; ++i) {
+                        const double t = static_cast<double>(i) / static_cast<double>(samples);
+                        const auto p = it->info().curve.value(t);
+                        points.push_back({p.x(), p.y(), p.z()});
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::edge_segments(int samples) const {
+        check_subdivisions(samples, "Blocking.edge_segments");
+        return std::visit(
+            [samples](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < samples; ++i) {
+                        segments.push_back({base + i, base + i + 1});
+                    }
+                    base += samples + 1;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
     std::vector<std::array<double, 3>> BlockingFacade::mesh_vertices(int subdivisions) {
         check_subdivisions(subdivisions, "Blocking.mesh_vertices");
         return std::visit(
