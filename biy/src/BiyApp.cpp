@@ -25,9 +25,15 @@ namespace gecko::biy {
          * which exist only for standalone 2D blocks (see `refresh_view()`). */
         constexpr const char *BLOCK_FACES = "block faces";
         constexpr const char *BLOCK_HEXES = "block hexes";
-        /** @brief The control points driving curved edges, and the polygon joining them. */
-        constexpr const char *CONTROL_POINTS = "control points";
-        constexpr const char *CONTROL_POLYGON = "control polygon";
+        /** @brief The control points driving each curved cell, and the polygon/net/lattice joining
+         * them. Three separate pairs: a face's net already contains its edges' points and a block's
+         * lattice contains both, so they are told apart by color and toggled independently. */
+        constexpr const char *EDGE_CONTROL_POINTS = "edge control points";
+        constexpr const char *EDGE_CONTROL_NET = "edge control polygon";
+        constexpr const char *FACE_CONTROL_POINTS = "face control points";
+        constexpr const char *FACE_CONTROL_NET = "face control net";
+        constexpr const char *BLOCK_CONTROL_POINTS = "block control points";
+        constexpr const char *BLOCK_CONTROL_NET = "block control lattice";
         /** @brief Overlay holding just the corner being dragged, drawn bigger and in its own color.
          * A separate structure rather than a per-point quantity on BLOCK_CORNERS: it keeps the
          * highlight's radius and color independent of the base cloud's, and picking still reports
@@ -61,7 +67,9 @@ namespace gecko::biy {
         std::string config_message;
         m_config = BiyConfig::load("biy_config.json", config_message);
         m_show_block_edges = m_config.show_block_edges;
-        m_show_control_points = m_config.show_control_points;
+        m_show_edge_control = m_config.show_edge_control;
+        m_show_face_control = m_config.show_face_control;
+        m_show_block_control = m_config.show_block_control;
         m_tol_vertex = static_cast<float>(m_config.tol_vertex);
         m_tol_curve = static_cast<float>(m_config.tol_curve);
         m_tol_surface = static_cast<float>(m_config.tol_surface);
@@ -162,7 +170,7 @@ namespace gecko::biy {
             polyscope::removeStructure(polyscope::getCurveNetwork(BLOCK_EDGES));
         }
 
-        refresh_control_points();
+        refresh_control_nets();
 
         // Block faces get their own structure rather than riding on the generated mesh: to_mesh()
         // only emits quads for standalone 2D blocks, so a hex block's 6 bounding faces would
@@ -203,30 +211,62 @@ namespace gecko::biy {
         add(structure, colors)->setEnabled(true);
     }
 
-    void BiyApp::refresh_control_points() {
-        // A degree-1 edge's 2 control points are just its endpoints, already drawn as corners —
-        // there is nothing to reveal, so the structure is never created at that order.
-        const auto points =
-            (m_blocking && m_order > 1) ? m_blocking->edge_control_points() : std::vector<std::array<double, 3>>{};
+    void BiyApp::refresh_control_nets() {
+        // At order 1 every control point coincides with a block corner (an edge's 2 are its
+        // endpoints, a face's 4 its corners, a block's 8 its own), so there is nothing to reveal
+        // and no structure is created.
+        const bool curved = m_blocking && m_order > 1;
+        const std::vector<std::array<double, 3>> none;
+        const std::vector<std::array<int, 2>> no_segments;
+
+        refresh_control_net(EDGE_CONTROL_POINTS,
+                            EDGE_CONTROL_NET,
+                            curved ? m_blocking->edge_control_points() : none,
+                            curved ? m_blocking->edge_control_polygons() : no_segments,
+                            m_config.edge_control_color,
+                            m_show_edge_control);
+        refresh_control_net(FACE_CONTROL_POINTS,
+                            FACE_CONTROL_NET,
+                            curved ? m_blocking->face_control_points() : none,
+                            curved ? m_blocking->face_control_nets() : no_segments,
+                            m_config.face_control_color,
+                            m_show_face_control);
+        refresh_control_net(BLOCK_CONTROL_POINTS,
+                            BLOCK_CONTROL_NET,
+                            curved ? m_blocking->block_control_points() : none,
+                            curved ? m_blocking->block_control_lattices() : no_segments,
+                            m_config.block_control_color,
+                            m_show_block_control);
+    }
+
+    void BiyApp::refresh_control_net(const char *points_name,
+                                     const char *net_name,
+                                     const std::vector<std::array<double, 3>> &points,
+                                     const std::vector<std::array<int, 2>> &segments,
+                                     const std::array<float, 3> &color,
+                                     bool visible) {
         if (points.empty()) {
-            if (polyscope::hasPointCloud(CONTROL_POINTS)) {
-                polyscope::removeStructure(polyscope::getPointCloud(CONTROL_POINTS));
+            if (polyscope::hasPointCloud(points_name)) {
+                polyscope::removeStructure(polyscope::getPointCloud(points_name));
             }
-            if (polyscope::hasCurveNetwork(CONTROL_POLYGON)) {
-                polyscope::removeStructure(polyscope::getCurveNetwork(CONTROL_POLYGON));
+            if (polyscope::hasCurveNetwork(net_name)) {
+                polyscope::removeStructure(polyscope::getCurveNetwork(net_name));
             }
             return;
         }
 
-        auto *cloud = polyscope::registerPointCloud(CONTROL_POINTS, points);
+        // Points and segments are 2 structures rather than a single curve network (which would draw
+        // both) so the points can be spheres big enough to catch the eye while the net stays a thin
+        // scaffold behind them.
+        auto *cloud = polyscope::registerPointCloud(points_name, points);
         cloud->setPointRadius(m_config.control_point_radius);
-        cloud->setPointColor(to_glm(m_config.control_point_color));
-        cloud->setEnabled(m_show_control_points);
+        cloud->setPointColor(to_glm(color));
+        cloud->setEnabled(visible);
 
-        auto *polygon = polyscope::registerCurveNetwork(CONTROL_POLYGON, points, m_blocking->edge_control_polygons());
-        polygon->setRadius(m_config.control_polygon_radius);
-        polygon->setColor(to_glm(m_config.control_point_color));
-        polygon->setEnabled(m_show_control_points);
+        auto *net = polyscope::registerCurveNetwork(net_name, points, segments);
+        net->setRadius(m_config.control_polygon_radius);
+        net->setColor(to_glm(color));
+        net->setEnabled(visible);
     }
 
     void BiyApp::show_highlight(std::optional<int> node_id) {
@@ -348,10 +388,15 @@ namespace gecko::biy {
         if (ImGui::Checkbox("Show block edges", &m_show_block_edges)) refresh_view();
 
         ImGui::BeginDisabled(m_order <= 1);
-        if (ImGui::Checkbox("Show control points", &m_show_control_points)) refresh_view();
+        ImGui::TextUnformatted("Control points");
+        if (ImGui::Checkbox("edges", &m_show_edge_control)) refresh_view();
+        ImGui::SameLine();
+        if (ImGui::Checkbox("faces", &m_show_face_control)) refresh_view();
+        ImGui::SameLine();
+        if (ImGui::Checkbox("blocks", &m_show_block_control)) refresh_view();
         ImGui::EndDisabled();
         if (m_order <= 1 && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Order 1 edges are straight: their control points are just the corners.");
+            ImGui::SetTooltip("At order 1 every control point is just a block corner.");
         }
 
         if (ImGui::Button("Export VTK")) {

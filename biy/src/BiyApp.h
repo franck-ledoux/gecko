@@ -101,8 +101,25 @@ namespace gecko::biy {
          */
         template<typename TStructure, typename TAdd>
         void apply_classification_colors(TStructure *structure, const std::vector<int> &dims, TAdd add);
-        /** @brief Registers (or removes) the control-point cloud and its control polygon. */
-        void refresh_control_points();
+        /** @brief Registers (or removes) all three control displays: edge polygons, face nets and
+         * block lattices. */
+        void refresh_control_nets();
+        /**
+         * @brief Registers (or removes) one control display: its points, drawn as spheres, and the
+         * segments joining them.
+         * @param points_name Polyscope name for the point cloud.
+         * @param net_name Polyscope name for the segments.
+         * @param points The control points.
+         * @param segments Index pairs joining them.
+         * @param color Color of both.
+         * @param visible Whether the pair is currently shown.
+         */
+        void refresh_control_net(const char *points_name,
+                                 const char *net_name,
+                                 const std::vector<std::array<double, 3>> &points,
+                                 const std::vector<std::array<int, 2>> &segments,
+                                 const std::array<float, 3> &color,
+                                 bool visible);
         /** @brief Creates a hex block spanning the model's bounding box, scaled by @p AMargin. */
         void create_bounding_box(double margin);
         /** @brief Draws the button panel. Assumes the ImGui frame is already set up. */
@@ -129,8 +146,12 @@ namespace gecko::biy {
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */
         bool m_show_block_edges = true;
-        /** @brief Whether curved edges' control points and control polygons are currently drawn. */
-        bool m_show_control_points = false;
+        /** @brief Whether each kind of control display is currently drawn. */
+        bool m_show_edge_control = false;
+        /** @copydoc m_show_edge_control */
+        bool m_show_face_control = false;
+        /** @copydoc m_show_edge_control */
+        bool m_show_block_control = false;
         /** @brief Samples per block edge; > 1 traces a curved edge rather than its chord. */
         int m_edge_samples = 8;
         /** @brief Edge order of the blocking, fixed at construction (see the `order` argument). */

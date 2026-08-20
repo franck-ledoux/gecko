@@ -181,6 +181,99 @@ TEST_CASE("snap_node_reclassifies_the_node_and_its_incident_edges", "[BlockTestS
     REQUIRE(e->info().geom_targets[0] == std::pair{GroupDim::Dim1, Int{10}});
 }
 
+TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[BlockTestSuite]") {
+    // The bottom boundary curve is a 2-segment polyline bulging up to (0.5, 0.25, 0), so following
+    // it genuinely requires bending — a straight edge is 0.25 away from it at mid-span.
+    SimplicialMesh mesh;
+    auto v0 = mesh.add_node(0, 0, 0);
+    auto v1 = mesh.add_node(1, 0, 0);
+    auto v2 = mesh.add_node(1, 1, 0);
+    auto v3 = mesh.add_node(0, 1, 0);
+    auto vm = mesh.add_node(0.5, 0.25, 0);
+
+    GroupRegistry groups;
+    auto vtx_group = groups.add_group("Vertices", GroupDim::Dim0);
+    auto curve_group = groups.add_group("Curves", GroupDim::Dim1);
+    auto surf_group = groups.add_group("Surf", GroupDim::Dim2);
+
+    auto &node_group = mesh.add_variable<GroupId, CellType::Node>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+    auto &node_entity = mesh.add_variable<Int, CellType::Node>(std::string(io::ENTITY_TAG_VARIABLE));
+    const std::array<NodeId, 4> corners{v0, v1, v2, v3};
+    for (std::size_t i = 0; i < 4; ++i) {
+        node_group[corners[i].value] = vtx_group;
+        node_entity[corners[i].value] = static_cast<Int>(i + 1);
+    }
+
+    auto &edge_group = mesh.add_variable<GroupId, CellType::Edge>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+    auto &edge_entity = mesh.add_variable<Int, CellType::Edge>(std::string(io::ENTITY_TAG_VARIABLE));
+    for (auto e : {mesh.add_edge(v0, vm), mesh.add_edge(vm, v1)}) {
+        edge_group[e.value] = curve_group;
+        edge_entity[e.value] = 10;
+    }
+
+    auto &face_group = mesh.add_variable<GroupId, CellType::Face>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+    auto &face_entity = mesh.add_variable<Int, CellType::Face>(std::string(io::ENTITY_TAG_VARIABLE));
+    for (auto f : {mesh.add_face(v0, v1, v2), mesh.add_face(v0, v2, v3)}) {
+        face_group[f.value] = surf_group;
+        face_entity[f.value] = 20;
+    }
+
+    const auto path = (std::filesystem::temp_directory_path() / "gecko_block_bent_curve_test.msh").string();
+    io::SimplicialMeshWriter::write(path, mesh, groups);
+    const FacetedGeometry geom(path);
+    std::filesystem::remove(path);
+
+    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    blocking.create_quad_block({Point3d(0, 0, 0), Point3d(1, 0, 0), Point3d(1, 1, 0), Point3d(0, 1, 0)});
+    blocking.classify(1e-6);
+
+    const auto e = edge_between(blocking, Point3d(0, 0, 0), Point3d(1, 0, 0));
+    REQUIRE(e->info().geom_targets[0] == std::pair{GroupDim::Dim1, Int{10}});
+
+    const auto *curve = geom.curve_by_tag(10);
+    REQUIRE(curve != nullptr);
+
+    // The exact guarantee interpolation buys: the curve *passes through* the points sampled on the
+    // geometry, at the parameters they were sampled at. Projecting the control points instead would
+    // leave the curve bowed strictly inside them, touching the geometry only at its 2 endpoints.
+    REQUIRE(curve->distance(e->info().curve.value(1.0 / 3.0)) == Approx(0.0).margin(1e-9));
+    REQUIRE(curve->distance(e->info().curve.value(2.0 / 3.0)) == Approx(0.0).margin(1e-9));
+
+    // Between those parameters it can only approximate: the samples are projections of evenly
+    // spaced chord points, which all land on the polyline's flanks, so no smooth cubic through them
+    // reaches the apex. Measure that residual against what projecting the control points would have
+    // given on the very same edge, rather than trusting a hand-picked threshold.
+    const auto worst_distance = [&curve](const BezierCurve<3, Point3d> &ACurve) {
+        double worst = 0.0;
+        for (int i = 0; i <= 50; ++i) {
+            worst = std::max(worst, curve->distance(ACurve.value(static_cast<double>(i) / 50.0)));
+        }
+        return worst;
+    };
+
+    BezierCurve<3, Point3d> control_point_projection;
+    const Vector3d chord(Point3d(0, 0, 0), Point3d(1, 0, 0));
+    for (std::size_t i = 0; i < 4; ++i) {
+        Point3d cp = Point3d(0, 0, 0) + chord * (static_cast<double>(i) / 3.0);
+        if (i > 0 && i < 3) curve->project(cp);
+        control_point_projection[i] = cp;
+    }
+
+    // Measured here: 0.089 interpolated vs 0.134 projected. The gap is modest on this deliberately
+    // pathological V — its kink is unreachable by any smooth cubic — and the residual is a sampling
+    // limitation, not a fitting one: evenly spaced chord points never sample near the apex. On the
+    // smooth curves real CAD produces, the interpolated fit is essentially exact. What matters is
+    // that the curve now touches the geometry at every sample parameter, which the assertions above
+    // pin exactly, instead of only at its 2 endpoints.
+    const double fitted_error = worst_distance(e->info().curve);
+    const double projected_error = worst_distance(control_point_projection);
+    INFO("interpolated: " << fitted_error << "  control-point projection: " << projected_error);
+    REQUIRE(fitted_error < projected_error);
+
+    // And it really is bent: the straight chord it started as passes 0.25 from the apex.
+    REQUIRE(e->info().curve.value(0.5).y() > 0.15);
+}
+
 TEST_CASE("snap_node_leaves_cells_it_does_not_touch_alone", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_square_geom_model();
     Blocking<FacetedGeometry> blocking(geom);

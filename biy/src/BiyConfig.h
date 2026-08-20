@@ -39,14 +39,23 @@ namespace gecko::biy {
          * blocking is built around and inside the model, and an opaque model hides all of it. */
         double model_transparency = 0.45;
 
-        /** @brief Whether curved edges' control points are drawn at startup. */
-        bool show_control_points = false;
-        /** @brief Radius of a control point. */
+        /** @brief Whether edges' control points and control polygons are drawn at startup. */
+        bool show_edge_control = false;
+        /** @brief Whether faces' control points and control nets are drawn at startup. */
+        bool show_face_control = false;
+        /** @brief Whether blocks' control points and control lattices are drawn at startup. */
+        bool show_block_control = false;
+        /** @brief Radius of a control point, shared by edges, faces and blocks. */
         double control_point_radius = 0.006;
-        /** @brief Thickness of the control polygon joining them. */
+        /** @brief Thickness of the polygon/net/lattice joining them. */
         double control_polygon_radius = 0.002;
-        /** @brief Color of both the control points and their polygon. */
-        std::array<float, 3> control_point_color{0.1f, 0.8f, 0.8f};
+        /** @brief Color of the edge control polygon and its points. */
+        std::array<float, 3> edge_control_color{0.1f, 0.8f, 0.8f};
+        /** @brief Color of the face control net and its points. Distinct from the other two, since
+         * a face's net contains its edges' points and the three overlap on screen. */
+        std::array<float, 3> face_control_color{0.95f, 0.55f, 0.1f};
+        /** @brief Color of the block control lattice and its points. */
+        std::array<float, 3> block_control_color{0.55f, 0.85f, 0.3f};
 
         /** @brief Default tolerance for snapping onto a model vertex — the tight one, since 2
          * vertices are usually far closer to each other than to any curve. */

@@ -95,9 +95,28 @@ doesn't touch can have changed.
 
 ## Control points
 
-**Show control points** draws the handles actually driving each curved edge, plus the control
-polygon joining them. Only meaningful above order 1, where an edge's 2 control points are just its
-corners — the checkbox is disabled there.
+**Control points** has one checkbox per kind, drawing the handles that actually drive each curved
+cell together with the scaffold joining them:
+
+| Checkbox | Shows                                                | Points per cell |
+| -------- | ---------------------------------------------------- | --------------- |
+| edges    | each edge's control polygon                          | `order + 1`     |
+| faces    | each face's control net, along `u` and `v`           | `(order + 1)²`  |
+| blocks   | each block's control lattice, along `u`, `v` and `w` | `(order + 1)³`  |
+
+They are colored differently because they overlap: a face's net already contains its edges' control
+points, and a block's lattice contains both. All three are disabled at order 1, where every control
+point is simply a block corner.
+
+Expect the lattice to stick out beyond the block it drives — a Bezier lies inside the convex hull of
+its control points, not through them, so the handles sit outside the shape they bend.
+
+That same property is why classification **interpolates** rather than projecting control points onto
+the geometry. Moving a control point onto a geometric curve does not put the *curve* there: it
+passes through its 2 endpoints only, staying strictly inside its handles, and so ends up bowed short
+of the geometry it should follow. `classify()` instead samples points on the geometry and solves for
+the control points that make the edge pass through them — which is exactly why the handles you see
+do not lie on the model.
 
 !!! note
     Green (volume) is not one of the four states you might expect, but `classify()` does produce it,
@@ -163,10 +182,14 @@ is a copy of the defaults:
   "block_edge_radius": 0.003,
   "block_edge_color": [0.15, 0.15, 0.15],
 
-  "show_control_points": false,
+  "show_edge_control": false,
+  "show_face_control": false,
+  "show_block_control": false,
   "control_point_radius": 0.006,
   "control_polygon_radius": 0.002,
-  "control_point_color": [0.1, 0.8, 0.8]
+  "edge_control_color": [0.1, 0.8, 0.8],
+  "face_control_color": [0.95, 0.55, 0.1],
+  "block_control_color": [0.55, 0.85, 0.3]
 }
 ```
 

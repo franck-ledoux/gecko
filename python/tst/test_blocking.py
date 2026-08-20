@@ -126,6 +126,42 @@ def test_every_supported_degree(geom_model_path, degree):
     assert len(blocking.edge_control_polygons()) == 4 * degree
 
 
+@pytest.mark.parametrize("degree", [1, 2, 3, 4])
+def test_face_and_block_control_nets(geom_model_path, degree):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=degree)
+    blocking.create_hex_block(_UNIT_HEX)
+    n = degree + 1
+
+    face_points = blocking.face_control_points()
+    face_net = blocking.face_control_nets()
+    block_points = blocking.block_control_points()
+    block_net = blocking.block_control_lattices()
+
+    # 6 faces with an (n x n) grid each; 1 block with an (n x n x n) grid.
+    assert len(face_points) == 6 * n * n
+    assert len(block_points) == n**3
+    # Per face: n rows and n columns, each of n-1 segments. Per block: 3 axes of n*n lines.
+    assert len(face_net) == 6 * 2 * n * (n - 1)
+    assert len(block_net) == 3 * n * n * (n - 1)
+
+    # No segment may join two different faces (or two different blocks).
+    for a, b in face_net:
+        assert a // (n * n) == b // (n * n)
+    for a, b in block_net:
+        assert max(a, b) < len(block_points)
+
+
+def test_degree_one_block_control_points_are_its_corners(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=1)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    assert sorted(tuple(p) for p in blocking.block_control_points()) == sorted(set(_UNIT_HEX))
+    # The 12 lattice segments of a straight block are exactly the cube's 12 edges.
+    assert len(blocking.block_control_lattices()) == 12
+
+
 @pytest.mark.parametrize("degree", [0, 5])
 def test_unsupported_degree_raises(geom_model_path, degree):
     model = gecko.GeomModel(geom_model_path)

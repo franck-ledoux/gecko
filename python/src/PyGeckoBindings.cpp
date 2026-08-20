@@ -127,6 +127,18 @@ namespace gecko::python {
             .def("edge_control_polygons",
                  &BlockingFacade::edge_control_polygons,
                  "Index pairs joining consecutive control points within each edge.")
+            .def("face_control_points",
+                 &BlockingFacade::face_control_points,
+                 "(x,y,z) control points of every block face, ``(degree+1)**2`` per face.")
+            .def("face_control_nets",
+                 &BlockingFacade::face_control_nets,
+                 "Index pairs joining each face control point to its neighbours along u and v.")
+            .def("block_control_points",
+                 &BlockingFacade::block_control_points,
+                 "(x,y,z) control points of every block, ``(degree+1)**3`` per block.")
+            .def("block_control_lattices",
+                 &BlockingFacade::block_control_lattices,
+                 "Index pairs joining each block control point to its neighbours along u, v and w.")
             .def("face_grid_vertices",
                  &BlockingFacade::face_grid_vertices,
                  py::arg("subdivisions") = 1,

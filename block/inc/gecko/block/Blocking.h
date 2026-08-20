@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <limits>
@@ -923,14 +924,21 @@ namespace gecko {
         }
 
         /**
-         * @brief Classifies one edge and refits its curve: its 2 endpoints are pinned to their
-         * (already-classified) nodes' current positions, and its interior control points are
-         * re-derived by straight-line interpolation between those endpoints, then projected onto the
-         * nearest classification target, if any.
+         * @brief Classifies one edge and refits its curve so that the curve itself lies on what it
+         * is classified on, its 2 endpoints pinned to their (already-classified) nodes.
          *
          * Classification is inferred from the edge's own 2 corner nodes via `infer_targets()`,
          * falling back to a proximity search at its midpoint when they can't decide (an
          * unclassified corner, or corners with no common containing entity).
+         *
+         * The fit **interpolates points sampled on the geometry** rather than projecting the control
+         * points onto it. Projecting the control points is the tempting shortcut, and it is wrong: a
+         * Bezier curve passes through its 2 endpoints but *not* through its interior control points,
+         * staying strictly inside their convex hull — so control points sitting exactly on a curved
+         * geometric curve leave the actual edge bowed off it, always falling short of the geometry
+         * it is supposed to follow. Instead, points on the geometry are obtained first (by projecting
+         * a straight-line guess), and the control points that make the curve pass *through* those
+         * points are then solved for — see `interpolating_curve()`.
          *
          * @param AEdge The edge to classify and refit.
          * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
@@ -950,16 +958,107 @@ namespace gecko {
 
             constexpr std::size_t n = TEdgeCurve::NumControlPoints;
             const Vector3d chord(p0, p1);
-            TEdgeCurve fitted;
+
+            // The points the fitted curve must pass through: its 2 endpoints, plus interior samples
+            // pulled onto the geometry. Without a classification there is nothing to pull them onto,
+            // so they stay on the chord and the fit collapses to the straight edge.
+            std::array<Point3d, n> samples{};
             for (std::size_t i = 0; i < n; ++i) {
                 const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
-                Point3d cp = p0 + chord * t;
+                Point3d s = p0 + chord * t;
                 if (result.any() && i > 0 && i + 1 < n) {
-                    project_onto(result.nearest_dim, result.nearest_tag, cp);
+                    project_onto(result.nearest_dim, result.nearest_tag, s);
                 }
-                fitted[i] = cp;
+                samples[i] = s;
             }
-            AEdge->info().curve = fitted;
+            samples[0] = p0;
+            samples[n - 1] = p1;
+
+            AEdge->info().curve = interpolating_curve(samples);
+        }
+
+        /**
+         * @brief Builds the curve of degree `TEdgeCurve::Degree` passing through @p ASamples at
+         * uniform parameters `t_i = i/(n-1)`.
+         *
+         * Solves `sum_j B_j(t_i) * P_j = S_i` for the control points `P`, where `B_j` are the
+         * Bernstein basis polynomials. The 2 endpoints are already control points (a Bezier
+         * interpolates them), so only the interior ones are unknown, leaving an `(n-2)x(n-2)` system
+         * — at most 3x3 here, small enough for plain Gaussian elimination with partial pivoting and
+         * not worth pulling in a linear algebra dependency for.
+         *
+         * @param ASamples The `n` points to pass through, first and last being the endpoints.
+         * @return The interpolating curve. Returns the samples as-is when there is no interior
+         *         control point to solve for (degree 1), where the curve already interpolates them.
+         */
+        static TEdgeCurve interpolating_curve(const std::array<Point3d, TEdgeCurve::NumControlPoints> &ASamples) {
+            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            constexpr std::size_t degree = n - 1;
+            constexpr std::size_t unknowns = (n > 2) ? n - 2 : 0;
+
+            TEdgeCurve fitted;
+            fitted[0] = ASamples[0];
+            fitted[n - 1] = ASamples[n - 1];
+            if constexpr (unknowns == 0) {
+                return fitted;
+            } else {
+                // Augmented system: `unknowns` equations, one per interior sample, with the 3
+                // coordinates carried as 3 right-hand sides (the matrix is the same for all of them).
+                std::array<std::array<double, unknowns + 3>, unknowns> sys{};
+                for (std::size_t r = 0; r < unknowns; ++r) {
+                    const double t = static_cast<double>(r + 1) / static_cast<double>(degree);
+                    for (std::size_t c = 0; c < unknowns; ++c) {
+                        sys[r][c] = bernstein(degree, c + 1, t);
+                    }
+                    // Move the 2 known endpoint terms over to the right-hand side.
+                    const Vector3d rhs = Vector3d(Point3d(0, 0, 0), ASamples[r + 1]) -
+                                         Vector3d(Point3d(0, 0, 0), ASamples[0]) * bernstein(degree, 0, t) -
+                                         Vector3d(Point3d(0, 0, 0), ASamples[n - 1]) * bernstein(degree, degree, t);
+                    sys[r][unknowns] = rhs.x();
+                    sys[r][unknowns + 1] = rhs.y();
+                    sys[r][unknowns + 2] = rhs.z();
+                }
+
+                for (std::size_t col = 0; col < unknowns; ++col) {
+                    std::size_t pivot = col;
+                    for (std::size_t r = col + 1; r < unknowns; ++r) {
+                        if (std::abs(sys[r][col]) > std::abs(sys[pivot][col])) pivot = r;
+                    }
+                    std::swap(sys[col], sys[pivot]);
+                    // A Bernstein collocation matrix at distinct parameters is non-singular, so this
+                    // only guards against a degenerate build rather than an expected case.
+                    if (std::abs(sys[col][col]) < 1e-300) continue;
+                    for (std::size_t r = 0; r < unknowns; ++r) {
+                        if (r == col) continue;
+                        const double factor = sys[r][col] / sys[col][col];
+                        for (std::size_t c = col; c < unknowns + 3; ++c) {
+                            sys[r][c] -= factor * sys[col][c];
+                        }
+                    }
+                }
+
+                for (std::size_t r = 0; r < unknowns; ++r) {
+                    const double d = sys[r][r];
+                    fitted[r + 1] = Point3d(sys[r][unknowns] / d, sys[r][unknowns + 1] / d, sys[r][unknowns + 2] / d);
+                }
+                return fitted;
+            }
+        }
+
+        /**
+         * @brief Evaluates the Bernstein basis polynomial `B_i^n(t) = C(n,i) t^i (1-t)^(n-i)`.
+         * @param ADegree The basis degree `n`.
+         * @param AIndex The basis index `i`, in `[0, ADegree]`.
+         * @param AT The parameter.
+         * @return The value of the polynomial.
+         */
+        static double bernstein(std::size_t ADegree, std::size_t AIndex, double AT) {
+            double binomial = 1.0;
+            for (std::size_t k = 0; k < AIndex; ++k) {
+                binomial = binomial * static_cast<double>(ADegree - k) / static_cast<double>(k + 1);
+            }
+            return binomial * std::pow(AT, static_cast<double>(AIndex)) *
+                   std::pow(1.0 - AT, static_cast<double>(ADegree - AIndex));
         }
 
         /**

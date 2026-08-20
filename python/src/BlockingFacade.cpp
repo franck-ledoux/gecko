@@ -295,6 +295,99 @@ namespace gecko::python {
             m_impl);
     }
 
+    std::vector<std::array<double, 3>> BlockingFacade::face_control_points() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    const auto &grid = it->info().surface.control_points();
+                    for (const auto &row : grid) {
+                        for (const auto &cp : row) {
+                            points.push_back({cp.x(), cp.y(), cp.z()});
+                        }
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::face_control_nets() const {
+        return std::visit(
+            [](const auto &impl) {
+                constexpr int n = std::decay_t<decltype(impl)>::DEGREE + 1;
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < n; ++i) {
+                        for (int j = 0; j < n; ++j) {
+                            const int here = base + i * n + j;
+                            if (i + 1 < n) segments.push_back({here, here + n}); // along u
+                            if (j + 1 < n) segments.push_back({here, here + 1}); // along v
+                        }
+                    }
+                    base += n * n;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::block_control_points() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
+                     it != itend;
+                     ++it) {
+                    const auto &grid = it->info().volume.control_points();
+                    for (const auto &plane : grid) {
+                        for (const auto &row : plane) {
+                            for (const auto &cp : row) {
+                                points.push_back({cp.x(), cp.y(), cp.z()});
+                            }
+                        }
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::block_control_lattices() const {
+        return std::visit(
+            [](const auto &impl) {
+                constexpr int n = std::decay_t<decltype(impl)>::DEGREE + 1;
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < n; ++i) {
+                        for (int j = 0; j < n; ++j) {
+                            for (int k = 0; k < n; ++k) {
+                                const int here = base + (i * n + j) * n + k;
+                                if (i + 1 < n) segments.push_back({here, here + n * n}); // along u
+                                if (j + 1 < n) segments.push_back({here, here + n});     // along v
+                                if (k + 1 < n) segments.push_back({here, here + 1});     // along w
+                            }
+                        }
+                    }
+                    base += n * n * n;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
     std::vector<std::array<double, 3>> BlockingFacade::face_grid_vertices(int subdivisions) const {
         check_subdivisions(subdivisions, "Blocking.face_grid_vertices");
         return std::visit(

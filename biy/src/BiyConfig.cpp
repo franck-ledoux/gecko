@@ -69,10 +69,14 @@ namespace gecko::biy {
             read_color(j, "corner_color_on_surface", config.corner_color_on_surface);
             read_color(j, "corner_color_on_volume", config.corner_color_on_volume);
             read_double(j, "model_transparency", config.model_transparency);
-            read_bool(j, "show_control_points", config.show_control_points);
+            read_bool(j, "show_edge_control", config.show_edge_control);
+            read_bool(j, "show_face_control", config.show_face_control);
+            read_bool(j, "show_block_control", config.show_block_control);
             read_double(j, "control_point_radius", config.control_point_radius);
             read_double(j, "control_polygon_radius", config.control_polygon_radius);
-            read_color(j, "control_point_color", config.control_point_color);
+            read_color(j, "edge_control_color", config.edge_control_color);
+            read_color(j, "face_control_color", config.face_control_color);
+            read_color(j, "block_control_color", config.block_control_color);
             read_double(j, "tol_vertex", config.tol_vertex);
             read_double(j, "tol_curve", config.tol_curve);
             read_double(j, "tol_surface", config.tol_surface);

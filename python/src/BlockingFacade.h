@@ -186,6 +186,34 @@ namespace gecko::python {
         [[nodiscard]] std::vector<std::array<int, 2>> edge_control_polygons() const;
 
         /**
+         * @brief Gets every block face's control points — the `(degree+1)²` grid driving its Bezier
+         * surface, the 2D counterpart of edge_control_points().
+         * @return `(degree+1)²` (x,y,z) triples per face, face after face, row-major (`u` outer,
+         *         `v` inner), in the traversal order face_classification_dims() uses.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> face_control_points() const;
+        /**
+         * @brief The segments of every face's control net, joining each control point to its
+         * neighbours along `u` and `v` within one face.
+         * @return One pair of face_control_points() indices per segment.
+         */
+        [[nodiscard]] std::vector<std::array<int, 2>> face_control_nets() const;
+
+        /**
+         * @brief Gets every block's control points — the `(degree+1)³` grid driving its Bezier
+         * volume, the 3D counterpart of edge_control_points().
+         * @return `(degree+1)³` (x,y,z) triples per block, block after block, row-major
+         *         (`u` outermost, `w` innermost).
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> block_control_points() const;
+        /**
+         * @brief The segments of every block's control lattice, joining each control point to its
+         * neighbours along `u`, `v` and `w` within one block.
+         * @return One pair of block_control_points() indices per segment.
+         */
+        [[nodiscard]] std::vector<std::array<int, 2>> block_control_lattices() const;
+
+        /**
          * @brief Samples every block face into a grid of quads, for display.
          *
          * Unlike mesh_quads(), which only emits anything for standalone 2D blocks, this covers the
