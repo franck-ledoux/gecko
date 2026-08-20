@@ -380,13 +380,18 @@ namespace gecko::biy {
         }
 
         ImGui::SetNextItemWidth(120.0f);
-        if (ImGui::InputInt("subdivisions", &m_subdivisions)) {
+        // The step sizes are given explicitly because InputInt's own default fast step is 100 —
+        // meaningless over a 1..20 range, and reachable without meaning to: ImGui applies it when
+        // io.KeyCtrl is set, which on macOS means Cmd (ConfigMacOSXBehaviors swaps the two). With
+        // the cap in place that turned every arrow click into a jump straight to one end or the
+        // other.
+        if (ImGui::InputInt("subdivisions", &m_subdivisions, 1, 5)) {
             m_subdivisions = std::clamp(m_subdivisions, 1, MAX_SUBDIVISIONS);
             refresh_view();
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("1 to %d. Each step costs cubically on a 3D blocking — %d subdivisions "
-                              "already means %d hexes per block.",
+            ImGui::SetTooltip("1 to %d (Cmd-click the arrows to step by 5). Each step costs cubically on a "
+                              "3D blocking — %d subdivisions already means %d hexes per block.",
                               MAX_SUBDIVISIONS,
                               MAX_SUBDIVISIONS,
                               MAX_SUBDIVISIONS * MAX_SUBDIVISIONS * MAX_SUBDIVISIONS);
