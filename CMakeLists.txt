@@ -23,6 +23,10 @@ option(GECKO_BUILD_SANDBOX "Build the gecko_sandbox scratch executable" ON)
 # Builds the python/ pybind11 module and its pytest suite. Default: OFF, since it needs a Python
 # development environment (Python.h) that isn't guaranteed present; CI turns it ON explicitly.
 option(GECKO_BUILD_PYTHON "Build the gecko_py Python bindings and their tests" OFF)
+# Builds the biy/ interactive 3D blocking viewer. Default: OFF, since on top of a Python
+# development environment it needs a GL/windowing stack (Polyscope's own dependency) that CI
+# runners don't currently provide.
+option(GECKO_BUILD_BIY "Build the biy interactive 3D blocking viewer" OFF)
 # Option to activate/desactivate code coverage during unit testing
 option(GECKO_CODE_COVERAGE "Perform code coverage with avail. test suites"               OFF)
 option(GECKO_CODE_COVERAGE_HTML_REPORT "Activate html reporting during code covering"    OFF)
@@ -65,9 +69,16 @@ set(CATCH_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/Catch2)
 
-# pybind11 (only pulled in — and only requires a Python dev environment — when actually needed)
-if (GECKO_BUILD_PYTHON)
+# pybind11 (only pulled in — and only requires a Python dev environment — when actually needed).
+# biy needs it too, for its embedded interpreter.
+if (GECKO_BUILD_PYTHON OR GECKO_BUILD_BIY)
     add_subdirectory(external/pybind11)
+endif ()
+
+# Polyscope (biy's 3D viewer). Vendored with its own dependencies (GLFW, ImGui, glm, ...), but
+# still needs the platform's GL/windowing headers, hence its own opt-in option.
+if (GECKO_BUILD_BIY)
+    add_subdirectory(external/polyscope)
 endif ()
 
 
@@ -286,4 +297,8 @@ endif ()
 
 if (GECKO_BUILD_PYTHON)
     add_subdirectory(python)
+endif ()
+
+if (GECKO_BUILD_BIY)
+    add_subdirectory(biy)
 endif ()

@@ -400,29 +400,31 @@ namespace gecko {
         void move_node(Node ANode, const Point3d &ANewPosition) {
             ANode->info().point = ANewPosition;
 
-            const Dart nd = ANode->dart();
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 0>(nd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 0>(nd).end();
+            // Swept exhaustively rather than through `one_dart_per_incident_cell<i,0>`: a vertex's
+            // own dart orbit only reaches its other incident cells through beta2/beta3, so on a
+            // standalone (still unsewn) block a corner's orbit is a single dart and the incidence
+            // iterators silently miss most of the cells that actually touch it. Same full-sweep
+            // shape as `classify()`; a blocking is small enough for that to be irrelevant.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
                  it != itend;
                  ++it) {
-                const Edge e = m_cmap.template attribute<1>(it);
-                const Node n0 = m_cmap.template attribute<0>(it);
-                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(it));
-                e->info().curve = straight_curve(n0->info().point, n1->info().point);
+                const Dart d = it->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (n0 != ANode && n1 != ANode) continue;
+                it->info().curve = straight_curve(n0->info().point, n1->info().point);
             }
 
-            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 0>(nd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<2, 0>(nd).end();
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                rebuild_face_surface(m_cmap.template attribute<2>(it));
+                if (face_has_node(it, ANode)) rebuild_face_surface(it);
             }
 
-            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 0>(nd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<3, 0>(nd).end();
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                if (const Block b = m_cmap.template attribute<3>(it); b != nullptr) rebuild_block_volume(b);
+                if (block_has_node(it, ANode)) rebuild_block_volume(it);
             }
         }
 
@@ -796,6 +798,38 @@ namespace gecko {
          * half of `classify_and_rebuild_face()`, also used on its own by `move_node()`.
          * @param AFace The face to rebuild.
          */
+        /**
+         * @brief Checks whether @p ANode is one of @p AFace's 4 corners.
+         * @param AFace The face to inspect.
+         * @param ANode The node to look for.
+         * @return true if the face has that corner.
+         */
+        bool face_has_node(Face AFace, Node ANode) {
+            Dart walk = AFace->dart();
+            for (std::size_t c = 0; c < 4; ++c) {
+                if (m_cmap.template attribute<0>(walk) == ANode) return true;
+                walk = m_cmap.template beta<1>(walk);
+            }
+            return false;
+        }
+
+        /**
+         * @brief Checks whether @p ANode is one of @p ABlock's 8 corners.
+         * @param ABlock The block to inspect.
+         * @param ANode The node to look for.
+         * @return true if the block has that corner.
+         */
+        bool block_has_node(Block ABlock, Node ANode) {
+            const Dart bd = ABlock->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<0>(it) == ANode) return true;
+            }
+            return false;
+        }
+
         void rebuild_face_surface(Face AFace) {
             const Dart fd = AFace->dart();
             std::array<Node, 4> local_nodes{};

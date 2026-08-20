@@ -1,0 +1,87 @@
+# biy — Block It Yourself
+
+`biy` is Gecko's interactive 3D viewer for building a block structure against a geometric model.
+It loads a Gmsh `.msh` file as a [`GeomModel`](python.md#geommodel), shows it in a
+[Polyscope](https://polyscope.run) window, and lets you build, deform and classify a
+[`Blocking`](python.md#blocking) on top of it — from the on-screen panel, by dragging block corners
+with the mouse, or by typing Python at the console, all acting on the same live objects.
+
+## Building
+
+`biy` is opt-in: on top of a Python development environment it needs a GL/windowing stack, so it
+isn't built (or exercised in CI) by default.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_BIY=ON
+cmake --build build --target biy
+```
+
+## Running
+
+```bash
+./build/biy/biy test_data/two_cubes.msh
+```
+
+Two things start together:
+
+- a **3D window** showing the model's facets, with a panel of actions; and
+- a **Python console** on the terminal you launched from, where `model` and `blocking` are already
+  bound.
+
+They are not two copies of the data kept in sync — the console's `blocking` *is* the object the
+window draws, so a change made either way shows up immediately in the other.
+
+## The panel
+
+| Button | What it does |
+| --- | --- |
+| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin |
+| Build connectivity | Sews coincident blocks together (see `Blocking::build_connectivity`) |
+| Classify | Snaps the blocking onto the model's vertices/curves/surfaces, within the given tolerance |
+| Export VTK | Writes the generated mesh to `biy_blocking.vtk` |
+
+`subdivisions` controls how finely the blocking is meshed for display and export: `1` shows the raw
+block structure, higher values show the mesh it generates.
+
+## Moving corners
+
+The block's corners are drawn as points. Drag one with the left mouse button and it follows the
+mouse in the plane facing the camera; every edge, face and block touching it is refitted live, so
+the block visibly deforms as you drag. Dragging does not re-classify — run **Classify** afterwards
+to snap the moved corners back onto the geometry.
+
+## The Python console
+
+Everything the panel does is also reachable from the console, which is the point: the panel is a
+convenience, the console is the full API.
+
+```python
+>>> vs = model.mesh_vertices()
+>>> lo = [min(v[k] for v in vs) for k in range(3)]
+>>> hi = [max(v[k] for v in vs) for k in range(3)]
+>>> blocking.create_hex_block([(lo[0],lo[1],lo[2]), (hi[0],lo[1],lo[2]), (hi[0],hi[1],lo[2]), (lo[0],hi[1],lo[2]),
+...                            (lo[0],lo[1],hi[2]), (hi[0],lo[1],hi[2]), (hi[0],hi[1],hi[2]), (lo[0],hi[1],hi[2])])
+0
+>>> blocking.node_ids()
+[0, 1, 2, 3, 4, 5, 6, 7]
+>>> blocking.move_node(6, hi[0] + 1.5, hi[1] + 1.5, hi[2] + 1.0)
+>>> blocking.classify(0.3)
+>>> blocking.write_vtk(2, "blocking.vtk")
+```
+
+The console exposes exactly the API documented in [Python Bindings](python.md) — it registers the
+same bindings as the standalone `gecko` module, so `import gecko` works here too.
+
+Press `Ctrl-D` in the console, or close the window, to quit.
+
+## Implementation notes
+
+Polyscope drives rendering from the main thread through its non-blocking `frameTick()`, rather than
+its usual blocking `show()`; the Python interpreter is embedded (not a subprocess) and its REPL runs
+on a second thread. A single mutex guards the facade objects, taken by the REPL around each
+statement and by the render thread around each frame, so both can touch the same state safely. That
+avoids the serialization layer a separate-process viewer would need, at the cost of the two sides
+sharing a process.
+
+`BIY_SCREENSHOT=<path>` renders a few frames, saves the window to that file and exits — a way to
+check the rendering path without a human at the keyboard.

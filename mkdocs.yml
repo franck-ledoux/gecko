@@ -57,6 +57,7 @@ nav:
   - Home: index.md
   - User Guide:
       - Python Bindings: user-guide/python.md
+      - biy (3D viewer): user-guide/biy.md
   - Developer Guide:
       - Building & Testing: developer-guide/testing.md
       - Writing Documentation: developer-guide/documentation.md
