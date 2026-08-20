@@ -383,6 +383,51 @@ namespace gecko {
             m_cmap.template remove_cell<2>(AFace->dart());
         }
 
+        /**
+         * @brief Moves one node to a new position, refitting the geometry of every cell it belongs
+         * to so the structure stays consistent.
+         *
+         * Every incident edge's curve is re-derived as a straight interpolation between its 2
+         * endpoints' current positions (interior control points included, for a curved
+         * `TEdgeCurve`), then every incident face's surface and block's volume is rebuilt from
+         * those edges. Classification (`geom_targets`) is deliberately left untouched throughout:
+         * moving a node is a purely geometric edit, and re-deciding what a cell is classified on is
+         * `classify()`'s job — call it afterwards to re-snap onto the geometric model.
+         *
+         * @param ANode The node to move.
+         * @param ANewPosition Its new position.
+         */
+        void move_node(Node ANode, const Point3d &ANewPosition) {
+            ANode->info().point = ANewPosition;
+
+            // Swept exhaustively rather than through `one_dart_per_incident_cell<i,0>`: a vertex's
+            // own dart orbit only reaches its other incident cells through beta2/beta3, so on a
+            // standalone (still unsewn) block a corner's orbit is a single dart and the incidence
+            // iterators silently miss most of the cells that actually touch it. Same full-sweep
+            // shape as `classify()`; a blocking is small enough for that to be irrelevant.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                const Dart d = it->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (n0 != ANode && n1 != ANode) continue;
+                it->info().curve = straight_curve(n0->info().point, n1->info().point);
+            }
+
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (face_has_node(it, ANode)) rebuild_face_surface(it);
+            }
+
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                if (block_has_node(it, ANode)) rebuild_block_volume(it);
+            }
+        }
+
         /** @brief Gives access to the underlying combinatorial map. @return The internal map. */
         Map &cmap() { return m_cmap; }
         /** @copydoc cmap() */
@@ -744,6 +789,56 @@ namespace gecko {
             const auto result = classify_position(GroupDim::Dim2, center, ATolCurveSurface, ATolCurveSurface);
             AFace->info().geom_targets = result.targets;
 
+            rebuild_face_surface(AFace);
+        }
+
+        /**
+         * @brief Rebuilds one face's stored surface via `coons_surface_from_edges()` from its 4
+         * boundary edges' current curves, leaving its classification untouched — the pure-geometry
+         * half of `classify_and_rebuild_face()`, also used on its own by `move_node()`.
+         * @param AFace The face to rebuild.
+         */
+        /**
+         * @brief Checks whether @p ANode is one of @p AFace's 4 corners.
+         * @param AFace The face to inspect.
+         * @param ANode The node to look for.
+         * @return true if the face has that corner.
+         */
+        bool face_has_node(Face AFace, Node ANode) {
+            Dart walk = AFace->dart();
+            for (std::size_t c = 0; c < 4; ++c) {
+                if (m_cmap.template attribute<0>(walk) == ANode) return true;
+                walk = m_cmap.template beta<1>(walk);
+            }
+            return false;
+        }
+
+        /**
+         * @brief Checks whether @p ANode is one of @p ABlock's 8 corners.
+         * @param ABlock The block to inspect.
+         * @param ANode The node to look for.
+         * @return true if the block has that corner.
+         */
+        bool block_has_node(Block ABlock, Node ANode) {
+            const Dart bd = ABlock->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<0>(it) == ANode) return true;
+            }
+            return false;
+        }
+
+        void rebuild_face_surface(Face AFace) {
+            const Dart fd = AFace->dart();
+            std::array<Node, 4> local_nodes{};
+            Dart walk = fd;
+            for (std::size_t c = 0; c < 4; ++c) {
+                local_nodes[c] = m_cmap.template attribute<0>(walk);
+                walk = m_cmap.template beta<1>(walk);
+            }
+
             std::array<TEdgeCurve, 4> curves{};
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
                       itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
@@ -789,6 +884,27 @@ namespace gecko {
             const Point3d center = local_nodes[0]->info().point + acc * (1.0 / 8.0);
             const auto result = classify_position(GroupDim::Dim3, center, ATolCurveSurface, ATolCurveSurface);
             ABlock->info().geom_targets = result.targets;
+
+            rebuild_block_volume(ABlock);
+        }
+
+        /**
+         * @brief Rebuilds one block's stored volume via `tfi_volume_from_faces()` from its 12
+         * boundary edges' current curves, leaving its classification untouched — the pure-geometry
+         * half of `classify_and_rebuild_block()`, also used on its own by `move_node()`.
+         * @param ABlock The block to rebuild.
+         */
+        void rebuild_block_volume(Block ABlock) {
+            const Dart bd = ABlock->dart();
+            std::array<Node, 8> local_nodes{};
+            local_nodes[0] = m_cmap.template attribute<0>(bd);
+            local_nodes[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
+            local_nodes[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
+            local_nodes[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
+            local_nodes[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
+            local_nodes[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
+            local_nodes[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
+            local_nodes[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
 
             std::array<TEdgeCurve, 12> curves{};
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),

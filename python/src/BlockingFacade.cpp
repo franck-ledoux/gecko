@@ -20,6 +20,13 @@ namespace gecko::python {
             return points;
         }
 
+        void check_subdivisions(int subdivisions, const char *who) {
+            if (subdivisions < 1) {
+                throw std::invalid_argument(std::string(who) + ": subdivisions must be >= 1, got " +
+                                             std::to_string(subdivisions));
+            }
+        }
+
         using ImplVariant = std::variant<BlockingFacade::Impl<1>, BlockingFacade::Impl<3>>;
 
         ImplVariant make_impl(const FacetedGeometry &geom, int degree) {
@@ -38,6 +45,7 @@ namespace gecko::python {
             [&points](auto &impl) {
                 const int id = impl.next_face_id++;
                 impl.faces_by_id.emplace(id, impl.blocking.create_quad_block(points));
+                impl.index_new_nodes();
                 return id;
             },
             m_impl);
@@ -48,6 +56,7 @@ namespace gecko::python {
         return std::visit(
             [&points](auto &impl) {
                 impl.blocking.create_hex_block(points);
+                impl.index_new_nodes();
                 return impl.next_block_id++;
             },
             m_impl);
@@ -117,14 +126,163 @@ namespace gecko::python {
     }
 
     void BlockingFacade::write_vtk(int subdivisions, const std::string &path) {
-        if (subdivisions < 1) {
-            throw std::invalid_argument("Blocking.write_vtk: subdivisions must be >= 1, got " +
-                                         std::to_string(subdivisions));
-        }
+        check_subdivisions(subdivisions, "Blocking.write_vtk");
         std::visit(
             [subdivisions, &path](auto &impl) {
                 const auto mesh = impl.blocking.to_mesh(static_cast<SizeT>(subdivisions));
                 io::VtkMeshWriter<CubicTraits>::write(path, mesh);
+            },
+            m_impl);
+    }
+
+    namespace {
+        template<typename TImpl>
+        auto find_node(TImpl &impl, int node_id) {
+            const auto it = impl.nodes_by_id.find(node_id);
+            if (it == impl.nodes_by_id.end()) {
+                throw std::out_of_range("Blocking: unknown node id " + std::to_string(node_id));
+            }
+            return it;
+        }
+    } // namespace
+
+    std::vector<int> BlockingFacade::node_ids() const {
+        return std::visit(
+            [](const auto &impl) {
+                std::vector<int> ids;
+                ids.reserve(impl.nodes_by_id.size());
+                for (const auto &[id, node] : impl.nodes_by_id) ids.push_back(id);
+                std::sort(ids.begin(), ids.end());
+                return ids;
+            },
+            m_impl);
+    }
+
+    std::array<double, 3> BlockingFacade::node_position(int node_id) const {
+        return std::visit(
+            [node_id](const auto &impl) {
+                const auto &p = find_node(impl, node_id)->second->info().point;
+                return std::array<double, 3>{p.x(), p.y(), p.z()};
+            },
+            m_impl);
+    }
+
+    void BlockingFacade::move_node(int node_id, double x, double y, double z) {
+        std::visit([node_id, x, y, z](
+                       auto &impl) { impl.blocking.move_node(find_node(impl, node_id)->second, Point3d(x, y, z)); },
+                   m_impl);
+    }
+
+    std::vector<int> BlockingFacade::node_classification_dims() const {
+        return std::visit(
+            [](const auto &impl) {
+                std::vector<int> ids;
+                ids.reserve(impl.nodes_by_id.size());
+                for (const auto &[id, node] : impl.nodes_by_id) ids.push_back(id);
+                std::sort(ids.begin(), ids.end()); // node_ids()' order
+
+                std::vector<int> dims;
+                dims.reserve(ids.size());
+                for (const int id : ids) {
+                    const auto &targets = impl.nodes_by_id.at(id)->info().geom_targets;
+                    // Every target of a cell sits at the same dimension (see Blocking::classify),
+                    // so the first one speaks for all of them.
+                    dims.push_back(targets.empty() ? -1 : static_cast<int>(targets.front().first));
+                }
+                return dims;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::edge_vertices(int samples) const {
+        check_subdivisions(samples, "Blocking.edge_vertices");
+        return std::visit(
+            [samples](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i <= samples; ++i) {
+                        const double t = static_cast<double>(i) / static_cast<double>(samples);
+                        const auto p = it->info().curve.value(t);
+                        points.push_back({p.x(), p.y(), p.z()});
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::edge_segments(int samples) const {
+        check_subdivisions(samples, "Blocking.edge_segments");
+        return std::visit(
+            [samples](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < samples; ++i) {
+                        segments.push_back({base + i, base + i + 1});
+                    }
+                    base += samples + 1;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::mesh_vertices(int subdivisions) {
+        check_subdivisions(subdivisions, "Blocking.mesh_vertices");
+        return std::visit(
+            [subdivisions](auto &impl) {
+                const auto mesh = impl.blocking.to_mesh(static_cast<SizeT>(subdivisions));
+                std::vector<std::array<double, 3>> vertices;
+                vertices.reserve(mesh.nb_nodes());
+                for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+                    const auto &p = mesh.node(NodeId{i});
+                    vertices.push_back({p.x(), p.y(), p.z()});
+                }
+                return vertices;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 4>> BlockingFacade::mesh_quads(int subdivisions) {
+        check_subdivisions(subdivisions, "Blocking.mesh_quads");
+        return std::visit(
+            [subdivisions](auto &impl) {
+                const auto mesh = impl.blocking.to_mesh(static_cast<SizeT>(subdivisions));
+                std::vector<std::array<int, 4>> quads;
+                quads.reserve(mesh.nb_faces());
+                for (UInt i = 0; i < mesh.nb_faces(); ++i) {
+                    const auto n = mesh.face_nodes(FaceId{i});
+                    quads.push_back({static_cast<int>(n[0].value),
+                                     static_cast<int>(n[1].value),
+                                     static_cast<int>(n[2].value),
+                                     static_cast<int>(n[3].value)});
+                }
+                return quads;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 8>> BlockingFacade::mesh_hexes(int subdivisions) {
+        check_subdivisions(subdivisions, "Blocking.mesh_hexes");
+        return std::visit(
+            [subdivisions](auto &impl) {
+                const auto mesh = impl.blocking.to_mesh(static_cast<SizeT>(subdivisions));
+                std::vector<std::array<int, 8>> hexes;
+                hexes.reserve(mesh.nb_cells());
+                for (UInt i = 0; i < mesh.nb_cells(); ++i) {
+                    const auto n = mesh.cell_nodes(CellId{i});
+                    std::array<int, 8> hex{};
+                    for (std::size_t k = 0; k < 8; ++k) hex[k] = static_cast<int>(n[k].value);
+                    hexes.push_back(hex);
+                }
+                return hexes;
             },
             m_impl);
     }

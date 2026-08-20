@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string>
@@ -101,16 +102,99 @@ namespace gecko::python {
          */
         void write_vtk(int subdivisions, const std::string &path);
 
+        /** @brief Gets the id of every corner node of the block structure. @return The node ids. */
+        [[nodiscard]] std::vector<int> node_ids() const;
+        /**
+         * @brief Gets the position of a corner node.
+         * @param node_id A node id, from node_ids().
+         * @return Its (x,y,z) position.
+         * @throw std::out_of_range if @p node_id is not a known node id.
+         */
+        [[nodiscard]] std::array<double, 3> node_position(int node_id) const;
+        /**
+         * @brief Moves a corner node, refitting every incident edge/face/block geometry.
+         * @param node_id A node id, from node_ids().
+         * @param x New X coordinate.
+         * @param y New Y coordinate.
+         * @param z New Z coordinate.
+         * @throw std::out_of_range if @p node_id is not a known node id.
+         */
+        void move_node(int node_id, double x, double y, double z);
+
+        /**
+         * @brief Gets what each corner node is classified on, in node_ids() order.
+         * @return One entry per node: the dimension of the geometric entity it is classified on
+         *         (0 vertex, 1 curve, 2 surface, 3 volume), or -1 if it is unclassified. Every
+         *         node is unclassified until classify() runs.
+         */
+        [[nodiscard]] std::vector<int> node_classification_dims() const;
+
+        /**
+         * @brief Samples every edge of the block structure along its own curve.
+         *
+         * Together with edge_segments(), gives the block structure's own edges as polylines —
+         * distinct from the subdivision lines of the mesh the blocking generates. For a curved
+         * (degree 3) blocking, @p samples > 1 traces the actual curve rather than its chord.
+         * @param samples Number of intervals to split each edge into (>= 1).
+         * @return One (x,y,z) triple per sample point, `samples + 1` per edge, edge after edge.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> edge_vertices(int samples) const;
+        /**
+         * @brief The segments joining the points edge_vertices() returns, in the same traversal
+         * order (call the two together, without mutating the blocking in between).
+         * @param samples Number of intervals to split each edge into (>= 1).
+         * @return One pair of edge_vertices() indices per segment.
+         */
+        [[nodiscard]] std::vector<std::array<int, 2>> edge_segments(int samples) const;
+
+        /**
+         * @brief Generates the mesh reproducing the blocking and returns its node positions.
+         * @param subdivisions Number of intervals to subdivide every parametric axis into (>= 1).
+         * @return One (x,y,z) triple per mesh node.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> mesh_vertices(int subdivisions);
+        /**
+         * @brief Generates the mesh reproducing the blocking and returns its quads.
+         * @param subdivisions Number of intervals to subdivide every parametric axis into (>= 1).
+         * @return One quadruple of mesh_vertices() indices per quad.
+         */
+        [[nodiscard]] std::vector<std::array<int, 4>> mesh_quads(int subdivisions);
+        /**
+         * @brief Generates the mesh reproducing the blocking and returns its hexes.
+         * @param subdivisions Number of intervals to subdivide every parametric axis into (>= 1).
+         * @return One 8-tuple of mesh_vertices() indices per hex.
+         */
+        [[nodiscard]] std::vector<std::array<int, 8>> mesh_hexes(int subdivisions);
+
         /** @brief Per-degree state; public only so the .cpp's free-function helpers can name it —
          * never part of the class' actual (Python-facing) interface. */
         template<std::size_t N>
         struct Impl {
-            Blocking<FacetedGeometry, BezierCurve<N, Point3d>> blocking;
-            std::unordered_map<int, typename Blocking<FacetedGeometry, BezierCurve<N, Point3d>>::Face> faces_by_id;
+            using BlockingT = Blocking<FacetedGeometry, BezierCurve<N, Point3d>>;
+
+            BlockingT blocking;
+            std::unordered_map<int, typename BlockingT::Face> faces_by_id;
+            std::unordered_map<int, typename BlockingT::Node> nodes_by_id;
             int next_face_id = 0;
             int next_block_id = 0;
+            int next_node_id = 0;
 
             explicit Impl(const FacetedGeometry &geom) : blocking(geom) {}
+
+            /** @brief Registers every not-yet-known corner node of the structure, so a freshly
+             * created block's corners become addressable by id. Cheap and idempotent: nodes already
+             * present keep their id. */
+            void index_new_nodes() {
+                auto &map = blocking.cmap();
+                for (auto it = map.template attributes<0>().begin(), itend = map.template attributes<0>().end();
+                     it != itend;
+                     ++it) {
+                    const bool known = std::any_of(nodes_by_id.begin(), nodes_by_id.end(), [&it](const auto &entry) {
+                        return entry.second == it;
+                    });
+                    if (!known) nodes_by_id.emplace(next_node_id++, it);
+                }
+            }
         };
 
     private:
