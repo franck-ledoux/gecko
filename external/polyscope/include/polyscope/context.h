@@ -1,0 +1,134 @@
+// Copyright 2017-2023, Nicholas Sharp and the Polyscope contributors. https://polyscope.run
+
+#pragma once
+
+#include <polyscope/pick.h>
+#include <polyscope/types.h>
+#include <polyscope/weak_handle.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtx/dual_quaternion.hpp>
+#include <glm/gtx/norm.hpp>
+
+#include <array>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+
+namespace polyscope {
+
+
+// forward declarations
+class Structure;
+class Group;
+class SlicePlane;
+class Widget;
+class TransformationGizmo;
+class FloatingQuantityStructure;
+namespace view {
+extern const float defaultNearClipRatio;
+extern const float defaultFarClipRatio;
+extern const float defaultFov;
+} // namespace view
+
+// A context object wrapping all global state used by Polyscope.
+//
+// In theory the user could explicitly manage multiple contexts explicitly. However for now that is not supported, there
+// is always exactly one global context.
+//
+// Historically, these globals were simply `static` members scattered through a few different files. However, this
+// was a persistent source of bugs at shutdown time, because the order in which destructors are called during shutdown
+// is platform-dependent. Bugs often arose because one global member often depends on another; if destructed in an
+// unexpected order, they would reference one-another and cause platform-dependent errors. The global context solves
+// this because destruction always happens in a predictable order.
+
+struct Context {
+
+  // ======================================================
+  // === General globals from polyscope.h
+  // ======================================================
+
+  bool initialized = false;
+  std::string backend = "";
+  std::map<std::string, std::map<std::string, std::unique_ptr<Structure>>> structures;
+  std::map<std::string, std::unique_ptr<Group>> groups;
+  float lengthScale = 1.;
+  std::tuple<glm::vec3, glm::vec3> boundingBox =
+      std::tuple<glm::vec3, glm::vec3>{glm::vec3{-1., -1., -1.}, glm::vec3{1., 1., 1.}};
+  std::vector<std::unique_ptr<SlicePlane>> slicePlanes;
+  std::vector<WeakHandle<Widget>> widgets;
+  std::function<void()> userCallback = nullptr;
+  std::function<void(const std::vector<std::string>&)> filesDroppedCallback = nullptr;
+
+
+  // ======================================================
+  // === Render engine globals from engine.h
+  // ======================================================
+
+
+  // ======================================================
+  // === View globals from view.h
+  // ======================================================
+
+  int bufferWidth = -1;
+  int bufferHeight = -1;
+  int windowWidth = -1;  // on init(), get overwritten with defaultWindowWidth if -1
+  int windowHeight = -1; // ^^^ same
+  int initWindowPosX = 20;
+  int initWindowPosY = 20;
+  bool windowResizable = true;
+  NavigateStyle navigateStyle = NavigateStyle::Turntable;
+  UpDir upDir = UpDir::YUp;
+  FrontDir frontDir = FrontDir::ZFront;
+  float moveScale = 1.0;
+  ViewRelativeMode viewRelativeMode = ViewRelativeMode::CenterRelative;
+  float nearClip = view::defaultNearClipRatio;
+  float farClip = view::defaultFarClipRatio;
+  std::array<float, 4> bgColor{{1.0, 1.0, 1.0, 0.0}};
+  glm::mat4x4 viewMat{std::numeric_limits<float>::quiet_NaN()};
+  float fov = view::defaultFov;
+  ProjectionMode projectionMode = ProjectionMode::Perspective;
+  glm::vec3 viewCenter;
+  bool midflight = false;
+  float flightStartTime = -1;
+  float flightEndTime = -1;
+  glm::dualquat flightTargetViewR, flightInitialViewR;
+  glm::vec3 flightTargetViewT, flightInitialViewT;
+  float flightTargetFov, flightInitialFov;
+
+  // ======================================================
+  // === Picking globals from pick.h / pick.cpp
+  // ======================================================
+
+  PickResult currSelectionPickResult;
+  bool haveSelectionVal = false;
+  uint64_t nextPickBufferInd = 1;
+  std::unordered_map<Structure*, std::tuple<uint64_t, uint64_t>> structureRanges;
+  std::unordered_map<Quantity*, std::tuple<uint64_t, uint64_t>> quantityRanges;
+
+  // ======================================================
+  // === Internal globals from internal.h
+  // ======================================================
+
+  bool renderPassIsRedraw = false;
+  bool pointCloudEfficiencyWarningReported = false;
+  FloatingQuantityStructure* globalFloatingQuantityStructure = nullptr;
+
+  // ======================================================
+  // === Other various global lists
+  // ======================================================
+
+  // Transformation gizmos that were created by hte user for the secne
+  // Note: this does _not_ include all gizmos, such as the one which exists
+  // for each structure. This is just storage for gizmos explicitly created
+  // like with addTransformationGizmo()
+  std::vector<std::unique_ptr<TransformationGizmo>> createdTransformationGizmos;
+};
+
+
+}; // namespace polyscope
