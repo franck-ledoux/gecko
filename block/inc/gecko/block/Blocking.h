@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
+#include <iterator>
+#include <limits>
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -60,6 +64,22 @@ namespace gecko {
         using Edge = typename Map::template Attribute_handle<1>::type;
         /** @brief Handle to a node (0-cell) attribute. */
         using Node = typename Map::template Attribute_handle<0>::type;
+
+        /**
+         * @brief Per-dimension distance thresholds for snapping a blocking onto its geometric model.
+         *
+         * Three separate values rather than one because the scales genuinely differ: 2 distinct
+         * vertices are typically far closer to each other than to any curve, so a tolerance loose
+         * enough to catch a surface would snap a corner to the wrong vertex.
+         */
+        struct Tolerances {
+            /** @brief Threshold for snapping onto a vertex (dimension 0). */
+            double vertex = 0.0;
+            /** @brief Threshold for snapping onto a curve (dimension 1). */
+            double curve = 0.0;
+            /** @brief Threshold for snapping onto a surface (dimension 2), and onto a volume. */
+            double surface = 0.0;
+        };
 
         /**
          * @brief Constructor.
@@ -218,56 +238,108 @@ namespace gecko {
          * @brief Classifies every node/edge/face/block of the blocking onto `geom_model()`'s
          * vertices/curves/surfaces/volumes, then refits/rebuilds their geometry to conform.
          *
-         * For each cell of topological dimension `d`, searches `m_geom_model`'s entities of
-         * dimension `>= d` (never lower, which would over-constrain — e.g. an edge is never pinned
-         * to a single point), stopping at the lowest such dimension that has at least one entity
-         * within tolerance; every entity within tolerance at that dimension (not just the nearest)
-         * is collected into the cell's `geom_targets` — a node near a corner shared by 2+ curves
-         * ends up with 2+ targets, by design (see `CellData.h`). The single nearest of those targets
-         * is used to snap/refit the cell's own stored geometry: a node's position is projected onto
-         * it; a curved edge's interior control points (its 2 endpoints stay pinned to their own,
-         * already-classified nodes) are projected onto it; a face's/block's stored surface/volume is
-         * then rebuilt from its (now possibly curved) boundary edges/faces via
-         * `coons_surface_from_edges()`/`tfi_volume_from_faces()` — never left as a stale blend of the
-         * pre-classification straight geometry. Not incremental: every cell is reclassified and
-         * every edge/face/block geometry rebuilt from scratch on every call.
+         * **Nodes** are classified by proximity: the search runs dimension by dimension and stops at
+         * the lowest one with any entity within tolerance; every entity within tolerance at that
+         * dimension (not just the nearest) is collected into the node's `geom_targets` — a node near
+         * a corner shared by 2+ curves ends up with 2+ targets, by design (see `CellData.h`).
          *
-         * @param ATolVertex Tolerance for snapping onto a vertex (dimension-0 entity) — the tight
-         *        threshold, since 2 distinct vertices are typically much closer to each other than
-         *        to the nearest curve/surface.
-         * @param ATolCurveSurface Tolerance for snapping onto a curve/surface/volume (dimension >=
-         *        1) — typically looser than `ATolVertex`. Defaults to `ATolVertex` when left at its
-         *        default `-1.0`.
+         * **Edges and faces** are instead classified *topologically*, from their own boundary: an
+         * edge is put on the lowest-dimensional entity containing both its corners' classifications,
+         * a face on the lowest-dimensional entity containing all 4 of its edges' — see
+         * `infer_targets()`. That is what keeps a cell coherent with its boundary, which proximity
+         * cannot: sampling one point of an edge can otherwise land it on a curve neither of its
+         * endpoints touches. Proximity remains the fallback whenever the boundary can't decide (an
+         * unclassified corner, or classifications with nothing in common). **Blocks** stay pure
+         * proximity, there being only volumes at that dimension.
+         *
+         * The single nearest target is then used to snap/refit the cell's own stored geometry: a
+         * node's position is projected onto it; a curved edge's interior control points (its 2
+         * endpoints stay pinned to their own, already-classified nodes) are projected onto it; a
+         * face's/block's stored surface/volume is rebuilt from its (now possibly curved) boundary
+         * edges/faces via `coons_surface_from_edges()`/`tfi_volume_from_faces()` — never left as a
+         * stale blend of the pre-classification straight geometry.
+         *
+         * Cells are visited in increasing dimension because each level's inference consumes the
+         * previous one's result. Not incremental: every cell is reclassified and every
+         * edge/face/block geometry rebuilt from scratch on every call — see `snap_node()` for the
+         * local counterpart used while editing.
+         *
+         * @param ATolVertex Tolerance for snapping onto a vertex — the tight threshold, since 2
+         *        distinct vertices are typically much closer to each other than to any curve.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface (and onto a volume). Defaults to
+         *        the resolved curve tolerance.
          */
-        void classify(double ATolVertex, double ATolCurveSurface = -1.0) {
-            const double tol_cs = (ATolCurveSurface < 0.0) ? ATolVertex : ATolCurveSurface;
+        void classify(double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
 
             for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
                  it != itend;
                  ++it) {
-                const auto result = classify_position(GroupDim::Dim0, it->info().point, ATolVertex, tol_cs);
-                it->info().geom_targets = result.targets;
-                if (result.any()) {
-                    project_onto(result.nearest_dim, result.nearest_tag, it->info().point);
-                }
+                classify_node(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
                  it != itend;
                  ++it) {
-                refit_edge(it, tol_cs);
+                refit_edge(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                classify_and_rebuild_face(it, tol_cs);
+                classify_and_rebuild_face(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                classify_and_rebuild_block(it, tol_cs);
+                classify_and_rebuild_block(it, tol);
+            }
+        }
+
+        /**
+         * @brief Snaps one node onto the geometric model and brings every cell touching it back into
+         * agreement — the incremental counterpart of `classify()`, meant to run when a corner is
+         * released after being dragged.
+         *
+         * The node is reclassified by proximity and projected onto its nearest target, then every
+         * incident edge, face and block is reclassified and refitted exactly as `classify()` would.
+         * Because edges and faces infer their classification from their own boundary rather than
+         * from a global search, re-deciding just the cells that touch @p ANode is enough: no other
+         * cell's boundary changed, so no other cell's classification can have.
+         *
+         * @param ANode The node to snap.
+         * @param ATolVertex Tolerance for snapping onto a vertex.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface. Defaults to the resolved curve
+         *        tolerance.
+         */
+        void snap_node(Node ANode, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
+            classify_node(ANode, tol);
+
+            // Swept exhaustively for the same reason `move_node()` documents: a corner's own dart
+            // orbit doesn't reach every cell that touches it on a still-unsewn block.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                const Dart d = it->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (n0 == ANode || n1 == ANode) refit_edge(it, tol);
+            }
+
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (face_has_node(it, ANode)) classify_and_rebuild_face(it, tol);
+            }
+
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                if (block_has_node(it, ANode)) classify_and_rebuild_block(it, tol);
             }
         }
 
@@ -606,6 +678,21 @@ namespace gecko {
         }
 
         /**
+         * @brief Resolves `classify()`/`snap_node()`'s defaulted tolerance arguments: an omitted
+         * (negative) curve tolerance falls back to the vertex one, and an omitted surface tolerance
+         * to the curve one.
+         * @param ATolVertex Vertex tolerance.
+         * @param ATolCurve Curve tolerance, or negative to reuse @p ATolVertex.
+         * @param ATolSurface Surface tolerance, or negative to reuse the resolved curve tolerance.
+         * @return The resolved tolerances.
+         */
+        static Tolerances resolve_tolerances(double ATolVertex, double ATolCurve, double ATolSurface) {
+            const double curve = (ATolCurve < 0.0) ? ATolVertex : ATolCurve;
+            const double surface = (ATolSurface < 0.0) ? curve : ATolSurface;
+            return Tolerances{ATolVertex, curve, surface};
+        }
+
+        /**
          * @brief Outcome of searching `m_geom_model` for entities near a query point: every entity
          * found within tolerance (see `classify_position()`), plus the dimension/tag of the single
          * nearest one (used to actually snap/project geometry).
@@ -658,30 +745,164 @@ namespace gecko {
          * @param AMinDim Lowest entity dimension to consider (the classified cell's own topological
          *        dimension).
          * @param AP The query point.
-         * @param ATolVertex Tolerance used only when scanning vertices (dimension 0).
-         * @param ATolCurveSurface Tolerance used when scanning curves/surfaces/volumes (dimension >= 1).
+         * @param ATol The per-dimension snapping tolerances.
          * @return The classification outcome (possibly empty, if nothing is within tolerance anywhere).
          */
-        ClassifyResult
-        classify_position(GroupDim AMinDim, const Point3d &AP, double ATolVertex, double ATolCurveSurface) const {
+        ClassifyResult classify_position(GroupDim AMinDim, const Point3d &AP, const Tolerances &ATol) const {
             ClassifyResult result;
             double best = 0.0;
             if (AMinDim <= GroupDim::Dim0) {
-                scan_dimension(m_geom_model->vertices(), GroupDim::Dim0, AP, ATolVertex, result, best);
+                scan_dimension(m_geom_model->vertices(), GroupDim::Dim0, AP, ATol.vertex, result, best);
                 if (result.any()) return result;
             }
             if (AMinDim <= GroupDim::Dim1) {
-                scan_dimension(m_geom_model->curves(), GroupDim::Dim1, AP, ATolCurveSurface, result, best);
+                scan_dimension(m_geom_model->curves(), GroupDim::Dim1, AP, ATol.curve, result, best);
                 if (result.any()) return result;
             }
             if (AMinDim <= GroupDim::Dim2) {
-                scan_dimension(m_geom_model->surfaces(), GroupDim::Dim2, AP, ATolCurveSurface, result, best);
+                scan_dimension(m_geom_model->surfaces(), GroupDim::Dim2, AP, ATol.surface, result, best);
                 if (result.any()) return result;
             }
             if (AMinDim <= GroupDim::Dim3) {
-                scan_dimension(m_geom_model->volumes(), GroupDim::Dim3, AP, ATolCurveSurface, result, best);
+                // Volumes reuse the surface tolerance: a `GeomModelConcept` volume's `distance()` is
+                // free to report 0 everywhere (as `FacetedVolume`'s stub does), which makes any
+                // threshold inert here — so there is nothing a 4th tolerance could usefully control.
+                scan_dimension(m_geom_model->volumes(), GroupDim::Dim3, AP, ATol.surface, result, best);
             }
             return result;
+        }
+
+        /**
+         * @brief Classifies one node by proximity and projects it onto its nearest target, leaving
+         * it where it is when nothing is within tolerance.
+         * @param ANode The node to classify.
+         * @param ATol The per-dimension snapping tolerances.
+         */
+        void classify_node(Node ANode, const Tolerances &ATol) {
+            const auto result = classify_position(GroupDim::Dim0, ANode->info().point, ATol);
+            ANode->info().geom_targets = result.targets;
+            if (result.any()) {
+                project_onto(result.nearest_dim, result.nearest_tag, ANode->info().point);
+            }
+        }
+
+        /**
+         * @brief Gathers every geometric entity containing *any* of @p ATargets — the union of the
+         * model's `containing_entities()` over a cell's classification, which is the set of entities
+         * that cell could still be said to lie on.
+         * @param ATargets One cell's `geom_targets`.
+         * @return The union, as a sorted set.
+         */
+        std::set<std::pair<GroupDim, Int>> containing_set(const std::vector<std::pair<GroupDim, Int>> &ATargets) const {
+            std::set<std::pair<GroupDim, Int>> result;
+            for (const auto &[dim, tag] : ATargets) {
+                for (const auto &entry : m_geom_model->containing_entities(dim, tag)) {
+                    result.insert(entry);
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Infers what a cell is classified on from the classification of its own boundary:
+         * the lowest-dimensional geometric entities containing *every* boundary cell's own
+         * classification.
+         *
+         * This is what keeps a cell's classification coherent with its boundary's, which proximity
+         * alone cannot guarantee — sampling a single point of an edge can put it on a curve its own
+         * two endpoints have nothing to do with. An edge whose 2 corners sit on the same geometric
+         * curve belongs on that curve; one whose corners sit on 2 different curves bounding a common
+         * surface belongs on that surface. Intersecting the boundary's containing sets (see
+         * `containing_set()`) states exactly that, and the model computes those sets from shared
+         * backing mesh cells, so no tolerance enters here at all.
+         *
+         * Returns *every* candidate at the winning dimension rather than one, matching how
+         * `classify_position()` reports several equally-plausible targets; picking the single
+         * nearest of them for projection is `nearest_of()`'s job.
+         *
+         * @param ABoundary Each boundary cell's `geom_targets`. An empty entry (an unclassified
+         *        boundary cell) makes inference impossible, since it constrains nothing.
+         * @param AMinDim The cell's own topological dimension — it can never be classified below it.
+         * @return The inferred targets, or empty when inference is impossible (an unclassified
+         *         boundary cell, or boundary classifications with nothing in common), in which case
+         *         the caller falls back to a proximity search.
+         */
+        std::vector<std::pair<GroupDim, Int>>
+        infer_targets(const std::vector<const std::vector<std::pair<GroupDim, Int>> *> &ABoundary,
+                      GroupDim AMinDim) const {
+            if (ABoundary.empty()) return {};
+
+            std::set<std::pair<GroupDim, Int>> common;
+            bool first = true;
+            for (const auto *targets : ABoundary) {
+                if (targets->empty()) return {}; // Unclassified boundary: nothing to infer from.
+                const auto candidates = containing_set(*targets);
+                if (first) {
+                    common = candidates;
+                    first = false;
+                } else {
+                    std::set<std::pair<GroupDim, Int>> intersection;
+                    std::ranges::set_intersection(common, candidates, std::inserter(intersection, intersection.end()));
+                    common = std::move(intersection);
+                }
+                if (common.empty()) return {};
+            }
+
+            // `common` is sorted by (dimension, tag), so the first entry at or above the cell's own
+            // dimension already sits at the winning — lowest — dimension.
+            GroupDim best = GroupDim::Undefined;
+            std::vector<std::pair<GroupDim, Int>> result;
+            for (const auto &[dim, tag] : common) {
+                if (dim < AMinDim) continue;
+                if (best == GroupDim::Undefined) best = dim;
+                if (dim != best) break;
+                result.emplace_back(dim, tag);
+            }
+            return result;
+        }
+
+        /**
+         * @brief Picks the entity of @p ATargets closest to @p AP — the geometric tie-break applied
+         * when `infer_targets()` leaves several equally-valid candidates at the winning dimension
+         * (e.g. an edge lying on a curve shared by 2 surfaces), and the entity a cell's geometry is
+         * then projected onto.
+         * @param ATargets Candidate entities.
+         * @param AP Representative point of the cell.
+         * @return The nearest candidate, or `Undefined` if @p ATargets is empty.
+         */
+        ClassifyResult nearest_of(const std::vector<std::pair<GroupDim, Int>> &ATargets, const Point3d &AP) const {
+            ClassifyResult result;
+            result.targets = ATargets;
+            double best = 0.0;
+            for (const auto &[dim, tag] : ATargets) {
+                const double d = distance_to(dim, tag, AP);
+                if (!result.any() || d < best) {
+                    best = d;
+                    result.nearest_dim = dim;
+                    result.nearest_tag = tag;
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Distance from @p AP to the geometric entity identified by (@p ADim, @p ATag).
+         * @param ADim Dimension of the entity.
+         * @param ATag `entity_tag()` of the entity.
+         * @param AP The query point.
+         * @return The distance, or infinity if no such entity exists.
+         */
+        double distance_to(GroupDim ADim, Int ATag, const Point3d &AP) const {
+            if (ADim == GroupDim::Dim0) {
+                if (const auto *v = m_geom_model->vertex_by_tag(ATag)) return v->distance(AP);
+            } else if (ADim == GroupDim::Dim1) {
+                if (const auto *c = m_geom_model->curve_by_tag(ATag)) return c->distance(AP);
+            } else if (ADim == GroupDim::Dim2) {
+                if (const auto *s = m_geom_model->surface_by_tag(ATag)) return s->distance(AP);
+            } else if (ADim == GroupDim::Dim3) {
+                if (const auto *vol = m_geom_model->volume_by_tag(ATag)) return vol->distance(AP);
+            }
+            return std::numeric_limits<double>::infinity();
         }
 
         /**
@@ -703,36 +924,292 @@ namespace gecko {
         }
 
         /**
-         * @brief Classifies one edge against `m_geom_model` (dimension >= 1 only) and refits its
-         * curve: its 2 endpoints are pinned to their (already-classified) nodes' current positions,
-         * and its interior control points are re-derived by straight-line interpolation between
-         * those endpoints, then projected onto the nearest classification target, if any.
+         * @brief Classifies one edge and refits its curve so that the curve itself lies on what it
+         * is classified on, its 2 endpoints pinned to their (already-classified) nodes.
+         *
+         * Classification is inferred from the edge's own 2 corner nodes via `infer_targets()`,
+         * falling back to a proximity search at its midpoint when they can't decide (an
+         * unclassified corner, or corners with no common containing entity).
+         *
+         * The fit **interpolates points sampled on the geometry** rather than projecting the control
+         * points onto it. Projecting the control points is the tempting shortcut, and it is wrong: a
+         * Bezier curve passes through its 2 endpoints but *not* through its interior control points,
+         * staying strictly inside their convex hull — so control points sitting exactly on a curved
+         * geometric curve leave the actual edge bowed off it, always falling short of the geometry
+         * it is supposed to follow. Instead, points on the geometry are obtained first (by projecting
+         * a straight-line guess), and the control points that make the curve pass *through* those
+         * points are then solved for — see `interpolating_curve()`.
+         *
          * @param AEdge The edge to classify and refit.
-         * @param ATolCurveSurface Tolerance for the (dimension >= 1) search.
+         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
          */
-        void refit_edge(Edge AEdge, double ATolCurveSurface) {
+        void refit_edge(Edge AEdge, const Tolerances &ATol) {
             const Dart d = AEdge->dart();
             const Node n0 = m_cmap.template attribute<0>(d);
             const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
             const Point3d &p0 = n0->info().point;
             const Point3d &p1 = n1->info().point;
 
+            const Point3d midpoint = AEdge->info().curve.value(0.5);
+            const auto inferred = infer_targets({&n0->info().geom_targets, &n1->info().geom_targets}, GroupDim::Dim1);
             const auto result =
-                classify_position(GroupDim::Dim1, AEdge->info().curve.value(0.5), ATolCurveSurface, ATolCurveSurface);
+                inferred.empty() ? classify_position(GroupDim::Dim1, midpoint, ATol) : nearest_of(inferred, midpoint);
             AEdge->info().geom_targets = result.targets;
 
             constexpr std::size_t n = TEdgeCurve::NumControlPoints;
             const Vector3d chord(p0, p1);
-            TEdgeCurve fitted;
+
+            // The points the fitted curve must pass through: its 2 endpoints, plus interior samples
+            // pulled onto the geometry. Without a classification there is nothing to pull them onto,
+            // so they stay on the chord and the fit collapses to the straight edge.
+            std::array<Point3d, n> samples{};
             for (std::size_t i = 0; i < n; ++i) {
                 const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
-                Point3d cp = p0 + chord * t;
+                Point3d s = p0 + chord * t;
                 if (result.any() && i > 0 && i + 1 < n) {
-                    project_onto(result.nearest_dim, result.nearest_tag, cp);
+                    project_onto(result.nearest_dim, result.nearest_tag, s);
                 }
-                fitted[i] = cp;
+                samples[i] = s;
             }
-            AEdge->info().curve = fitted;
+            samples[0] = p0;
+            samples[n - 1] = p1;
+
+            // On a curve the geometry also dictates which *direction* the edge must leave its ends
+            // in, and honouring that matters as much as passing through the right points — a fit
+            // free to choose its end tangents picks badly wrong ones (~30 degrees out on a plain
+            // circular arc). On a surface there is no single such direction, so plain interpolation
+            // stands.
+            if (result.nearest_dim == GroupDim::Dim1) {
+                const auto *curve = m_geom_model->curve_by_tag(result.nearest_tag);
+                if (curve != nullptr) {
+                    // Far more samples than there are unknowns, and parameterized by their own
+                    // spacing rather than uniformly: a point projected from the chord at parameter
+                    // `t` does not sit at parameter `t` along the geometry, and assuming it does
+                    // biases the fit (it leaves the tangents pointing the right way but too short).
+                    std::vector<Point3d> dense;
+                    dense.reserve(4 * n);
+                    for (std::size_t i = 0; i < 4 * n; ++i) {
+                        const double t = static_cast<double>(i) / static_cast<double>(4 * n - 1);
+                        Point3d s = p0 + chord * t;
+                        project_onto(result.nearest_dim, result.nearest_tag, s);
+                        dense.push_back(s);
+                    }
+                    dense.front() = p0;
+                    dense.back() = p1;
+
+                    AEdge->info().curve = tangent_constrained_curve(dense,
+                                                                    chord_length_parameters(dense),
+                                                                    oriented_tangent(curve->tangent(p0), chord),
+                                                                    oriented_tangent(curve->tangent(p1), chord));
+                    return;
+                }
+            }
+            AEdge->info().curve = interpolating_curve(samples);
+        }
+
+        /**
+         * @brief Assigns each of @p APoints a curve parameter in `[0,1]` proportional to the
+         * distance travelled along them — the standard chord-length parameterization, which matches
+         * where points actually fall along a curve far better than spacing them uniformly.
+         * @param APoints The sample points, in order.
+         * @return One parameter per point, starting at 0 and ending at 1. All zero for a degenerate
+         *         (zero-length) sample run.
+         */
+        static std::vector<double> chord_length_parameters(const std::vector<Point3d> &APoints) {
+            std::vector<double> parameters(APoints.size(), 0.0);
+            for (std::size_t i = 1; i < APoints.size(); ++i) {
+                parameters[i] = parameters[i - 1] + Vector3d(APoints[i - 1], APoints[i]).norm();
+            }
+            const double total = parameters.back();
+            if (total <= 0.0) return parameters;
+            for (double &p : parameters) {
+                p /= total;
+            }
+            return parameters;
+        }
+
+        /**
+         * @brief Flips @p ATangent, whose sign is arbitrary (see `FacetedCurve::tangent()`), to
+         * travel the same way as @p AChord.
+         * @param ATangent The tangent to orient.
+         * @param AChord The direction of travel along the edge.
+         * @return The oriented tangent.
+         */
+        static Vector3d oriented_tangent(const Vector3d &ATangent, const Vector3d &AChord) {
+            return (ATangent.dot(AChord) < 0.0) ? -ATangent : ATangent;
+        }
+
+        /**
+         * @brief Builds the curve leaving @p ASamples' 2 endpoints along @p AStartTangent and
+         * @p AEndTangent, fitted as closely as possible to the interior samples.
+         *
+         * The end tangents are imposed exactly by construction: a Bezier's start tangent is
+         * `P1 - P0` and its end tangent `Pn - P(n-1)`, so pinning `P1 = P0 + a * AStartTangent` and
+         * `P(n-1) = Pn - b * AEndTangent` fixes both directions whatever `a` and `b` turn out to be.
+         * Those 2 lengths are then the only freedom left (for degree 3; higher degrees keep their
+         * extra middle control points free too), and are chosen by least squares against the
+         * interior samples — the classic tangent-constrained Bezier fit.
+         *
+         * @param ASamples The points to fit, first and last being the endpoints.
+         * @param AParameters The curve parameter each sample should be reproduced at, one per entry
+         *        of @p ASamples — see `chord_length_parameters()`.
+         * @param AStartTangent Unit direction the curve must leave `ASamples.front()` in.
+         * @param AEndTangent Unit direction the curve must arrive at `ASamples.back()` in.
+         * @return The fitted curve. Falls back to plain interpolation if either tangent is null (a
+         *         degenerate faceting) or the fit is singular.
+         */
+        static TEdgeCurve tangent_constrained_curve(const std::vector<Point3d> &ASamples,
+                                                    const std::vector<double> &AParameters,
+                                                    const Vector3d &AStartTangent,
+                                                    const Vector3d &AEndTangent) {
+            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            constexpr std::size_t degree = n - 1;
+            std::array<Point3d, n> ends{};
+            ends[0] = ASamples.front();
+            ends[n - 1] = ASamples.back();
+            if constexpr (n < 3) {
+                return interpolating_curve(ends);
+            } else {
+                if (AStartTangent.norm_sq() < 1e-24 || AEndTangent.norm_sq() < 1e-24) {
+                    return interpolating_curve(ends);
+                }
+
+                const Point3d &p0 = ASamples.front();
+                const Point3d &pn = ASamples.back();
+
+                // Least squares over the interior samples for the 2 tangent lengths. Each sample
+                // contributes its 3 coordinates, so even degree 3 (2 unknowns) is overdetermined.
+                double ata[2][2] = {{0.0, 0.0}, {0.0, 0.0}};
+                double atb[2] = {0.0, 0.0};
+                for (std::size_t i = 1; i + 1 < ASamples.size(); ++i) {
+                    const double t = AParameters[i];
+                    // B(t) = base(t) + a * B_1(t) * start - b * B_(n-2)(t) * end, with everything
+                    // that does not depend on a or b gathered into base(t).
+                    const double ca = bernstein(degree, 1, t);
+                    const double cb = -bernstein(degree, degree - 1, t);
+                    Vector3d base = Vector3d(Point3d(0, 0, 0), p0) * (bernstein(degree, 0, t) + ca) +
+                                    Vector3d(Point3d(0, 0, 0), pn) * (bernstein(degree, degree, t) - cb);
+                    // Degree 4 and up keep middle control points of their own; leaving them on the
+                    // chord keeps this a 2-unknown fit while the ends stay exact.
+                    for (std::size_t j = 2; j + 2 < n; ++j) {
+                        const double s = static_cast<double>(j) / static_cast<double>(degree);
+                        const Point3d mid = p0 + Vector3d(p0, pn) * s;
+                        base += Vector3d(Point3d(0, 0, 0), mid) * bernstein(degree, j, t);
+                    }
+
+                    const Vector3d residual = Vector3d(Point3d(0, 0, 0), ASamples[i]) - base;
+                    const Vector3d da = AStartTangent * ca;
+                    const Vector3d db = AEndTangent * cb;
+                    ata[0][0] += da.dot(da);
+                    ata[0][1] += da.dot(db);
+                    ata[1][0] += db.dot(da);
+                    ata[1][1] += db.dot(db);
+                    atb[0] += da.dot(residual);
+                    atb[1] += db.dot(residual);
+                }
+
+                const double det = ata[0][0] * ata[1][1] - ata[0][1] * ata[1][0];
+                if (std::abs(det) < 1e-18) {
+                    return interpolating_curve(ends);
+                }
+                const double a = (atb[0] * ata[1][1] - ata[0][1] * atb[1]) / det;
+                const double b = (ata[0][0] * atb[1] - atb[0] * ata[1][0]) / det;
+
+                TEdgeCurve fitted;
+                fitted[0] = p0;
+                fitted[n - 1] = pn;
+                fitted[1] = p0 + AStartTangent * a;
+                fitted[n - 2] = pn - AEndTangent * b;
+                for (std::size_t j = 2; j + 2 < n; ++j) {
+                    const double s = static_cast<double>(j) / static_cast<double>(degree);
+                    fitted[j] = p0 + Vector3d(p0, pn) * s;
+                }
+                return fitted;
+            }
+        }
+
+        /**
+         * @brief Builds the curve of degree `TEdgeCurve::Degree` passing through @p ASamples at
+         * uniform parameters `t_i = i/(n-1)`.
+         *
+         * Solves `sum_j B_j(t_i) * P_j = S_i` for the control points `P`, where `B_j` are the
+         * Bernstein basis polynomials. The 2 endpoints are already control points (a Bezier
+         * interpolates them), so only the interior ones are unknown, leaving an `(n-2)x(n-2)` system
+         * — at most 3x3 here, small enough for plain Gaussian elimination with partial pivoting and
+         * not worth pulling in a linear algebra dependency for.
+         *
+         * @param ASamples The `n` points to pass through, first and last being the endpoints.
+         * @return The interpolating curve. Returns the samples as-is when there is no interior
+         *         control point to solve for (degree 1), where the curve already interpolates them.
+         */
+        static TEdgeCurve interpolating_curve(const std::array<Point3d, TEdgeCurve::NumControlPoints> &ASamples) {
+            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            constexpr std::size_t degree = n - 1;
+            constexpr std::size_t unknowns = (n > 2) ? n - 2 : 0;
+
+            TEdgeCurve fitted;
+            fitted[0] = ASamples[0];
+            fitted[n - 1] = ASamples[n - 1];
+            if constexpr (unknowns == 0) {
+                return fitted;
+            } else {
+                // Augmented system: `unknowns` equations, one per interior sample, with the 3
+                // coordinates carried as 3 right-hand sides (the matrix is the same for all of them).
+                std::array<std::array<double, unknowns + 3>, unknowns> sys{};
+                for (std::size_t r = 0; r < unknowns; ++r) {
+                    const double t = static_cast<double>(r + 1) / static_cast<double>(degree);
+                    for (std::size_t c = 0; c < unknowns; ++c) {
+                        sys[r][c] = bernstein(degree, c + 1, t);
+                    }
+                    // Move the 2 known endpoint terms over to the right-hand side.
+                    const Vector3d rhs = Vector3d(Point3d(0, 0, 0), ASamples[r + 1]) -
+                                         Vector3d(Point3d(0, 0, 0), ASamples[0]) * bernstein(degree, 0, t) -
+                                         Vector3d(Point3d(0, 0, 0), ASamples[n - 1]) * bernstein(degree, degree, t);
+                    sys[r][unknowns] = rhs.x();
+                    sys[r][unknowns + 1] = rhs.y();
+                    sys[r][unknowns + 2] = rhs.z();
+                }
+
+                for (std::size_t col = 0; col < unknowns; ++col) {
+                    std::size_t pivot = col;
+                    for (std::size_t r = col + 1; r < unknowns; ++r) {
+                        if (std::abs(sys[r][col]) > std::abs(sys[pivot][col])) pivot = r;
+                    }
+                    std::swap(sys[col], sys[pivot]);
+                    // A Bernstein collocation matrix at distinct parameters is non-singular, so this
+                    // only guards against a degenerate build rather than an expected case.
+                    if (std::abs(sys[col][col]) < 1e-300) continue;
+                    for (std::size_t r = 0; r < unknowns; ++r) {
+                        if (r == col) continue;
+                        const double factor = sys[r][col] / sys[col][col];
+                        for (std::size_t c = col; c < unknowns + 3; ++c) {
+                            sys[r][c] -= factor * sys[col][c];
+                        }
+                    }
+                }
+
+                for (std::size_t r = 0; r < unknowns; ++r) {
+                    const double d = sys[r][r];
+                    fitted[r + 1] = Point3d(sys[r][unknowns] / d, sys[r][unknowns + 1] / d, sys[r][unknowns + 2] / d);
+                }
+                return fitted;
+            }
+        }
+
+        /**
+         * @brief Evaluates the Bernstein basis polynomial `B_i^n(t) = C(n,i) t^i (1-t)^(n-i)`.
+         * @param ADegree The basis degree `n`.
+         * @param AIndex The basis index `i`, in `[0, ADegree]`.
+         * @param AT The parameter.
+         * @return The value of the polynomial.
+         */
+        static double bernstein(std::size_t ADegree, std::size_t AIndex, double AT) {
+            double binomial = 1.0;
+            for (std::size_t k = 0; k < AIndex; ++k) {
+                binomial = binomial * static_cast<double>(ADegree - k) / static_cast<double>(k + 1);
+            }
+            return binomial * std::pow(AT, static_cast<double>(AIndex)) *
+                   std::pow(1.0 - AT, static_cast<double>(ADegree - AIndex));
         }
 
         /**
@@ -764,15 +1241,21 @@ namespace gecko {
         }
 
         /**
-         * @brief Classifies one face against `m_geom_model` (dimension >= 2 only, using the face's
-         * own corner centroid) and rebuilds its stored surface via `coons_surface_from_edges()` from
-         * its 4 (now possibly refitted) boundary edges. Applies uniformly to a standalone 2D (quad)
-         * block's own face and to one of a 3D (hex) block's 6 bounding faces — both are ordinary
-         * 2-cells with exactly 4 boundary edges.
+         * @brief Classifies one face and rebuilds its stored surface via `coons_surface_from_edges()`
+         * from its 4 (now possibly refitted) boundary edges. Applies uniformly to a standalone 2D
+         * (quad) block's own face and to one of a 3D (hex) block's 6 bounding faces — both are
+         * ordinary 2-cells with exactly 4 boundary edges.
+         *
+         * Classification is inferred from those 4 edges' own classifications via `infer_targets()`
+         * (so a face all of whose edges lie on one surface lands on that surface), falling back to a
+         * proximity search at the face's corner centroid when they can't decide. Edges must
+         * therefore already be classified — `classify()` and `snap_node()` both do faces after
+         * edges for that reason.
+         *
          * @param AFace The face to classify and rebuild.
-         * @param ATolCurveSurface Tolerance for the (dimension >= 2) search.
+         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
          */
-        void classify_and_rebuild_face(Face AFace, double ATolCurveSurface) {
+        void classify_and_rebuild_face(Face AFace, const Tolerances &ATol) {
             const Dart fd = AFace->dart();
             std::array<Node, 4> local_nodes{};
             Dart walk = fd;
@@ -786,7 +1269,18 @@ namespace gecko {
                 acc += Vector3d(local_nodes[0]->info().point, node->info().point);
             }
             const Point3d center = local_nodes[0]->info().point + acc * 0.25;
-            const auto result = classify_position(GroupDim::Dim2, center, ATolCurveSurface, ATolCurveSurface);
+
+            std::vector<const std::vector<std::pair<GroupDim, Int>> *> boundary;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                boundary.push_back(&m_cmap.template attribute<1>(it)->info().geom_targets);
+            }
+
+            const auto inferred = infer_targets(boundary, GroupDim::Dim2);
+            const auto result =
+                inferred.empty() ? classify_position(GroupDim::Dim2, center, ATol) : nearest_of(inferred, center);
             AFace->info().geom_targets = result.targets;
 
             rebuild_face_surface(AFace);
@@ -862,10 +1356,14 @@ namespace gecko {
          * from the boundary `Face` attributes' own stored surfaces, which may have been rebuilt by
          * `classify_and_rebuild_face()` in an independent local orientation (reconciling the two is
          * `to_mesh()`'s seam-indexing concern, not this method's).
+         * Classification stays a plain proximity search here, unlike edges' and faces': the only
+         * entities at dimension 3 are volumes, and inferring from the block's 6 faces could only
+         * ever return those same volumes.
+         *
          * @param ABlock The block to classify and rebuild.
-         * @param ATolCurveSurface Tolerance for the (dimension >= 3) search.
+         * @param ATol The per-dimension snapping tolerances.
          */
-        void classify_and_rebuild_block(Block ABlock, double ATolCurveSurface) {
+        void classify_and_rebuild_block(Block ABlock, const Tolerances &ATol) {
             const Dart bd = ABlock->dart();
             std::array<Node, 8> local_nodes{};
             local_nodes[0] = m_cmap.template attribute<0>(bd);
@@ -882,7 +1380,7 @@ namespace gecko {
                 acc += Vector3d(local_nodes[0]->info().point, node->info().point);
             }
             const Point3d center = local_nodes[0]->info().point + acc * (1.0 / 8.0);
-            const auto result = classify_position(GroupDim::Dim3, center, ATolCurveSurface, ATolCurveSurface);
+            const auto result = classify_position(GroupDim::Dim3, center, ATol);
             ABlock->info().geom_targets = result.targets;
 
             rebuild_block_volume(ABlock);

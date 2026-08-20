@@ -72,12 +72,6 @@ def test_hex_block_with_cubic_degree(geom_model_path):
     assert not blocking.is_purely_2d()
 
 
-def test_invalid_degree_raises(geom_model_path):
-    model = gecko.GeomModel(geom_model_path)
-    with pytest.raises(ValueError):
-        gecko.Blocking(model, degree=2)
-
-
 def test_node_classification_dims(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model)
@@ -118,6 +112,121 @@ def test_edge_vertices_invalid_samples_raises(geom_model_path):
     blocking.create_quad_block(_QUAD_A)
     with pytest.raises(ValueError):
         blocking.edge_vertices(0)
+
+
+@pytest.mark.parametrize("degree", [1, 2, 3, 4])
+def test_every_supported_degree(geom_model_path, degree):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=degree)
+    assert blocking.degree() == degree
+
+    blocking.create_quad_block(_QUAD_A)
+    # A quad has 4 edges, each driven by degree+1 control points joined by degree segments.
+    assert len(blocking.edge_control_points()) == 4 * (degree + 1)
+    assert len(blocking.edge_control_polygons()) == 4 * degree
+
+
+@pytest.mark.parametrize("degree", [1, 2, 3, 4])
+def test_face_and_block_control_nets(geom_model_path, degree):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=degree)
+    blocking.create_hex_block(_UNIT_HEX)
+    n = degree + 1
+
+    face_points = blocking.face_control_points()
+    face_net = blocking.face_control_nets()
+    block_points = blocking.block_control_points()
+    block_net = blocking.block_control_lattices()
+
+    # 6 faces with an (n x n) grid each; 1 block with an (n x n x n) grid.
+    assert len(face_points) == 6 * n * n
+    assert len(block_points) == n**3
+    # Per face: n rows and n columns, each of n-1 segments. Per block: 3 axes of n*n lines.
+    assert len(face_net) == 6 * 2 * n * (n - 1)
+    assert len(block_net) == 3 * n * n * (n - 1)
+
+    # No segment may join two different faces (or two different blocks).
+    for a, b in face_net:
+        assert a // (n * n) == b // (n * n)
+    for a, b in block_net:
+        assert max(a, b) < len(block_points)
+
+
+def test_degree_one_block_control_points_are_its_corners(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=1)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    assert sorted(tuple(p) for p in blocking.block_control_points()) == sorted(set(_UNIT_HEX))
+    # The 12 lattice segments of a straight block are exactly the cube's 12 edges.
+    assert len(blocking.block_control_lattices()) == 12
+
+
+@pytest.mark.parametrize("degree", [0, 5])
+def test_unsupported_degree_raises(geom_model_path, degree):
+    model = gecko.GeomModel(geom_model_path)
+    with pytest.raises(ValueError):
+        gecko.Blocking(model, degree=degree)
+
+
+def test_edge_and_face_classification_dims(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+
+    assert blocking.edge_classification_dims() == [-1] * 4
+    assert blocking.face_classification_dims() == [-1]
+
+    blocking.classify(1e-6)
+    # The fixture's one triangle spans (0,0,0)-(1,0,0)-(0,1,0), so 2 of the quad's edges lie on the
+    # surface and the face itself follows them onto it.
+    assert len(blocking.edge_classification_dims()) == 4
+    assert blocking.face_classification_dims() == [2]
+
+
+def test_face_grid_covers_3d_blocks_that_mesh_quads_does_not(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    # to_mesh() only emits quads for standalone 2D blocks, so a hex's 6 bounding faces would be
+    # undrawable without the dedicated face-grid path.
+    assert blocking.mesh_quads(1) == []
+    assert len(blocking.face_grid_quads(1)) == 6
+    assert len(blocking.face_classification_dims()) == 6
+
+    for subdivisions in (1, 3):
+        vertices = blocking.face_grid_vertices(subdivisions)
+        quads = blocking.face_grid_quads(subdivisions)
+        owners = blocking.face_grid_owners(subdivisions)
+        assert len(vertices) == 6 * (subdivisions + 1) ** 2
+        assert len(quads) == 6 * subdivisions**2
+        assert len(owners) == len(quads)
+        assert max(i for quad in quads for i in quad) < len(vertices)
+        assert sorted(set(owners)) == list(range(6))
+
+
+def test_snap_node(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    blocking.classify(1e-6)
+
+    # Node 0 sits on the fixture's only model vertex, the origin. Nudge it off, then snap it back.
+    blocking.move_node(0, 0.02, 0.02, 0.0)
+    assert blocking.node_position(0) == [0.02, 0.02, 0.0]
+
+    blocking.snap_node(0, 0.1, 0.1, 0.1)
+    assert blocking.node_position(0) == [0.0, 0.0, 0.0]
+    assert blocking.node_classification_dims()[0] == 0
+
+
+def test_snap_node_unknown_id_raises(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    with pytest.raises(IndexError):
+        blocking.snap_node(99, 0.1)
 
 
 def test_nb_cells_invalid_dim_raises(geom_model_path):

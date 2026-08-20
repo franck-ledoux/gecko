@@ -27,18 +27,33 @@ namespace gecko::python {
             }
         }
 
-        using ImplVariant = std::variant<BlockingFacade::Impl<1>, BlockingFacade::Impl<3>>;
+        using ImplVariant = std::
+            variant<BlockingFacade::Impl<1>, BlockingFacade::Impl<2>, BlockingFacade::Impl<3>, BlockingFacade::Impl<4>>;
 
         ImplVariant make_impl(const FacetedGeometry &geom, int degree) {
-            if (degree == 1) return ImplVariant{std::in_place_type<BlockingFacade::Impl<1>>, geom};
-            if (degree == 3) return ImplVariant{std::in_place_type<BlockingFacade::Impl<3>>, geom};
-            throw std::invalid_argument("Blocking: degree must be 1 (straight) or 3 (cubic Bezier), got " +
-                                        std::to_string(degree));
+            switch (degree) {
+                case 1:
+                    return ImplVariant{std::in_place_type<BlockingFacade::Impl<1>>, geom};
+                case 2:
+                    return ImplVariant{std::in_place_type<BlockingFacade::Impl<2>>, geom};
+                case 3:
+                    return ImplVariant{std::in_place_type<BlockingFacade::Impl<3>>, geom};
+                case 4:
+                    return ImplVariant{std::in_place_type<BlockingFacade::Impl<4>>, geom};
+                default:
+                    throw std::invalid_argument(
+                        "Blocking: degree must be in [" + std::to_string(BlockingFacade::MIN_DEGREE) + "," +
+                        std::to_string(BlockingFacade::MAX_DEGREE) + "] (1 = straight), got " + std::to_string(degree));
+            }
         }
     } // namespace
 
     BlockingFacade::BlockingFacade(const GeomModelFacade &model, int degree)
         : m_impl(make_impl(model.native(), degree)) {}
+
+    int BlockingFacade::degree() const {
+        return std::visit([](const auto &impl) { return std::decay_t<decltype(impl)>::DEGREE; }, m_impl);
+    }
 
     int BlockingFacade::create_quad_block(const std::vector<std::array<double, 3>> &corners) {
         const auto points = to_points<4>(corners, "Blocking.create_quad_block");
@@ -67,10 +82,10 @@ namespace gecko::python {
         std::visit([](auto &impl) { impl.blocking.build_connectivity(); }, m_impl);
     }
 
-    void BlockingFacade::classify(double tol_vertex, double tol_curve_surface) {
-        std::visit(
-            [tol_vertex, tol_curve_surface](auto &impl) { impl.blocking.classify(tol_vertex, tol_curve_surface); },
-            m_impl);
+    void BlockingFacade::classify(double tol_vertex, double tol_curve, double tol_surface) {
+        std::visit([tol_vertex, tol_curve, tol_surface](
+                       auto &impl) { impl.blocking.classify(tol_vertex, tol_curve, tol_surface); },
+                   m_impl);
     }
 
     std::size_t BlockingFacade::nb_cells(int dim) const {
@@ -177,6 +192,23 @@ namespace gecko::python {
                    m_impl);
     }
 
+    void BlockingFacade::snap_node(int node_id, double tol_vertex, double tol_curve, double tol_surface) {
+        std::visit(
+            [node_id, tol_vertex, tol_curve, tol_surface](auto &impl) {
+                impl.blocking.snap_node(find_node(impl, node_id)->second, tol_vertex, tol_curve, tol_surface);
+            },
+            m_impl);
+    }
+
+    namespace {
+        /** @brief The dimension a cell's `geom_targets` puts it on, or -1 when unclassified. Every
+         * target of one cell sits at the same dimension (see `Blocking::classify()`), so the first
+         * speaks for all. */
+        int classification_dim(const std::vector<std::pair<GroupDim, Int>> &ATargets) {
+            return ATargets.empty() ? -1 : static_cast<int>(ATargets.front().first);
+        }
+    } // namespace
+
     std::vector<int> BlockingFacade::node_classification_dims() const {
         return std::visit(
             [](const auto &impl) {
@@ -189,12 +221,238 @@ namespace gecko::python {
                 std::vector<int> dims;
                 dims.reserve(ids.size());
                 for (const int id : ids) {
-                    const auto &targets = impl.nodes_by_id.at(id)->info().geom_targets;
-                    // Every target of a cell sits at the same dimension (see Blocking::classify),
-                    // so the first one speaks for all of them.
-                    dims.push_back(targets.empty() ? -1 : static_cast<int>(targets.front().first));
+                    dims.push_back(classification_dim(impl.nodes_by_id.at(id)->info().geom_targets));
                 }
                 return dims;
+            },
+            m_impl);
+    }
+
+    std::vector<int> BlockingFacade::edge_classification_dims() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<int> dims;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    dims.push_back(classification_dim(it->info().geom_targets));
+                }
+                return dims;
+            },
+            m_impl);
+    }
+
+    std::vector<int> BlockingFacade::face_classification_dims() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<int> dims;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    dims.push_back(classification_dim(it->info().geom_targets));
+                }
+                return dims;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::edge_control_points() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (const auto &cp : it->info().curve.control_points()) {
+                        points.push_back({cp.x(), cp.y(), cp.z()});
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::edge_control_polygons() const {
+        return std::visit(
+            [](const auto &impl) {
+                constexpr int n = static_cast<int>(std::decay_t<decltype(impl)>::DEGREE) + 1;
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i + 1 < n; ++i) {
+                        segments.push_back({base + i, base + i + 1});
+                    }
+                    base += n;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::face_control_points() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    const auto &grid = it->info().surface.control_points();
+                    for (const auto &row : grid) {
+                        for (const auto &cp : row) {
+                            points.push_back({cp.x(), cp.y(), cp.z()});
+                        }
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::face_control_nets() const {
+        return std::visit(
+            [](const auto &impl) {
+                constexpr int n = std::decay_t<decltype(impl)>::DEGREE + 1;
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < n; ++i) {
+                        for (int j = 0; j < n; ++j) {
+                            const int here = base + i * n + j;
+                            if (i + 1 < n) segments.push_back({here, here + n}); // along u
+                            if (j + 1 < n) segments.push_back({here, here + 1}); // along v
+                        }
+                    }
+                    base += n * n;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::block_control_points() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
+                     it != itend;
+                     ++it) {
+                    const auto &grid = it->info().volume.control_points();
+                    for (const auto &plane : grid) {
+                        for (const auto &row : plane) {
+                            for (const auto &cp : row) {
+                                points.push_back({cp.x(), cp.y(), cp.z()});
+                            }
+                        }
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 2>> BlockingFacade::block_control_lattices() const {
+        return std::visit(
+            [](const auto &impl) {
+                constexpr int n = std::decay_t<decltype(impl)>::DEGREE + 1;
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<int, 2>> segments;
+                int base = 0;
+                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < n; ++i) {
+                        for (int j = 0; j < n; ++j) {
+                            for (int k = 0; k < n; ++k) {
+                                const int here = base + (i * n + j) * n + k;
+                                if (i + 1 < n) segments.push_back({here, here + n * n}); // along u
+                                if (j + 1 < n) segments.push_back({here, here + n});     // along v
+                                if (k + 1 < n) segments.push_back({here, here + 1});     // along w
+                            }
+                        }
+                    }
+                    base += n * n * n;
+                }
+                return segments;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::face_grid_vertices(int subdivisions) const {
+        check_subdivisions(subdivisions, "Blocking.face_grid_vertices");
+        return std::visit(
+            [subdivisions](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<std::array<double, 3>> points;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    // Straight off the face's own stored surface, rather than out of to_mesh():
+                    // to_mesh() only emits quads for standalone 2D blocks, so a hex block's own
+                    // bounding faces would otherwise never be drawable.
+                    for (int i = 0; i <= subdivisions; ++i) {
+                        for (int j = 0; j <= subdivisions; ++j) {
+                            const double u = static_cast<double>(i) / static_cast<double>(subdivisions);
+                            const double v = static_cast<double>(j) / static_cast<double>(subdivisions);
+                            const auto p = it->info().surface.value(u, v);
+                            points.push_back({p.x(), p.y(), p.z()});
+                        }
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<int, 4>> BlockingFacade::face_grid_quads(int subdivisions) const {
+        check_subdivisions(subdivisions, "Blocking.face_grid_quads");
+        return std::visit(
+            [subdivisions](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                const int side = subdivisions + 1;
+                std::vector<std::array<int, 4>> quads;
+                int base = 0;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    for (int i = 0; i < subdivisions; ++i) {
+                        for (int j = 0; j < subdivisions; ++j) {
+                            const int a = base + i * side + j;
+                            quads.push_back({a, a + side, a + side + 1, a + 1});
+                        }
+                    }
+                    base += side * side;
+                }
+                return quads;
+            },
+            m_impl);
+    }
+
+    std::vector<int> BlockingFacade::face_grid_owners(int subdivisions) const {
+        check_subdivisions(subdivisions, "Blocking.face_grid_owners");
+        return std::visit(
+            [subdivisions](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                const int per_face = subdivisions * subdivisions;
+                std::vector<int> owners;
+                int face_index = 0;
+                for (auto it = map.template attributes<2>().begin(), itend = map.template attributes<2>().end();
+                     it != itend;
+                     ++it) {
+                    owners.insert(owners.end(), static_cast<std::size_t>(per_face), face_index);
+                    ++face_index;
+                }
+                return owners;
             },
             m_impl);
     }

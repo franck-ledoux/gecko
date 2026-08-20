@@ -70,11 +70,21 @@ namespace gecko::python {
             .def("build_connectivity",
                  &BlockingFacade::build_connectivity,
                  "Auto-detects and sews coincident blocks created so far. Not incremental.")
+            .def("degree", &BlockingFacade::degree, "Edge curve degree this blocking was built with.")
             .def("classify",
                  &BlockingFacade::classify,
                  py::arg("tol_vertex"),
-                 py::arg("tol_curve_surface") = -1.0,
-                 "Classifies every cell onto the geometric model and refits geometry accordingly.")
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Classifies every cell onto the geometric model and refits geometry accordingly. An omitted "
+                 "curve tolerance reuses the vertex one, an omitted surface tolerance the curve one.")
+            .def("snap_node",
+                 &BlockingFacade::snap_node,
+                 py::arg("node_id"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Snaps one corner onto the model, reclassifying and refitting only the cells touching it.")
             .def("nb_cells",
                  &BlockingFacade::nb_cells,
                  py::arg("dim"),
@@ -105,6 +115,42 @@ namespace gecko::python {
                  &BlockingFacade::node_classification_dims,
                  "Dimension of the entity each corner node is classified on (0 vertex, 1 curve, 2 surface, "
                  "3 volume), or -1 if unclassified, in node_ids() order.")
+            .def("edge_classification_dims",
+                 &BlockingFacade::edge_classification_dims,
+                 "Dimension of the entity each block edge is classified on, or -1 if unclassified.")
+            .def("face_classification_dims",
+                 &BlockingFacade::face_classification_dims,
+                 "Dimension of the entity each block face is classified on, or -1 if unclassified.")
+            .def("edge_control_points",
+                 &BlockingFacade::edge_control_points,
+                 "(x,y,z) control points of every block edge, ``degree + 1`` per edge.")
+            .def("edge_control_polygons",
+                 &BlockingFacade::edge_control_polygons,
+                 "Index pairs joining consecutive control points within each edge.")
+            .def("face_control_points",
+                 &BlockingFacade::face_control_points,
+                 "(x,y,z) control points of every block face, ``(degree+1)**2`` per face.")
+            .def("face_control_nets",
+                 &BlockingFacade::face_control_nets,
+                 "Index pairs joining each face control point to its neighbours along u and v.")
+            .def("block_control_points",
+                 &BlockingFacade::block_control_points,
+                 "(x,y,z) control points of every block, ``(degree+1)**3`` per block.")
+            .def("block_control_lattices",
+                 &BlockingFacade::block_control_lattices,
+                 "Index pairs joining each block control point to its neighbours along u, v and w.")
+            .def("face_grid_vertices",
+                 &BlockingFacade::face_grid_vertices,
+                 py::arg("subdivisions") = 1,
+                 "(x,y,z) points sampling every block face into a grid, for display.")
+            .def("face_grid_quads",
+                 &BlockingFacade::face_grid_quads,
+                 py::arg("subdivisions") = 1,
+                 "Quads joining the points face_grid_vertices() returns.")
+            .def("face_grid_owners",
+                 &BlockingFacade::face_grid_owners,
+                 py::arg("subdivisions") = 1,
+                 "Which block face each quad of face_grid_quads() came from.")
             .def("edge_vertices",
                  &BlockingFacade::edge_vertices,
                  py::arg("samples") = 1,

@@ -28,8 +28,13 @@ cmake --build build --target biy
 ## Running
 
 ```bash
-./build/biy/biy test_data/two_cubes.msh
+./build/biy/biy test_data/two_cubes.msh        # cubic blocks (order 3, the default)
+./build/biy/biy test_data/two_cubes.msh 1      # straight blocks
 ```
+
+The optional second argument is the **block order**: `1` for straight edges, `2`/`3`/`4` for Bezier
+edges of that degree. It is fixed for the session — the order is part of the C++ blocking's type, so
+changing it means starting biy again.
 
 Two things start together:
 
@@ -42,24 +47,26 @@ window draws, so a change made either way shows up immediately in the other.
 
 ## The panel
 
-| Button              | What it does                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------------- |
-| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin                 |
-| Build connectivity  | Sews coincident blocks together (see `Blocking::build_connectivity`)                     |
-| Classify            | Snaps the blocking onto the model's vertices/curves/surfaces, within the given tolerance |
-| Export VTK          | Writes the generated mesh to `biy_blocking.vtk`                                          |
+| Button              | What it does                                                             |
+| ------------------- | ------------------------------------------------------------------------ |
+| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin |
+| Build connectivity  | Sews coincident blocks together (see `Blocking::build_connectivity`)     |
+| Classify            | Snaps the whole blocking onto the model, within the 3 tolerances below   |
+| Export VTK          | Writes the generated mesh to `biy_blocking.vtk`                          |
 
 `subdivisions` controls how finely the blocking is meshed for display and export: `1` shows the raw
-block structure, higher values show the mesh it generates. **Show block edges** draws the block
+block structure, higher values show the mesh it generates. It is capped at **20**, because a 3D
+blocking's mesh grows cubically with it — 20 is already 8000 hexes per block, and the window bogs
+down before anything else does. **Show block edges** draws the block
 structure's own edges as a curve network — the edges of the blocks themselves, traced along their
 curves, as opposed to the subdivision lines of the mesh.
 
-## Corner colors
+## Classification colors
 
-Block corners are colored by what `classify()` put them on, so the state of a blocking being fitted
-to its model is readable at a glance:
+Corners, block edges **and** block faces are all colored by what `classify()` put them on, so the
+state of a blocking being fitted to its model is readable at a glance:
 
-| Corner | Classified on                                                        |
+| Color  | Classified on                                                        |
 | ------ | -------------------------------------------------------------------- |
 | Violet | nothing yet — `classify()` hasn't run, or found nothing in tolerance |
 | Yellow | a model vertex                                                       |
@@ -68,6 +75,57 @@ to its model is readable at a glance:
 | Green  | a model volume                                                       |
 
 The corner being dragged is drawn white and larger, so it can't be confused with any of these.
+
+Edges and faces are not classified by proximity like corners are, but from **their own boundary**:
+an edge goes on the lowest-dimensional entity containing both its corners' classifications, a face
+on the one containing all 4 of its edges'. So an edge between 2 corners of one model curve lands on
+that curve, while a diagonal whose corners belong to different curves lands on the surface they
+share — even though its midpoint may sit closer to a curve. Proximity is only the fallback, used
+when the boundary can't decide (an unclassified corner, say).
+
+## Snapping
+
+`classify()` takes **three** tolerances — vertex, curve, surface — editable in the panel. They are
+separate because the scales genuinely differ: one loose enough to catch a surface would snap corners
+onto the wrong vertex.
+
+Those same tolerances drive the **snap on release**: let go of a dragged corner and it settles onto
+whatever it landed near, with every edge and face touching it reclassified and refitted to match.
+The status line reports what it snapped onto. That update is local rather than a full `classify()`
+pass — sound precisely because edges and faces infer from their boundary, so no cell the corner
+doesn't touch can have changed.
+
+## Control points
+
+**Control points** has one checkbox per kind, drawing the handles that actually drive each curved
+cell together with the scaffold joining them:
+
+| Checkbox | Shows                                                | Points per cell |
+| -------- | ---------------------------------------------------- | --------------- |
+| edges    | each edge's control polygon                          | `order + 1`     |
+| faces    | each face's control net, along `u` and `v`           | `(order + 1)²`  |
+| blocks   | each block's control lattice, along `u`, `v` and `w` | `(order + 1)³`  |
+
+They are colored differently because they overlap: a face's net already contains its edges' control
+points, and a block's lattice contains both. All three are disabled at order 1, where every control
+point is simply a block corner.
+
+Expect the lattice to stick out beyond the block it drives — a Bezier lies inside the convex hull of
+its control points, not through them, so the handles sit outside the shape they bend.
+
+That same property is why classification **fits** the edge rather than projecting its control points
+onto the geometry. Moving a control point onto a geometric curve does not put the *curve* there: it
+passes through its 2 endpoints only, staying strictly inside its handles, and so ends up bowed short
+of the geometry it should follow. `classify()` instead samples points on the geometry and solves for
+the control points that reproduce them — which is exactly why the handles you see do not lie on the
+model.
+
+An edge classified on a **curve** additionally leaves each of its ends along that curve's own
+tangent there, since the first handle's direction *is* the curve's starting direction. Fitting
+positions alone leaves those directions free, and they come out badly wrong — about 30° off on a
+plain circular arc, which shows up as handles splaying away from the geometry instead of running
+alongside it. A surface has no single such direction, so edges classified on one are fitted by
+position only.
 
 !!! note
     Green (volume) is not one of the four states you might expect, but `classify()` does produce it,
@@ -96,8 +154,8 @@ already taken: Polyscope uses `Shift`+`Ctrl`+drag for zooming.
 In **Edit** mode, press the left button on a corner and it follows the mouse in the plane facing the
 camera. While held, the corner is drawn larger and in the highlight color, returning to normal on
 release. Every edge, face and block touching the corner is refitted live, so the block visibly
-deforms as you drag. Dragging does not re-classify — run **Classify** afterwards to snap the moved
-corners back onto the geometry.
+deforms as you drag. Releasing snaps it onto the model and reclassifies everything it touches — see
+[Snapping](#snapping) above.
 
 The scene itself stays put while you edit. Polyscope normally recomputes the scene's bounding box
 and length scale whenever a structure changes, which drags the ground plane along with it — so biy
@@ -123,27 +181,46 @@ is a copy of the defaults:
   "corner_color_on_surface": [0.15, 0.4, 0.95],
   "corner_color_on_volume": [0.2, 0.75, 0.3],
 
+  "tol_vertex": 0.1,
+  "tol_curve": 0.1,
+  "tol_surface": 0.1,
+
   "model_transparency": 0.45,
+
   "show_block_edges": true,
   "block_edge_radius": 0.003,
-  "block_edge_color": [0.15, 0.15, 0.15]
+  "block_edge_color": [0.15, 0.15, 0.15],
+
+  "show_edge_control": false,
+  "show_face_control": false,
+  "show_block_control": false,
+  "control_point_radius": 0.006,
+  "control_polygon_radius": 0.002,
+  "edge_control_color": [0.1, 0.8, 0.8],
+  "face_control_color": [0.95, 0.55, 0.1],
+  "block_control_color": [0.55, 0.85, 0.3]
 }
 ```
 
-| Key                         | Meaning                                                                                  |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
-| `corner_radius`             | Size of a block corner at rest                                                           |
-| `corner_highlight_radius`   | Size of the corner being dragged                                                         |
-| `corner_highlight_color`    | Color of the corner being dragged, RGB in `[0,1]`                                        |
-| `corner_color_unclassified` | Color of a corner not classified onto anything                                           |
-| `corner_color_on_vertex`    | Color of a corner classified on a model vertex                                           |
-| `corner_color_on_curve`     | Color of a corner classified on a model curve                                            |
-| `corner_color_on_surface`   | Color of a corner classified on a model surface                                          |
-| `corner_color_on_volume`    | Color of a corner classified on a model volume                                           |
-| `model_transparency`        | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
-| `show_block_edges`          | Whether block edges are drawn at startup                                                 |
-| `block_edge_radius`         | Thickness of the block edges                                                             |
-| `block_edge_color`          | Color of the block edges, RGB in `[0,1]`                                                 |
+| Key                                      | Meaning                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `corner_radius`                          | Size of a block corner at rest                                                           |
+| `corner_highlight_radius`                | Size of the corner being dragged                                                         |
+| `corner_highlight_color`                 | Color of the corner being dragged, RGB in `[0,1]`                                        |
+| `corner_color_unclassified`              | Color of a corner not classified onto anything                                           |
+| `corner_color_on_vertex`                 | Color of a corner classified on a model vertex                                           |
+| `corner_color_on_curve`                  | Color of a corner classified on a model curve                                            |
+| `corner_color_on_surface`                | Color of a corner classified on a model surface                                          |
+| `corner_color_on_volume`                 | Color of a corner classified on a model volume                                           |
+| `model_transparency`                     | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
+| `tol_vertex`, `tol_curve`, `tol_surface` | Starting snapping tolerances, one per entity dimension                                   |
+| `show_block_edges`                       | Whether block edges are drawn at startup                                                 |
+| `show_control_points`                    | Whether curved edges' control points are drawn at startup                                |
+| `control_point_radius`                   | Size of a control point                                                                  |
+| `control_polygon_radius`                 | Thickness of the polygon joining them                                                    |
+| `control_point_color`                    | Color of both, RGB in `[0,1]`                                                            |
+| `block_edge_radius`                      | Thickness of the block edges                                                             |
+| `block_edge_color`                       | Color of the block edges, RGB in `[0,1]`                                                 |
 
 Radii are Polyscope *relative* values — a fraction of the scene's bounding box — so they stay
 sensible whatever units the model uses.

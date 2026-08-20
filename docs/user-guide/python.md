@@ -60,7 +60,7 @@ for group_id in model.group_ids():
 `Blocking` builds a structured quad/hex blocking against a `GeomModel`. Block corners are passed
 as lists of `(x, y, z)` tuples; created faces/blocks are identified by the `int` id `Blocking`
 hands back. `degree=1` (the default) gives straight edges; `degree=3` gives cubic-Bezier edges that
-`classify()` can bend onto curved geometry.
+`classify()` can bend onto curved geometry. Degrees 1 through 4 are available.
 
 ```python
 import gecko
@@ -72,7 +72,15 @@ face_a = blocking.create_quad_block([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
 face_b = blocking.create_quad_block([(1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)])
 blocking.build_connectivity()  # sews the shared edge between face_a and face_b
 
-blocking.classify(tol_vertex=1e-6)  # snap onto model's vertices/curves/surfaces
+blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)  # snap onto the model
+
+# What each cell ended up on: -1 free, 0 vertex, 1 curve, 2 surface, 3 volume. Edges and faces are
+# inferred from their own boundary, not from proximity — see the biy guide.
+print(blocking.node_classification_dims(), blocking.edge_classification_dims())
+
+# Snap one corner back onto the model after moving it, reclassifying only what touches it.
+blocking.move_node(0, 0.01, 0.01, 0.0)
+blocking.snap_node(0, tol_vertex=0.1)
 
 print(blocking.nb_cells(2), blocking.is_valid_topology())
 

@@ -46,8 +46,11 @@ namespace gecko {
      * surface_by_tag()/volume_by_tag(), each looking up an entity by its entity_tag() (see
      * GeomEntityConcept) and returning a pointer to it, or `nullptr` if no entity of that
      * dimension has that tag; groups() (every group, regardless of dimension) and
-     * groups(GroupDim) (groups of one dimension only); and entities(GroupId), the (possibly
-     * dimension-mixed) entities belonging to a given group.
+     * groups(GroupDim) (groups of one dimension only); entities(GroupId), the (possibly
+     * dimension-mixed) entities belonging to a given group; and containing_entities(GroupDim, Int),
+     * the model's B-Rep incidence — an entity plus every higher-dimensional entity containing it,
+     * as (dimension, entity_tag) pairs — which lets a block cell's classification be inferred from
+     * that of its own boundary rather than from proximity alone (see `Blocking::classify()`).
      * @tparam T Candidate geometric model type.
      */
     template<typename T>
@@ -64,12 +67,17 @@ namespace gecko {
             { model.groups() } -> std::ranges::range;
             { model.groups(dim) } -> std::ranges::range;
             { model.entities(gid) } -> std::ranges::range;
+            { model.containing_entities(dim, tag) } -> std::ranges::range;
             {
                 model.vertex_by_tag(tag)
             } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().vertices())> *>;
             {
                 model.curve_by_tag(tag)
             } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().curves())> *>;
+            // Curves alone must also report a direction: fitting a curved block edge onto one needs
+            // its tangent at the edge's ends, and unlike a point projection there is no meaningful
+            // counterpart of this on a vertex, surface or volume.
+            { model.curve_by_tag(tag)->tangent(std::declval<const Point3d &>()) } -> std::same_as<Vector3d>;
             {
                 model.surface_by_tag(tag)
             } -> std::same_as<const std::ranges::range_value_t<decltype(std::declval<const T &>().surfaces())> *>;

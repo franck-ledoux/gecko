@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -36,12 +38,19 @@ namespace gecko::biy {
      */
     class BiyApp {
     public:
+        /** @brief Highest display subdivision the panel accepts. A 3D blocking's generated mesh
+         * grows cubically with it — 20 is already 8000 hexes per block — and the window becomes
+         * unusable well before anything else complains. */
+        static constexpr int MAX_SUBDIVISIONS = 20;
+
         /**
          * @brief Constructor. Loads the geometric model and registers it for display.
          * @param model_path Path to the .msh file to load.
+         * @param order Edge order of the blocking to build (see `BlockingFacade`'s degree). Fixed
+         *        for the session: it is baked into the C++ blocking type.
          * @throw std::runtime_error if the file cannot be read.
          */
-        explicit BiyApp(const std::string &model_path);
+        BiyApp(const std::string &model_path, int order);
 
         /** @brief Draws this frame's ImGui panel and services any in-progress corner drag. Called
          * by Polyscope once per frame, on the main thread. */
@@ -60,11 +69,24 @@ namespace gecko::biy {
          */
         [[nodiscard]] python::BlockingFacade &blocking();
 
-        /** @brief Re-reads the facades and refreshes every Polyscope structure. Call after any
-         * mutation — including ones made from the Python console. */
-        void refresh_view();
+        /**
+         * @brief Asks for the Polyscope structures to be rebuilt on the next frame. Call after any
+         * mutation made off the render thread — in practice, from the Python console.
+         *
+         * Deliberately not a direct `refresh_view()`: registering and removing Polyscope structures
+         * races with the main thread drawing them. `mutex()` cannot prevent that, since it only
+         * guards this class' own per-frame callback and not Polyscope's rendering, which happens
+         * outside it. Deferring to the next frame keeps every structure mutation on the render
+         * thread, where drawing cannot be interleaved with it.
+         *
+         * Safe to call with `mutex()` already held — as the console does — since it takes no lock.
+         */
+        void request_refresh();
 
     private:
+        /** @brief Re-reads the facades and rebuilds every Polyscope structure. Main thread only —
+         * see `request_refresh()`. */
+        void refresh_view();
         /** @brief Registers the model's own facets (triangles, and tets when the file had any). */
         void register_model();
         /** @brief Freezes the scene's bounding box/length scale to the model, so later edits to
@@ -75,6 +97,34 @@ namespace gecko::biy {
         void set_mouse_mode(MouseMode mode);
         /** @brief Shows the drag highlight on one corner, or hides it when @p ANodeId is unset. */
         void show_highlight(std::optional<int> node_id);
+        /** @brief Applies a per-cell classification color quantity to a Polyscope structure.
+         * @tparam TStructure Polyscope structure type.
+         * @tparam TAdd Callable adding a color quantity of the right kind to that structure.
+         * @param AStructure The structure to color.
+         * @param ADims One classification dimension per element (-1 when unclassified).
+         * @param AAdd Adds the quantity (structures differ: per-edge, per-face, ...).
+         */
+        template<typename TStructure, typename TAdd>
+        void apply_classification_colors(TStructure *structure, const std::vector<int> &dims, TAdd add);
+        /** @brief Registers (or removes) all three control displays: edge polygons, face nets and
+         * block lattices. */
+        void refresh_control_nets();
+        /**
+         * @brief Registers (or removes) one control display: its points, drawn as spheres, and the
+         * segments joining them.
+         * @param points_name Polyscope name for the point cloud.
+         * @param net_name Polyscope name for the segments.
+         * @param points The control points.
+         * @param segments Index pairs joining them.
+         * @param color Color of both.
+         * @param visible Whether the pair is currently shown.
+         */
+        void refresh_control_net(const char *points_name,
+                                 const char *net_name,
+                                 const std::vector<std::array<double, 3>> &points,
+                                 const std::vector<std::array<int, 2>> &segments,
+                                 const std::array<float, 3> &color,
+                                 bool visible);
         /** @brief Creates a hex block spanning the model's bounding box, scaled by @p AMargin. */
         void create_bounding_box(double margin);
         /** @brief Draws the button panel. Assumes the ImGui frame is already set up. */
@@ -89,6 +139,10 @@ namespace gecko::biy {
         std::unique_ptr<python::GeomModelFacade> m_model;
         std::unique_ptr<python::BlockingFacade> m_blocking;
         std::string m_model_path;
+        /** @brief Set by `request_refresh()`, consumed by the next `per_frame()`. Atomic rather than
+         * guarded by `m_mutex`: the console calls `request_refresh()` while already holding that
+         * mutex, and re-locking a non-recursive `std::mutex` would deadlock. */
+        std::atomic<bool> m_view_dirty{false};
         /** @brief What the left mouse button currently does. */
         MouseMode m_mode = MouseMode::Camera;
         /** @brief Node id of the corner currently being dragged, if any. */
@@ -97,10 +151,24 @@ namespace gecko::biy {
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */
         bool m_show_block_edges = true;
+        /** @brief Whether each kind of control display is currently drawn. */
+        bool m_show_edge_control = false;
+        /** @copydoc m_show_edge_control */
+        bool m_show_face_control = false;
+        /** @copydoc m_show_edge_control */
+        bool m_show_block_control = false;
         /** @brief Samples per block edge; > 1 traces a curved edge rather than its chord. */
         int m_edge_samples = 8;
-        /** @brief Tolerance the "Classify" button passes to Blocking::classify(). */
-        float m_classify_tol = 0.1f;
+        /** @brief Edge order of the blocking, fixed at construction (see the `order` argument). */
+        int m_order = 3;
+        /** @brief Per-dimension snapping tolerances, shared by the "Classify" button and by the
+         * snap that runs when a dragged corner is released. Separate values because the scales
+         * differ: one loose enough to catch a surface would snap corners to the wrong vertex. */
+        float m_tol_vertex = 0.1f;
+        /** @copydoc m_tol_vertex */
+        float m_tol_curve = 0.1f;
+        /** @copydoc m_tol_vertex */
+        float m_tol_surface = 0.1f;
         /** @brief Last status/error line shown in the panel. */
         std::string m_status;
     };
