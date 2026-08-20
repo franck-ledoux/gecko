@@ -23,21 +23,30 @@ namespace gecko::python {
      * plain int ids assigned by this façade, never a gecko::Point3d or CGAL dart/attribute handle
      * — see docs/user-guide/python.md.
      *
-     * TEdgeCurve's degree (1 = straight, 3 = cubic Bezier) is chosen at construction time via a
-     * plain int, instead of being a compile-time Python-visible axis: internally this holds one of
-     * a small std::variant of degree-specific implementations, matching the 2 instantiations used
-     * across block/tst/ (see e.g. blocking_curve_evaluation_tests.cpp).
+     * TEdgeCurve's degree (1 = straight, 2/3/4 = Bezier of that order) is chosen at construction
+     * time via a plain int, instead of being a compile-time Python-visible axis: internally this
+     * holds one of a std::variant of degree-specific implementations. The degree cannot be changed
+     * afterwards — it is baked into the C++ type — so build a new Blocking to work at another order.
      */
     class BlockingFacade {
     public:
+        /** @brief Lowest edge curve degree this facade can instantiate. */
+        static constexpr int MIN_DEGREE = 1;
+        /** @brief Highest edge curve degree this facade can instantiate. */
+        static constexpr int MAX_DEGREE = 4;
+
         /**
          * @brief Constructor.
          * @param model The geometric model to build against; must outlive this Blocking (enforced
          *        on the Python side via py::keep_alive).
-         * @param degree Edge curve degree: 1 for straight edges, 3 for cubic Bezier edges.
-         * @throw std::invalid_argument if @p degree is neither 1 nor 3.
+         * @param degree Edge curve degree: 1 for straight edges, 2/3/4 for Bezier curves of that
+         *        order.
+         * @throw std::invalid_argument if @p degree is outside [MIN_DEGREE, MAX_DEGREE].
          */
         explicit BlockingFacade(const GeomModelFacade &model, int degree = 1);
+
+        /** @brief Gets the edge curve degree this blocking was built with. @return The degree. */
+        [[nodiscard]] int degree() const;
 
         /**
          * @brief Creates a new, unsewn quad block.
@@ -62,10 +71,23 @@ namespace gecko::python {
         /**
          * @brief Classifies every cell onto the geometric model and refits geometry accordingly.
          * @param tol_vertex Tolerance for snapping onto a vertex.
-         * @param tol_curve_surface Tolerance for snapping onto a curve/surface/volume; defaults to
-         *        @p tol_vertex when left at -1.0.
+         * @param tol_curve Tolerance for snapping onto a curve; defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface (and volume); defaults to the
+         *        resolved curve tolerance.
          */
-        void classify(double tol_vertex, double tol_curve_surface = -1.0);
+        void classify(double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
+
+        /**
+         * @brief Snaps one corner node onto the geometric model, reclassifying and refitting only
+         * the cells that touch it — meant to run when a dragged corner is released.
+         * @param node_id A node id from node_ids().
+         * @param tol_vertex Tolerance for snapping onto a vertex.
+         * @param tol_curve Tolerance for snapping onto a curve; defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface; defaults to the resolved curve
+         *        tolerance.
+         * @throw std::out_of_range if @p node_id is not a known node id.
+         */
+        void snap_node(int node_id, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
 
         /**
          * @brief Gets the number of cells of a given dimension in the blocking.
@@ -130,6 +152,64 @@ namespace gecko::python {
         [[nodiscard]] std::vector<int> node_classification_dims() const;
 
         /**
+         * @brief Gets what each block edge is classified on, in the traversal order edge_vertices()
+         * and edge_segments() use.
+         * @return One entry per edge: the dimension of the geometric entity it is classified on
+         *         (0 vertex, 1 curve, 2 surface, 3 volume), or -1 if unclassified.
+         */
+        [[nodiscard]] std::vector<int> edge_classification_dims() const;
+
+        /**
+         * @brief Gets what each block face is classified on, in the traversal order
+         * face_grid_owners() indexes into.
+         * @return One entry per face: the dimension of the geometric entity it is classified on, or
+         *         -1 if unclassified.
+         */
+        [[nodiscard]] std::vector<int> face_classification_dims() const;
+
+        /**
+         * @brief Gets every block edge's control points — the handles actually driving a curved
+         * edge's shape, as opposed to the points sampled along it by edge_vertices().
+         *
+         * Only informative above degree 1, where a straight edge's 2 control points are just its
+         * endpoints.
+         * @return `degree + 1` (x,y,z) triples per edge, edge after edge, in the same traversal
+         *         order as edge_vertices().
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> edge_control_points() const;
+
+        /**
+         * @brief The segments of every edge's control polygon, joining consecutive control points
+         * within each edge (never across two edges).
+         * @return One pair of edge_control_points() indices per segment.
+         */
+        [[nodiscard]] std::vector<std::array<int, 2>> edge_control_polygons() const;
+
+        /**
+         * @brief Samples every block face into a grid of quads, for display.
+         *
+         * Unlike mesh_quads(), which only emits anything for standalone 2D blocks, this covers the
+         * bounding faces of 3D blocks too — so a blocking's faces can be drawn (and colored by
+         * classification) whatever its dimension. Use with face_grid_quads() and face_grid_owners().
+         * @param subdivisions Number of intervals per parametric axis (>= 1).
+         * @return `(subdivisions+1)^2` (x,y,z) triples per face, face after face.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> face_grid_vertices(int subdivisions) const;
+        /**
+         * @brief The quads joining the points face_grid_vertices() returns.
+         * @param subdivisions Number of intervals per parametric axis (>= 1).
+         * @return One quadruple of face_grid_vertices() indices per quad.
+         */
+        [[nodiscard]] std::vector<std::array<int, 4>> face_grid_quads(int subdivisions) const;
+        /**
+         * @brief Which block face each quad of face_grid_quads() came from, so a per-face value
+         * (its classification, say) can be spread onto every quad subdividing it.
+         * @param subdivisions Number of intervals per parametric axis (>= 1).
+         * @return One index into face_classification_dims() per quad.
+         */
+        [[nodiscard]] std::vector<int> face_grid_owners(int subdivisions) const;
+
+        /**
          * @brief Samples every edge of the block structure along its own curve.
          *
          * Together with edge_segments(), gives the block structure's own edges as polylines —
@@ -171,6 +251,8 @@ namespace gecko::python {
         template<std::size_t N>
         struct Impl {
             using BlockingT = Blocking<FacetedGeometry, BezierCurve<N, Point3d>>;
+            /** @brief The edge curve degree this alternative was instantiated for. */
+            static constexpr int DEGREE = static_cast<int>(N);
 
             BlockingT blocking;
             std::unordered_map<int, typename BlockingT::Face> faces_by_id;
@@ -198,7 +280,7 @@ namespace gecko::python {
         };
 
     private:
-        std::variant<Impl<1>, Impl<3>> m_impl;
+        std::variant<Impl<1>, Impl<2>, Impl<3>, Impl<4>> m_impl;
     };
 
 } // namespace gecko::python
