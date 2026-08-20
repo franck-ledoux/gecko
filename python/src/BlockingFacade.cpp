@@ -10,8 +10,8 @@ namespace gecko::python {
         template<std::size_t K>
         std::array<Point3d, K> to_points(const std::vector<std::array<double, 3>> &corners, const char *who) {
             if (corners.size() != K) {
-                throw std::invalid_argument(std::string(who) + ": expected " + std::to_string(K) +
-                                             " corners, got " + std::to_string(corners.size()));
+                throw std::invalid_argument(std::string(who) + ": expected " + std::to_string(K) + " corners, got " +
+                                            std::to_string(corners.size()));
             }
             std::array<Point3d, K> points{};
             for (std::size_t i = 0; i < K; ++i) {
@@ -26,11 +26,12 @@ namespace gecko::python {
             if (degree == 1) return ImplVariant{std::in_place_type<BlockingFacade::Impl<1>>, geom};
             if (degree == 3) return ImplVariant{std::in_place_type<BlockingFacade::Impl<3>>, geom};
             throw std::invalid_argument("Blocking: degree must be 1 (straight) or 3 (cubic Bezier), got " +
-                                         std::to_string(degree));
+                                        std::to_string(degree));
         }
     } // namespace
 
-    BlockingFacade::BlockingFacade(const GeomModelFacade &model, int degree) : m_impl(make_impl(model.native(), degree)) {}
+    BlockingFacade::BlockingFacade(const GeomModelFacade &model, int degree)
+        : m_impl(make_impl(model.native(), degree)) {}
 
     int BlockingFacade::create_quad_block(const std::vector<std::array<double, 3>> &corners) {
         const auto points = to_points<4>(corners, "Blocking.create_quad_block");
@@ -58,8 +59,9 @@ namespace gecko::python {
     }
 
     void BlockingFacade::classify(double tol_vertex, double tol_curve_surface) {
-        std::visit([tol_vertex, tol_curve_surface](auto &impl) { impl.blocking.classify(tol_vertex, tol_curve_surface); },
-                   m_impl);
+        std::visit(
+            [tol_vertex, tol_curve_surface](auto &impl) { impl.blocking.classify(tol_vertex, tol_curve_surface); },
+            m_impl);
     }
 
     std::size_t BlockingFacade::nb_cells(int dim) const {
@@ -76,7 +78,7 @@ namespace gecko::python {
                         return impl.blocking.template nb_cells<3>();
                     default:
                         throw std::invalid_argument("Blocking.nb_cells: dim must be in [0,3], got " +
-                                                     std::to_string(dim));
+                                                    std::to_string(dim));
                 }
             },
             m_impl);
@@ -102,8 +104,9 @@ namespace gecko::python {
     } // namespace
 
     bool BlockingFacade::can_delete_face(int face_id) const {
-        return std::visit([face_id](const auto &impl) { return impl.blocking.can_delete_face(find_face(impl, face_id)->second); },
-                           m_impl);
+        return std::visit(
+            [face_id](const auto &impl) { return impl.blocking.can_delete_face(find_face(impl, face_id)->second); },
+            m_impl);
     }
 
     void BlockingFacade::delete_face(int face_id) {
@@ -119,7 +122,7 @@ namespace gecko::python {
     void BlockingFacade::write_vtk(int subdivisions, const std::string &path) {
         if (subdivisions < 1) {
             throw std::invalid_argument("Blocking.write_vtk: subdivisions must be >= 1, got " +
-                                         std::to_string(subdivisions));
+                                        std::to_string(subdivisions));
         }
         std::visit(
             [subdivisions, &path](auto &impl) {
