@@ -39,6 +39,23 @@ namespace gecko::biy {
          * blocking is built around and inside the model, and an opaque model hides all of it. */
         double model_transparency = 0.45;
 
+        /** @brief Whether curved edges' control points are drawn at startup. */
+        bool show_control_points = false;
+        /** @brief Radius of a control point. */
+        double control_point_radius = 0.006;
+        /** @brief Thickness of the control polygon joining them. */
+        double control_polygon_radius = 0.002;
+        /** @brief Color of both the control points and their polygon. */
+        std::array<float, 3> control_point_color{0.1f, 0.8f, 0.8f};
+
+        /** @brief Default tolerance for snapping onto a model vertex — the tight one, since 2
+         * vertices are usually far closer to each other than to any curve. */
+        double tol_vertex = 0.1;
+        /** @brief Default tolerance for snapping onto a model curve. */
+        double tol_curve = 0.1;
+        /** @brief Default tolerance for snapping onto a model surface. */
+        double tol_surface = 0.1;
+
         /** @brief Whether the block structure's own edges are drawn at startup. */
         bool show_block_edges = true;
         /** @brief Thickness of those edges. */

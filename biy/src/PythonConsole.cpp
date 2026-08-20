@@ -77,7 +77,7 @@ namespace gecko::biy {
                         incomplete = true;
                     } else {
                         builtins_eval(code, globals);
-                        app.refresh_view();
+                        app.request_refresh();
                     }
                 } catch (const py::error_already_set &e) {
                     std::cout << e.what() << "\n";

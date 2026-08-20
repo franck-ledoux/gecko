@@ -4,22 +4,45 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <string>
 
 #include <polyscope/polyscope.h>
 
 #include "BiyApp.h"
+#include "BlockingFacade.h"
 #include "PythonConsole.h"
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        std::cerr << "usage: biy <model.msh>\n";
+    using gecko::python::BlockingFacade;
+
+    if (argc < 2 || argc > 3) {
+        std::cerr << "usage: biy <model.msh> [order]\n"
+                  << "  order  block edge order, " << BlockingFacade::MIN_DEGREE << " (straight) to "
+                  << BlockingFacade::MAX_DEGREE << "; default 3\n";
         return 1;
+    }
+
+    int order = 3;
+    if (argc == 3) {
+        try {
+            std::size_t consumed = 0;
+            order = std::stoi(argv[2], &consumed);
+            if (consumed != std::string(argv[2]).size()) throw std::invalid_argument("trailing characters");
+        } catch (const std::exception &) {
+            std::cerr << "biy: order must be a whole number, got '" << argv[2] << "'\n";
+            return 1;
+        }
+        if (order < BlockingFacade::MIN_DEGREE || order > BlockingFacade::MAX_DEGREE) {
+            std::cerr << "biy: order must be between " << BlockingFacade::MIN_DEGREE << " and "
+                      << BlockingFacade::MAX_DEGREE << ", got " << order << "\n";
+            return 1;
+        }
     }
 
     try {
         polyscope::init();
 
-        gecko::biy::BiyApp app(argv[1]);
+        gecko::biy::BiyApp app(argv[1], order);
         polyscope::state::userCallback = [&app] { app.per_frame(); };
 
         gecko::biy::PythonConsole console(app);
