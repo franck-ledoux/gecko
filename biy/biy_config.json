@@ -9,6 +9,8 @@
   "corner_color_on_surface": [0.15, 0.4, 0.95],
   "corner_color_on_volume": [0.2, 0.75, 0.3],
 
+  "model_transparency": 0.45,
+
   "show_block_edges": true,
   "block_edge_radius": 0.003,
   "block_edge_color": [0.15, 0.15, 0.15]

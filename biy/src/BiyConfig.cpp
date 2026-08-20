@@ -68,6 +68,7 @@ namespace gecko::biy {
             read_color(j, "corner_color_on_curve", config.corner_color_on_curve);
             read_color(j, "corner_color_on_surface", config.corner_color_on_surface);
             read_color(j, "corner_color_on_volume", config.corner_color_on_volume);
+            read_double(j, "model_transparency", config.model_transparency);
             read_bool(j, "show_block_edges", config.show_block_edges);
             read_double(j, "block_edge_radius", config.block_edge_radius);
             read_color(j, "block_edge_color", config.block_edge_color);

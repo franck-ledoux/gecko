@@ -20,6 +20,30 @@ cmake --build build -j
 cd build && ctest --output-on-failure
 ```
 
+## biy — Block It Yourself
+
+`biy` is Gecko's interactive 3D viewer for building a block structure against a geometric model.
+It loads a Gmsh `.msh` file, shows it, and lets you create a bounding box, drag its corners onto the
+geometry, mesh it and classify it — from the on-screen panel, with the mouse, or by typing Python
+at a console that drives the very same live objects.
+
+![The biy viewer: a hex block fitted inside a translucent cylinder, its corners colored by what
+they are classified on](docs/assets/biy.png)
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_BIY=ON
+cmake --build build --target biy
+./build/biy/biy test_data/cylinder.msh
+```
+
+It is opt-in (`GECKO_BUILD_BIY=OFF` by default) because, on top of a Python development
+environment, it needs a GL/windowing stack. **CI does not build or test `biy`**, for the same
+reason — the hosted runners provide no such stack. Its supporting library code (`Blocking`, the
+Python facades) *is* covered by the usual suites; the viewer itself is verified locally.
+
+See [the biy guide](docs/user-guide/biy.md) for the mouse modes, the corner color code and the
+`biy_config.json` settings.
+
 ## Documentation
 
 The full developer documentation — project layout, running/writing tests, code coverage,
@@ -27,6 +51,8 @@ writing/generating this documentation itself, and linting — lives under [`docs
 and is kept up to date there rather than duplicated here:
 
 - [Overview & project layout](docs/index.md)
+- [biy — the interactive 3D viewer](docs/user-guide/biy.md)
+- [Python bindings](docs/user-guide/python.md)
 - [Building & Testing](docs/developer-guide/testing.md)
 - [Writing Documentation](docs/developer-guide/documentation.md)
 - [Linting & Formatting](docs/developer-guide/linting.md)

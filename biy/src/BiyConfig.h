@@ -35,6 +35,10 @@ namespace gecko::biy {
          * silently drawn as unclassified. */
         std::array<float, 3> corner_color_on_volume{0.2f, 0.75f, 0.3f};
 
+        /** @brief Opacity of the model's surface, in `[0,1]`. Slightly see-through by default: the
+         * blocking is built around and inside the model, and an opaque model hides all of it. */
+        double model_transparency = 0.45;
+
         /** @brief Whether the block structure's own edges are drawn at startup. */
         bool show_block_edges = true;
         /** @brief Thickness of those edges. */

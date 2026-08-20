@@ -6,10 +6,19 @@ It loads a Gmsh `.msh` file as a [`GeomModel`](python.md#geommodel), shows it in
 [`Blocking`](python.md#blocking) on top of it — from the on-screen panel, by dragging block corners
 with the mouse, or by typing Python at the console, all acting on the same live objects.
 
+![The biy viewer: a hex block fitted inside a translucent cylinder, its corners colored by what
+they are classified on](../assets/biy.png)
+
+!!! warning "Not covered by CI"
+    Unlike the rest of Gecko, `biy` is **not built or tested in CI** — the hosted runners provide no
+    GL/windowing stack for Polyscope. The library code underneath it (`Blocking::move_node`, the
+    Python facades it displays through) *is* covered by the regular C++ and Python suites, but the
+    viewer itself is only ever verified locally. Build and run it yourself after changing it.
+
 ## Building
 
 `biy` is opt-in: on top of a Python development environment it needs a GL/windowing stack, so it
-isn't built (or exercised in CI) by default.
+isn't built by default.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGECKO_BUILD_BIY=ON
@@ -114,6 +123,7 @@ is a copy of the defaults:
   "corner_color_on_surface": [0.15, 0.4, 0.95],
   "corner_color_on_volume": [0.2, 0.75, 0.3],
 
+  "model_transparency": 0.45,
   "show_block_edges": true,
   "block_edge_radius": 0.003,
   "block_edge_color": [0.15, 0.15, 0.15]
@@ -130,6 +140,7 @@ is a copy of the defaults:
 | `corner_color_on_curve` | Color of a corner classified on a model curve |
 | `corner_color_on_surface` | Color of a corner classified on a model surface |
 | `corner_color_on_volume` | Color of a corner classified on a model volume |
+| `model_transparency` | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
 | `show_block_edges` | Whether block edges are drawn at startup |
 | `block_edge_radius` | Thickness of the block edges |
 | `block_edge_color` | Color of the block edges, RGB in `[0,1]` |
@@ -160,6 +171,11 @@ convenience, the console is the full API.
 
 The console exposes exactly the API documented in [Python Bindings](python.md) — it registers the
 same bindings as the standalone `gecko` module, so `import gecko` works here too.
+
+It behaves like Python's own interactive prompt, `codeop` and all: multi-line blocks and bracket
+continuations are accepted, showing `...` until the statement is complete, and a block ends with a
+blank line. That also means a script piped in on stdin must leave a blank line after any trailing
+block.
 
 Press `Ctrl-D` in the console, or close the window, to quit.
 

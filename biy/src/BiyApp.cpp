@@ -62,7 +62,10 @@ namespace gecko::biy {
         const auto tets = m_model->mesh_tets();
 
         if (!triangles.empty()) {
-            polyscope::registerSurfaceMesh(MODEL_SURFACE, vertices, triangles);
+            auto *surface = polyscope::registerSurfaceMesh(MODEL_SURFACE, vertices, triangles);
+            // See-through by default: a blocking is built around and inside its model, and an
+            // opaque model hides the very thing being edited.
+            surface->setTransparency(static_cast<float>(m_config.model_transparency));
         }
         if (!tets.empty()) {
             polyscope::registerTetMesh(MODEL_VOLUME, vertices, tets);
