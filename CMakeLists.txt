@@ -112,13 +112,6 @@ if (GECKO_CODE_COVERAGE)
     message(STATUS "CMAKE_CXX_FLAGS       = ${CMAKE_CXX_FLAGS}")
     message(STATUS "CMAKE_CXX_FLAGS_DEBUG = ${CMAKE_CXX_FLAGS_DEBUG}")
     message(STATUS "============================================")
-    message(STATUS "============ COVERED COMPONENTS ============")
-    message(STATUS "============================================")
-    foreach(c IN LISTS GMDS_COVER_COMPONENTS)
-        set(ENABLE_${c} ON)
-        message(STATUS "COMPONENT  : ${c}")
-    endforeach()
-    message(STATUS "============================================")
 endif(GECKO_CODE_COVERAGE)
 #==============================================================================
 #voir a ajouter une target coverage avec ces options liées à la target
