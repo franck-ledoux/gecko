@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 
+#include <polyscope/options.h>
 #include <polyscope/polyscope.h>
 
 #include "BiyApp.h"
@@ -40,6 +41,9 @@ int main(int argc, char **argv) {
     }
 
     try {
+        // Set before init(): the GLFW window is created with this as its title, so it is too late
+        // to change once Polyscope is up.
+        polyscope::options::programName = "BIY";
         polyscope::init();
 
         gecko::biy::BiyApp app(argv[1], order);
