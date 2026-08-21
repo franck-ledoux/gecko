@@ -1,19 +1,26 @@
 {
+  "panel_width": 305,
+
+  "geometry_volume_color": [0.55, 0.6, 0.7],
+  "geometry_surface_color": [0.35, 0.5, 0.8],
+  "geometry_curve_color": [0.15, 0.15, 0.2],
+  "geometry_curve_radius": 0.004,
+  "geometry_point_color": [0.1, 0.1, 0.15],
+  "geometry_point_radius": 0.008,
+  "model_transparency": 0.45,
+  "show_geometry_volumes": true,
+  "show_geometry_surfaces": true,
+  "show_geometry_curves": true,
+  "show_geometry_points": true,
+
   "corner_radius": 0.01,
   "corner_highlight_radius": 0.02,
   "corner_highlight_color": [1.0, 1.0, 1.0],
-
   "corner_color_unclassified": [0.6, 0.2, 0.85],
   "corner_color_on_vertex": [1.0, 0.9, 0.1],
   "corner_color_on_curve": [0.9, 0.15, 0.15],
   "corner_color_on_surface": [0.15, 0.4, 0.95],
   "corner_color_on_volume": [0.2, 0.75, 0.3],
-
-  "tol_vertex": 0.1,
-  "tol_curve": 0.1,
-  "tol_surface": 0.1,
-
-  "model_transparency": 0.45,
 
   "show_block_edges": true,
   "block_edge_radius": 0.003,
@@ -26,5 +33,12 @@
   "control_polygon_radius": 0.002,
   "edge_control_color": [0.1, 0.8, 0.8],
   "face_control_color": [0.95, 0.55, 0.1],
-  "block_control_color": [0.55, 0.85, 0.3]
+  "block_control_color": [0.55, 0.85, 0.3],
+
+  "mesh_color": [0.6, 0.6, 0.65],
+  "show_mesh": false,
+
+  "tol_vertex": 0.1,
+  "tol_curve": 0.1,
+  "tol_surface": 0.1
 }

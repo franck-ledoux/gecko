@@ -45,7 +45,13 @@ Two things start together:
 They are not two copies of the data kept in sync — the console's `blocking` *is* the object the
 window draws, so a change made either way shows up immediately in the other.
 
-## The panel
+## The panels
+
+biy replaces Polyscope's own windows with two of its own, both the width Polyscope gives its
+panels (`panel_width` in the config):
+
+**BIY operations** — Polyscope's *Reset view*, *Screenshot*, *View* and *Appearance* controls,
+rebuilt here from its public builders, followed by biy's own:
 
 | Button              | What it does                                                             |
 | ------------------- | ------------------------------------------------------------------------ |
@@ -54,12 +60,30 @@ window draws, so a change made either way shows up immediately in the other.
 | Classify            | Snaps the whole blocking onto the model, within the 3 tolerances below   |
 | Export VTK          | Writes the generated mesh to `biy_blocking.vtk`                          |
 
-`subdivisions` controls how finely the blocking is meshed for display and export: `1` shows the raw
-block structure, higher values show the mesh it generates. It is capped at **20**, because a 3D
+Polyscope's *Debug* section is dropped — it is an internal texture inspector, and unlike the others
+it is not exposed as a callable builder.
+
+**Scene** — replaces Polyscope's "Structures" list with a tree that speaks biy's own vocabulary.
+Each row delegates to the structure's own Polyscope panel, so the visibility controls are the usual
+ones; a row greys out when the model has nothing of that kind (a boundary-representation file has no
+volume, a 2D blocking no blocks).
+
+| Section  | Rows                              |
+| -------- | --------------------------------- |
+| Geometry | volumes, surfaces, curves, points |
+| Blocking | blocks, faces, edges, vertices    |
+| Mesh     | quads, hexes                      |
+
+A **volume** is drawn as its boundary — that is simply what a Polyscope volume mesh renders — and
+its interior tetrahedra are never shown. On a model that has volumes, *surfaces* start hidden: they
+are the very triangles the volume's boundary is made of, so drawing both only makes them fight over
+the depth buffer. One click brings them back.
+
+**Blocking** shows the block structure itself, **Mesh** the mesh it generates. `subdivisions`
+therefore controls the Mesh section alone; the blocking is drawn at its own display resolution,
+fine enough to show curvature whatever the mesh is set to. It is capped at **20**, because a 3D
 blocking's mesh grows cubically with it — 20 is already 8000 hexes per block, and the window bogs
-down before anything else does. **Show block edges** draws the block
-structure's own edges as a curve network — the edges of the blocks themselves, traced along their
-curves, as opposed to the subdivision lines of the mesh.
+down before anything else does.
 
 ## Classification colors
 
@@ -171,21 +195,28 @@ is a copy of the defaults:
 
 ```json
 {
+  "panel_width": 305,
+
+  "geometry_volume_color": [0.55, 0.6, 0.7],
+  "geometry_surface_color": [0.35, 0.5, 0.8],
+  "geometry_curve_color": [0.15, 0.15, 0.2],
+  "geometry_curve_radius": 0.004,
+  "geometry_point_color": [0.1, 0.1, 0.15],
+  "geometry_point_radius": 0.008,
+  "model_transparency": 0.45,
+  "show_geometry_volumes": true,
+  "show_geometry_surfaces": true,
+  "show_geometry_curves": true,
+  "show_geometry_points": true,
+
   "corner_radius": 0.01,
   "corner_highlight_radius": 0.02,
   "corner_highlight_color": [1.0, 1.0, 1.0],
-
   "corner_color_unclassified": [0.6, 0.2, 0.85],
   "corner_color_on_vertex": [1.0, 0.9, 0.1],
   "corner_color_on_curve": [0.9, 0.15, 0.15],
   "corner_color_on_surface": [0.15, 0.4, 0.95],
   "corner_color_on_volume": [0.2, 0.75, 0.3],
-
-  "tol_vertex": 0.1,
-  "tol_curve": 0.1,
-  "tol_surface": 0.1,
-
-  "model_transparency": 0.45,
 
   "show_block_edges": true,
   "block_edge_radius": 0.003,
@@ -198,29 +229,43 @@ is a copy of the defaults:
   "control_polygon_radius": 0.002,
   "edge_control_color": [0.1, 0.8, 0.8],
   "face_control_color": [0.95, 0.55, 0.1],
-  "block_control_color": [0.55, 0.85, 0.3]
+  "block_control_color": [0.55, 0.85, 0.3],
+
+  "mesh_color": [0.6, 0.6, 0.65],
+  "show_mesh": false,
+
+  "tol_vertex": 0.1,
+  "tol_curve": 0.1,
+  "tol_surface": 0.1
 }
 ```
 
-| Key                                      | Meaning                                                                                  |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `corner_radius`                          | Size of a block corner at rest                                                           |
-| `corner_highlight_radius`                | Size of the corner being dragged                                                         |
-| `corner_highlight_color`                 | Color of the corner being dragged, RGB in `[0,1]`                                        |
-| `corner_color_unclassified`              | Color of a corner not classified onto anything                                           |
-| `corner_color_on_vertex`                 | Color of a corner classified on a model vertex                                           |
-| `corner_color_on_curve`                  | Color of a corner classified on a model curve                                            |
-| `corner_color_on_surface`                | Color of a corner classified on a model surface                                          |
-| `corner_color_on_volume`                 | Color of a corner classified on a model volume                                           |
-| `model_transparency`                     | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
-| `tol_vertex`, `tol_curve`, `tol_surface` | Starting snapping tolerances, one per entity dimension                                   |
-| `show_block_edges`                       | Whether block edges are drawn at startup                                                 |
-| `show_control_points`                    | Whether curved edges' control points are drawn at startup                                |
-| `control_point_radius`                   | Size of a control point                                                                  |
-| `control_polygon_radius`                 | Thickness of the polygon joining them                                                    |
-| `control_point_color`                    | Color of both, RGB in `[0,1]`                                                            |
-| `block_edge_radius`                      | Thickness of the block edges                                                             |
-| `block_edge_color`                       | Color of the block edges, RGB in `[0,1]`                                                 |
+| Key                                                                                               | Meaning                                                                                  |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `panel_width`                                                                                     | Width of biy's 2 side panels, before UI scaling                                          |
+| `geometry_volume_color`                                                                           | Color of the model's volumes                                                             |
+| `geometry_surface_color`                                                                          | Color of the model's surfaces                                                            |
+| `geometry_curve_color`, `geometry_curve_radius`                                                   | Color and thickness of the model's curves                                                |
+| `geometry_point_color`, `geometry_point_radius`                                                   | Color and sphere radius of the model's points                                            |
+| `show_geometry_volumes`, `show_geometry_surfaces`, `show_geometry_curves`, `show_geometry_points` | Which Geometry rows start visible                                                        |
+| `mesh_color`, `show_mesh`                                                                         | Color of the generated mesh, and whether it starts visible                               |
+| `corner_radius`                                                                                   | Size of a block corner at rest                                                           |
+| `corner_highlight_radius`                                                                         | Size of the corner being dragged                                                         |
+| `corner_highlight_color`                                                                          | Color of the corner being dragged, RGB in `[0,1]`                                        |
+| `corner_color_unclassified`                                                                       | Color of a corner not classified onto anything                                           |
+| `corner_color_on_vertex`                                                                          | Color of a corner classified on a model vertex                                           |
+| `corner_color_on_curve`                                                                           | Color of a corner classified on a model curve                                            |
+| `corner_color_on_surface`                                                                         | Color of a corner classified on a model surface                                          |
+| `corner_color_on_volume`                                                                          | Color of a corner classified on a model volume                                           |
+| `model_transparency`                                                                              | Opacity of the model surface in `[0,1]`; below 1 so the blocking inside it stays visible |
+| `tol_vertex`, `tol_curve`, `tol_surface`                                                          | Starting snapping tolerances, one per entity dimension                                   |
+| `show_block_edges`                                                                                | Whether block edges are drawn at startup                                                 |
+| `show_control_points`                                                                             | Whether curved edges' control points are drawn at startup                                |
+| `control_point_radius`                                                                            | Size of a control point                                                                  |
+| `control_polygon_radius`                                                                          | Thickness of the polygon joining them                                                    |
+| `control_point_color`                                                                             | Color of both, RGB in `[0,1]`                                                            |
+| `block_edge_radius`                                                                               | Thickness of the block edges                                                             |
+| `block_edge_color`                                                                                | Color of the block edges, RGB in `[0,1]`                                                 |
 
 Radii are Polyscope *relative* values — a fraction of the scene's bounding box — so they stay
 sensible whatever units the model uses.

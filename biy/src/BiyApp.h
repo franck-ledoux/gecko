@@ -9,6 +9,10 @@
 
 #include <glm/glm.hpp>
 
+namespace polyscope {
+    class Structure;
+} // namespace polyscope
+
 #include "BiyConfig.h"
 #include "BlockingFacade.h"
 #include "GeomModelFacade.h"
@@ -127,6 +131,22 @@ namespace gecko::biy {
                                  bool visible);
         /** @brief Creates a hex block spanning the model's bounding box, scaled by @p AMargin. */
         void create_bounding_box(double margin);
+        /** @brief Registers (or removes) the mesh the blocking generates, at `m_subdivisions`. */
+        void refresh_mesh();
+        /** @brief Draws the "BIY operations" window: the parts of Polyscope's own panel worth
+         * keeping, then biy's controls. */
+        void draw_operations_panel();
+        /** @brief Draws the "Scene" window, which replaces Polyscope's "Structures" panel with a
+         * Geometry / Blocking / Mesh tree. */
+        void draw_scene_panel();
+        /**
+         * @brief Draws one Scene subsection: a named row delegating to the structure's own
+         * Polyscope UI, so the usual visibility controls come from Polyscope itself.
+         * @param label The subsection's name.
+         * @param structure The structure to expose, or nullptr when the model has none of that kind
+         *        (a boundary-representation model has no volume, say), which draws a greyed row.
+         */
+        static void draw_scene_entry(const char *label, polyscope::Structure *structure);
         /** @brief Draws the button panel. Assumes the ImGui frame is already set up. */
         void draw_panel();
         /** @brief Starts/continues/ends a corner drag from the current mouse state. */
@@ -151,6 +171,10 @@ namespace gecko::biy {
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */
         bool m_show_block_edges = true;
+        /** @brief Whether the generated mesh is currently drawn. */
+        bool m_show_mesh = false;
+        /** @brief Height the operations panel took last frame, so the Scene panel stacks under it. */
+        float m_operations_panel_height = 0.0f;
         /** @brief Whether each kind of control display is currently drawn. */
         bool m_show_edge_control = false;
         /** @copydoc m_show_edge_control */

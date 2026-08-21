@@ -39,6 +39,36 @@ namespace gecko::biy {
          * blocking is built around and inside the model, and an opaque model hides all of it. */
         double model_transparency = 0.45;
 
+        /** @brief Width of biy's own side panels, in pixels before UI scaling. Defaults to the width
+         * Polyscope gives the panels this replaces. */
+        double panel_width = 305.0;
+
+        /** @brief Color of the geometric model's volumes, drawn as their boundary. */
+        std::array<float, 3> geometry_volume_color{0.55f, 0.6f, 0.7f};
+        /** @brief Color of the geometric model's surfaces. */
+        std::array<float, 3> geometry_surface_color{0.35f, 0.5f, 0.8f};
+        /** @brief Color of the geometric model's curves. */
+        std::array<float, 3> geometry_curve_color{0.15f, 0.15f, 0.2f};
+        /** @brief Thickness of the geometric model's curves. */
+        double geometry_curve_radius = 0.004;
+        /** @brief Color of the geometric model's points. */
+        std::array<float, 3> geometry_point_color{0.1f, 0.1f, 0.15f};
+        /** @brief Radius of the spheres the geometric model's points are drawn as. */
+        double geometry_point_radius = 0.008;
+        /** @brief Color of the mesh the blocking generates. */
+        std::array<float, 3> mesh_color{0.6f, 0.6f, 0.65f};
+
+        /** @brief Which parts of the geometric model, and the generated mesh, are shown at startup. */
+        bool show_geometry_volumes = true;
+        /** @copydoc show_geometry_volumes */
+        bool show_geometry_surfaces = true;
+        /** @copydoc show_geometry_volumes */
+        bool show_geometry_curves = true;
+        /** @copydoc show_geometry_volumes */
+        bool show_geometry_points = true;
+        /** @copydoc show_geometry_volumes */
+        bool show_mesh = false;
+
         /** @brief Whether edges' control points and control polygons are drawn at startup. */
         bool show_edge_control = false;
         /** @brief Whether faces' control points and control nets are drawn at startup. */
