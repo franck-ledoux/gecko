@@ -110,3 +110,50 @@ TEST_CASE("Vtk_EmptyMesh_WritesWellFormedEmptyHeaders", "[Vtk IO]") {
     REQUIRE(content.find("CELLS 0 0") != std::string::npos);
     REQUIRE(content.find("CELL_TYPES 0") != std::string::npos);
 }
+
+TEST_CASE("Vtk_NamedNodeIntVariables_WritesPointDataScalarsSections", "[Vtk IO]") {
+    CubicMesh mesh;
+    auto n0 = mesh.add_node(0, 0, 0);
+    auto n1 = mesh.add_node(1, 0, 0);
+    auto n2 = mesh.add_node(1, 1, 0);
+    auto n3 = mesh.add_node(0, 1, 0);
+    mesh.add_face(n0, n1, n2, n3);
+
+    auto &dims = mesh.add_variable<Int, CellType::Node>("classification_dim");
+    dims[n0.value] = 0;
+    dims[n1.value] = -1;
+    dims[n2.value] = 2;
+    dims[n3.value] = -1;
+    auto &tags = mesh.add_variable<Int, CellType::Node>("classification_tag");
+    tags[n0.value] = 7;
+    tags[n1.value] = -1;
+    tags[n2.value] = 1;
+    tags[n3.value] = -1;
+
+    const auto path = vtk_path("gecko_vtk_point_data_test.vtk").string();
+    io::CubicVtkWriter::write(path, mesh, {"classification_dim", "classification_tag"});
+    const std::string content = read_file(path);
+    std::filesystem::remove(path);
+
+    REQUIRE(content.find("POINT_DATA 4") != std::string::npos);
+    REQUIRE(content.find("SCALARS classification_dim int 1\nLOOKUP_TABLE default\n0\n-1\n2\n-1\n") !=
+            std::string::npos);
+    REQUIRE(content.find("SCALARS classification_tag int 1\nLOOKUP_TABLE default\n7\n-1\n1\n-1\n") !=
+            std::string::npos);
+    // Field order must follow the requested list, POINT_DATA before either SCALARS block.
+    REQUIRE(content.find("POINT_DATA") < content.find("SCALARS classification_dim"));
+    REQUIRE(content.find("SCALARS classification_dim") < content.find("SCALARS classification_tag"));
+}
+
+TEST_CASE("Vtk_UnknownNodeIntVariableName_IsSilentlySkipped", "[Vtk IO]") {
+    CubicMesh mesh;
+    mesh.add_node(0, 0, 0);
+
+    const auto path = vtk_path("gecko_vtk_point_data_missing_test.vtk").string();
+    io::CubicVtkWriter::write(path, mesh, {"does_not_exist"});
+    const std::string content = read_file(path);
+    std::filesystem::remove(path);
+
+    REQUIRE(content.find("POINT_DATA") == std::string::npos);
+    REQUIRE(content.find("SCALARS") == std::string::npos);
+}

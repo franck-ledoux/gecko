@@ -54,12 +54,23 @@ def test_write_vtk(tmp_path, geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model)
     blocking.create_quad_block(_QUAD_A)
+    blocking.classify(1e-6)
 
     out_path = tmp_path / "blocking.vtk"
     blocking.write_vtk(1, str(out_path))
 
     assert out_path.exists()
-    assert out_path.stat().st_size > 0
+    content = out_path.read_text()
+    assert "POINT_DATA 4" in content
+    assert "SCALARS classification_dim int 1" in content
+    assert "SCALARS classification_tag int 1" in content
+
+    # Same fixture/tolerance as test_node_classification_dims: 1 corner on the model's one vertex
+    # (dim 0), 2 on its one surface (dim 2), 1 outside it and unclassified (dim -1) — order isn't
+    # guaranteed to match write_vtk's own node order, so compare as a multiset.
+    dim_section = content.split("SCALARS classification_dim int 1\nLOOKUP_TABLE default\n")[1]
+    dims = [int(line) for line in dim_section.splitlines()[:4]]
+    assert sorted(dims) == [-1, 0, 2, 2]
 
 
 def test_hex_block_with_cubic_degree(geom_model_path):

@@ -54,12 +54,12 @@ both the width Polyscope gives its panels (`panel_width` in the config), plus Po
 **BIY operations** (left) — Polyscope's *Reset view*, *Screenshot*, *View* and *Appearance*
 controls, rebuilt here from its public builders, followed by biy's own:
 
-| Button              | What it does                                                             |
-| ------------------- | ------------------------------------------------------------------------ |
-| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin |
-| Build connectivity  | Sews coincident blocks together (see `Blocking::build_connectivity`)     |
-| Classify            | Snaps the whole blocking onto the model, within the 3 tolerances below   |
-| Export VTK          | Writes the generated mesh to `biy_blocking.vtk`                          |
+| Button              | What it does                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin                                     |
+| Build connectivity  | Sews coincident blocks together (see `Blocking::build_connectivity`)                                         |
+| Classify            | Snaps the whole blocking onto the model, within the 3 tolerances below                                       |
+| Export VTK          | Writes the generated mesh to `biy_blocking.vtk`, with `classification_dim`/`classification_tag` node scalars |
 
 Polyscope's *Debug* section is dropped — it is an internal texture inspector, and unlike the others
 it is not exposed as a callable builder.
