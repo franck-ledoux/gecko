@@ -132,6 +132,14 @@ namespace gecko::biy {
         polyscope::options::buildDefaultGuiPanels = false;
         polyscope::options::openImGuiWindowForUserCallback = false;
         polyscope::internal::leftWindowsWidth = static_cast<float>(m_config.panel_width) * polyscope::options::uiScale;
+        // The right side is trickier: buildPickGui() (kept, for the "Selection" box) calls Polyscope's
+        // own ensureWindowWidthsSet() every frame, which unconditionally *recomputes*
+        // internal::rightWindowsWidth from options::rightGuiPaneWidth (500 by default) — so setting
+        // internal::rightWindowsWidth directly, the way leftWindowsWidth is set above, would only
+        // last until the next buildPickGui() call, and both Scene and Selection would drift to 500
+        // regardless of panel_width. Setting the *source* option instead makes every later
+        // recomputation land back on the width actually asked for.
+        polyscope::options::rightGuiPaneWidth = static_cast<int>(m_config.panel_width);
         polyscope::internal::rightWindowsWidth = static_cast<float>(m_config.panel_width) * polyscope::options::uiScale;
 
         register_model();
@@ -511,12 +519,24 @@ namespace gecko::biy {
     }
 
     void BiyApp::draw_scene_panel() {
-        // On the opposite side from "BIY operations" — its own full-height column, not stacked
-        // under the other one — so the two read as independent panels rather than one long list.
+        // On the opposite side from "BIY operations" — its own column, not stacked under the other
+        // one — so the two read as independent panels rather than one long list.
+        //
+        // A fixed strip at the bottom is reserved for Polyscope's own "Selection" box
+        // (polyscope::buildPickGui(), drawn right after this), whether or not something is
+        // currently picked: sizing this panel around the *presence* of a selection would make it
+        // grow and shrink as picks come and go, which reads as flicker more than as useful space.
+        // buildPickGui() finds where to start via internal::lastRightSideFreeY, which normally only
+        // Polyscope's own stacked panels update — since biy draws no such panel above it, that stays
+        // near 0 and Selection would otherwise land right on top of this one.
+        constexpr float SELECTION_RESERVED_HEIGHT = 160.0f;
         const float margin = polyscope::internal::imguiStackMargin;
         const float width = polyscope::internal::rightWindowsWidth;
+        const float height =
+            polyscope::view::windowHeight - 3 * margin - SELECTION_RESERVED_HEIGHT * polyscope::options::uiScale;
+
         ImGui::SetNextWindowPos(ImVec2(polyscope::view::windowWidth - width - margin, margin));
-        ImGui::SetNextWindowSize(ImVec2(width, polyscope::view::windowHeight - 2 * margin));
+        ImGui::SetNextWindowSize(ImVec2(width, height));
         ImGui::Begin("Scene", nullptr);
 
         if (ImGui::CollapsingHeader("Geometry", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -539,6 +559,10 @@ namespace gecko::biy {
         }
 
         ImGui::End();
+
+        // See this panel's own reserved-strip comment above: this is what actually makes
+        // buildPickGui() start below the strip rather than back at the top of the column.
+        polyscope::internal::lastRightSideFreeY = margin + height;
     }
 
     void BiyApp::draw_panel() {

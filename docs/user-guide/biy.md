@@ -48,7 +48,8 @@ window draws, so a change made either way shows up immediately in the other.
 ## The panels
 
 biy replaces Polyscope's own windows with two of its own, on opposite sides of the 3D view and
-both the width Polyscope gives its panels (`panel_width` in the config):
+both the width Polyscope gives its panels (`panel_width` in the config), plus Polyscope's own
+"Selection" box below Scene once something has been picked in the 3D view.
 
 **BIY operations** (left) — Polyscope's *Reset view*, *Screenshot*, *View* and *Appearance*
 controls, rebuilt here from its public builders, followed by biy's own:
