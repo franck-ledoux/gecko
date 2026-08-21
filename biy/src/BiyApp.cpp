@@ -1,8 +1,11 @@
 #include "BiyApp.h"
 
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 
 #include <imgui.h>
 #include <polyscope/curve_network.h>
@@ -56,8 +59,19 @@ namespace gecko::biy {
         /** @brief The block structure's own edges, traced along their curves — distinct from the
          * subdivision lines of the generated mesh. */
         constexpr const char *BLOCK_EDGES = "edges";
+        /** @brief Cut-mode preview: the sheet under the cursor, and where the cut would land on each
+         * of its edges. Separate short-lived structures, registered only while hovering. */
+        constexpr const char *SHEET_EDGES = "sheet";
+        constexpr const char *CUT_POINTS = "cut";
 
         glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
+
+        /** @brief A cut parameter, short enough to sit in the status line. */
+        std::string format_param(double value) {
+            std::ostringstream out;
+            out << std::fixed << std::setprecision(3) << value;
+            return out.str();
+        }
 
         // Polyscope looks structures up per type, so the Scene panel needs one accessor per kind.
         // Each returns null when that structure does not exist — a boundary-representation model has
@@ -154,6 +168,12 @@ namespace gecko::biy {
         if (mode == MouseMode::Camera && m_dragged_node) {
             m_dragged_node.reset();
             show_highlight(std::nullopt);
+        }
+        if (mode != MouseMode::Cut) {
+            m_hover_edge.reset();
+            m_sheet.clear();
+            m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
+            refresh_cut_preview();
         }
     }
 
@@ -478,6 +498,7 @@ namespace gecko::biy {
         draw_gizmo();
 
         handle_drag();
+        handle_cut();
     }
 
     void BiyApp::draw_operations_panel() {
@@ -673,14 +694,42 @@ namespace gecko::biy {
         if (!ImGui::GetIO().WantCaptureKeyboard) {
             if (ImGui::IsKeyPressed(ImGuiKey_C)) set_mouse_mode(MouseMode::Camera);
             if (ImGui::IsKeyPressed(ImGuiKey_E)) set_mouse_mode(MouseMode::Edit);
+            if (ImGui::IsKeyPressed(ImGuiKey_X)) set_mouse_mode(MouseMode::Cut);
         }
 
         ImGui::TextUnformatted("Mouse mode");
         if (ImGui::RadioButton("Camera (C)", m_mode == MouseMode::Camera)) set_mouse_mode(MouseMode::Camera);
         ImGui::SameLine();
         if (ImGui::RadioButton("Edit (E)", m_mode == MouseMode::Edit)) set_mouse_mode(MouseMode::Edit);
-        ImGui::TextWrapped(m_mode == MouseMode::Edit ? "Drag a block corner to move it. Camera navigation is off."
-                                                     : "Rotate/pan/zoom the view. Switch to Edit to move corners.");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Cut (X)", m_mode == MouseMode::Cut)) set_mouse_mode(MouseMode::Cut);
+        switch (m_mode) {
+            case MouseMode::Edit:
+                ImGui::TextWrapped("Drag a block corner to move it. Camera navigation is off.");
+                break;
+            case MouseMode::Cut:
+                ImGui::TextWrapped("Point at a block edge: the whole sheet that would be cut lights up, and the "
+                                   "markers show where. Click to cut. Camera navigation is off.");
+                break;
+            default:
+                ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split blocks.");
+                break;
+        }
+
+        if (m_mode == MouseMode::Cut) {
+            // The cursor drives this every time it moves; typing in it is the way to land a cut on
+            // an exact value, which pointing cannot do.
+            ImGui::SetNextItemWidth(120.0f * polyscope::options::uiScale);
+            ImGui::SliderFloat("Cut at", &m_cut_param, 0.01f, 0.99f, "%.3f");
+            if (ImGui::IsItemEdited() && m_hover_edge) refresh_cut_preview();
+            if (m_hover_edge && !m_sheet.empty()) {
+                ImGui::Text("Sheet: %zu edges", m_sheet.size());
+            } else if (m_hover_edge) {
+                ImGui::TextWrapped("This sheet closes back onto itself — no even cut exists.");
+            } else {
+                ImGui::TextUnformatted("Sheet: none under the cursor");
+            }
+        }
         ImGui::Separator();
 
         if (ImGui::Button("Create bounding box")) create_bounding_box(0.1);
@@ -783,6 +832,149 @@ namespace gecko::biy {
         return eye + ray * t;
     }
 
+    void BiyApp::update_cut_hover(glm::vec2 screen_coords) {
+        const auto clear = [this] {
+            m_hover_edge.reset();
+            m_sheet.clear();
+        };
+
+        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        if (!pick.isHit || pick.structureName != BLOCK_EDGES) {
+            clear();
+            return;
+        }
+
+        // Polyscope reports where in space the click landed, which is all that is needed: the block
+        // edges are drawn as polylines sampled from the very same curves the facade indexes, so
+        // finding the nearest sampled segment recovers both which edge it was and how far along —
+        // without depending on how Polyscope happens to number a curve network's elements.
+        const auto points = m_blocking->edge_vertices(m_edge_samples);
+        const auto per_edge = static_cast<std::size_t>(m_edge_samples) + 1;
+        if (points.empty() || points.size() % per_edge != 0) {
+            clear();
+            return;
+        }
+
+        const glm::vec3 target = pick.position;
+        double best = std::numeric_limits<double>::max();
+        int best_edge = -1;
+        double best_param = 0.5;
+        for (std::size_t e = 0; e * per_edge < points.size(); ++e) {
+            for (std::size_t k = 0; k + 1 < per_edge; ++k) {
+                const auto &a = points[e * per_edge + k];
+                const auto &b = points[e * per_edge + k + 1];
+                const glm::vec3 pa(static_cast<float>(a[0]), static_cast<float>(a[1]), static_cast<float>(a[2]));
+                const glm::vec3 pb(static_cast<float>(b[0]), static_cast<float>(b[1]), static_cast<float>(b[2]));
+                const glm::vec3 ab = pb - pa;
+                const float len2 = glm::dot(ab, ab);
+                const float f = (len2 > 0.0f) ? glm::clamp(glm::dot(target - pa, ab) / len2, 0.0f, 1.0f) : 0.0f;
+                const double distance = glm::length(target - (pa + ab * f));
+                if (distance < best) {
+                    best = distance;
+                    best_edge = static_cast<int>(e);
+                    best_param = (static_cast<double>(k) + f) / static_cast<double>(m_edge_samples);
+                }
+            }
+        }
+        if (best_edge < 0) {
+            clear();
+            return;
+        }
+
+        // Cutting in half is far and away the common case, so the middle gets a magnet rather than
+        // asking for pixel-perfect aiming.
+        if (std::abs(best_param - 0.5) < m_config.cut_snap_tolerance) best_param = 0.5;
+
+        m_hover_edge = best_edge;
+        m_cut_param = static_cast<float>(best_param);
+        m_sheet = m_blocking->sheet_edges(best_edge);
+    }
+
+    void BiyApp::refresh_cut_preview() {
+        const bool show = m_mode == MouseMode::Cut && m_hover_edge.has_value() && !m_sheet.empty();
+        if (!show) {
+            if (polyscope::hasCurveNetwork(SHEET_EDGES)) {
+                polyscope::removeStructure(polyscope::getCurveNetwork(SHEET_EDGES));
+            }
+            if (polyscope::hasPointCloud(CUT_POINTS)) {
+                polyscope::removeStructure(polyscope::getPointCloud(CUT_POINTS));
+            }
+            return;
+        }
+
+        // Rebuilt as its own compact point list rather than reusing the full edge_vertices() array:
+        // Polyscope draws a sphere per curve-network node, so carrying along every point of every
+        // unhighlighted edge would bury the sheet under thousands of them.
+        const auto points = m_blocking->edge_vertices(m_edge_samples);
+        const auto per_edge = static_cast<std::size_t>(m_edge_samples) + 1;
+        std::vector<std::array<double, 3>> sheet_points;
+        std::vector<std::array<int, 2>> sheet_segments;
+        for (const int e : m_sheet) {
+            const auto base = static_cast<int>(sheet_points.size());
+            for (std::size_t k = 0; k < per_edge; ++k) {
+                sheet_points.push_back(points[static_cast<std::size_t>(e) * per_edge + k]);
+            }
+            for (int k = 0; k < m_edge_samples; ++k) {
+                sheet_segments.push_back({base + k, base + k + 1});
+            }
+        }
+
+        auto *net = polyscope::registerCurveNetwork(SHEET_EDGES, sheet_points, sheet_segments);
+        net->setColor(glm::vec3(m_config.sheet_color[0], m_config.sheet_color[1], m_config.sheet_color[2]));
+        net->setRadius(static_cast<float>(m_config.sheet_radius));
+
+        const auto cut_points = m_blocking->sheet_cut_points(*m_hover_edge, m_cut_param);
+        auto *cloud = polyscope::registerPointCloud(CUT_POINTS, cut_points);
+        cloud->setPointColor(
+            glm::vec3(m_config.cut_point_color[0], m_config.cut_point_color[1], m_config.cut_point_color[2]));
+        cloud->setPointRadius(static_cast<float>(m_config.cut_point_radius));
+    }
+
+    void BiyApp::handle_cut() {
+        if (!m_blocking || m_mode != MouseMode::Cut) return;
+        ImGuiIO &io = ImGui::GetIO();
+        if (io.WantCaptureMouse) return;
+
+        const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
+        // Only re-tested when the cursor actually moved: a hover test is a Polyscope pick, and a
+        // pick is a render pass — running one every frame for a still cursor would cost real
+        // framerate for no new information.
+        if (mouse != m_last_cut_mouse) {
+            m_last_cut_mouse = mouse;
+            update_cut_hover(mouse);
+            refresh_cut_preview();
+        }
+
+        if (!io.MouseClicked[0]) return;
+
+        if (!m_hover_edge) {
+            m_status = "Point at a block edge to cut it";
+            return;
+        }
+        if (m_sheet.empty()) {
+            m_status = "That sheet cannot be cut evenly — it closes back onto itself";
+            return;
+        }
+
+        const std::size_t cut_edges = m_sheet.size();
+        const std::size_t before = m_blocking->nb_cells(3);
+        if (!m_blocking->cut_sheet(*m_hover_edge, m_cut_param)) {
+            m_status = "Cut refused at t=" + format_param(m_cut_param);
+            return;
+        }
+        const std::size_t after = m_blocking->nb_cells(3);
+
+        // The whole preview describes edges that no longer exist, and the indices behind it have all
+        // shifted, so it goes before anything is drawn again.
+        m_hover_edge.reset();
+        m_sheet.clear();
+        m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
+        refresh_cut_preview();
+        refresh_view();
+
+        m_status = "Cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) +
+                   (after > before ? " — blocks " + std::to_string(before) + " to " + std::to_string(after) : "");
+    }
     void BiyApp::handle_drag() {
         if (!m_blocking || m_mode != MouseMode::Edit) return;
         ImGuiIO &io = ImGui::GetIO();

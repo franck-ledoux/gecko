@@ -274,6 +274,41 @@ namespace gecko::python {
          */
         [[nodiscard]] std::vector<std::array<int, 8>> mesh_hexes(int subdivisions);
 
+        /**
+         * @brief The edges cut_sheet() would split if aimed at @p edge_index — the whole sheet, not
+         * just the one edge — so a caller can show what a cut is about to do before doing it.
+         * @param edge_index An edge, as its position in the order edge_vertices()/edge_segments()/
+         *        edge_classification_dims() all use.
+         * @return Those same positions, for every edge of the sheet (@p edge_index included), or an
+         *         empty list when the sheet cannot be cut homogeneously.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        [[nodiscard]] std::vector<int> sheet_edges(int edge_index);
+
+        /**
+         * @brief Where a cut would actually land: one point per sheet edge, each on the side the
+         * sheet agrees on, so the whole cut locus can be shown before committing to it.
+         * @param edge_index An edge, in the same order sheet_edges() uses.
+         * @param param Where along that edge to cut, strictly inside (0, 1).
+         * @return One point per edge of the sheet, in sheet_edges() order, or an empty list when the
+         *         sheet cannot be cut homogeneously.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> sheet_cut_points(int edge_index, double param);
+
+        /**
+         * @brief Cuts the blocking along the whole sheet through one edge, splitting every block the
+         * sheet crosses in 2 and keeping the geometry it cut through exactly (see
+         * `Blocking::cut_sheet()`).
+         * @param edge_index An edge, in the same order sheet_edges() uses.
+         * @param param Where along that edge to cut, measured along its own curve exactly as
+         *        edge_vertices() samples it, strictly inside (0, 1).
+         * @return false, changing nothing, if @p param is out of range or the sheet cannot be cut
+         *         homogeneously.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        bool cut_sheet(int edge_index, double param);
+
         /** @brief Per-degree state; public only so the .cpp's free-function helpers can name it —
          * never part of the class' actual (Python-facing) interface. */
         template<std::size_t N>

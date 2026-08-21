@@ -8,6 +8,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -478,6 +479,213 @@ namespace gecko {
             assert(can_delete_face(AFace) &&
                    "Blocking::delete_face: precondition violated (blocking must be purely 2D)");
             m_cmap.template remove_cell<2>(AFace->dart());
+        }
+
+        // ---------------------------------------------------------------------
+        // Sheet cut
+        // ---------------------------------------------------------------------
+
+        /** @brief One edge of a sheet, paired with the endpoint its cut parameter is measured from. */
+        struct SheetEdge {
+            /** @brief The edge itself. */
+            Edge edge{};
+            /** @brief The endpoint parameter 0 sits at, so one parameter cuts the whole sheet coherently. */
+            Node from{};
+        };
+
+        /**
+         * @brief One face a sheet crosses, with the local frame it had when the sheet was collected.
+         *
+         * The frame is captured up front because applying a cut invalidates it: splitting the face's
+         * edges lengthens its dart cycle, so walking `beta<1>` from its dart no longer enumerates its
+         * 4 corners.
+         */
+        struct SheetFace {
+            /** @brief The face itself. */
+            Face face{};
+            /** @brief Its 4 corners, in its own dart-cycle order. */
+            std::array<Node, 4> corners{};
+            /** @brief Which of its own axes the cut runs across: 0 = local `u`, 1 = local `v`. */
+            int axis = 0;
+            /** @brief Local corner index of one crossing edge's `from` node, giving the cut's side. */
+            int from_corner = 0;
+        };
+
+        /** @brief One block a sheet crosses, with the local frame it had when the sheet was collected.
+         * @see SheetFace for why the frame is captured rather than re-walked. */
+        struct SheetBlock {
+            /** @brief The block itself. */
+            Block block{};
+            /** @brief Its 8 corners, in `HEX_CORNER_UVW` order. */
+            std::array<Node, 8> corners{};
+            /** @brief Which of its own axes the cut runs across: 0/1/2 = local `u`/`v`/`w`. */
+            int axis = 0;
+            /** @brief Local corner index of one crossing edge's `from` node, giving the cut's side. */
+            int from_corner = 0;
+        };
+
+        /** @brief Everything one `cut_sheet()` would touch, as returned by `find_sheet()`. */
+        struct Sheet {
+            /** @brief Every edge the cut splits. */
+            std::vector<SheetEdge> edges;
+            /** @brief Every face the cut splits (exactly 2 of its 4 edges are in `edges`). */
+            std::vector<SheetFace> faces;
+            /** @brief Every block the cut splits (exactly 4 of its 12 edges are in `edges`). */
+            std::vector<SheetBlock> blocks;
+        };
+
+        /**
+         * @brief Collects the sheet through @p AEdge: every edge a cut of @p AEdge would have to
+         * split to stay conformal, plus the faces and blocks those edges run through.
+         *
+         * The sheet is the transitive closure of "is parallel to, within one block" starting from
+         * @p AEdge. Since 2 sewn blocks share the very same `Edge` attribute, that relation walks
+         * from block to block on its own — which is what makes the cut propagate through the whole
+         * layer rather than stopping at the selected block. A standalone quad block joins in the
+         * same way, through its 2 parallel edges instead of a hex's 4.
+         *
+         * Each edge is collected together with the endpoint its parameter must be measured from, so
+         * that one parameter cuts every edge on the same side. That side is carried across blocks by
+         * integer corner coordinates (`HEX_CORNER_UVW`/`QUAD_CORNER_IJ`), never by geometry, so a
+         * neighbour block whose local frame runs the other way still gets `1-t` rather than `t`
+         * without any distance or tolerance being involved.
+         *
+         * @param AEdge The edge the cut is aimed at; parameter 0 is its own stored curve's start
+         *        (`curve.control_points()[0]`), matching what `cut_sheet()`'s parameter means.
+         * @return The sheet, or `std::nullopt` when it is not homogeneously cuttable — either a face
+         *         carries a number of sheet edges other than 0 or 2, a block other than 0 or 4, or
+         *         one edge is reached from 2 blocks that disagree on which end it starts at. All 3
+         *         mean the sheet closes back onto itself in a way that leaves no single well-defined
+         *         cut, and are reported rather than cut wrongly.
+         */
+        std::optional<Sheet> find_sheet(Edge AEdge) {
+            std::map<Edge, Node> start_of;
+            std::vector<Edge> pending;
+            start_of.emplace(AEdge, curve_start_node(AEdge));
+            pending.push_back(AEdge);
+
+            while (!pending.empty()) {
+                const Edge e = pending.back();
+                pending.pop_back();
+                const Node from = start_of.at(e);
+
+                for (const Block b : blocks_of_edge(e)) {
+                    const std::array<Node, 8> corners = block_local_nodes(b);
+                    const std::array<Edge, 12> edges = block_edges(b, corners);
+                    const std::size_t ie = table_index(edges, e);
+                    const int axis = hex_edge_axis(ie);
+                    const int side = HEX_CORNER_UVW[static_cast<std::size_t>(node_index(corners, from))][axis];
+                    for (std::size_t k = 0; k < 12; ++k) {
+                        if (hex_edge_axis(k) != axis) continue;
+                        const auto a = static_cast<std::size_t>(HEX_EDGES[k].first);
+                        const auto b2 = static_cast<std::size_t>(HEX_EDGES[k].second);
+                        const Node ns = (HEX_CORNER_UVW[a][axis] == side) ? corners[a] : corners[b2];
+                        if (!extend_sheet(start_of, pending, edges[k], ns)) return std::nullopt;
+                    }
+                }
+
+                for (const Face f : standalone_faces_of_edge(e)) {
+                    const std::array<Node, 4> corners = face_local_nodes(f);
+                    const std::array<Edge, 4> edges = face_edges(f, corners);
+                    const std::size_t ie = table_index(edges, e);
+                    const int axis = quad_edge_axis(ie);
+                    const int side = QUAD_CORNER_IJ[static_cast<std::size_t>(node_index(corners, from))][axis];
+                    for (std::size_t k = 0; k < 4; ++k) {
+                        if (quad_edge_axis(k) != axis) continue;
+                        const auto a = static_cast<std::size_t>(QUAD_EDGES[k].first);
+                        const auto b2 = static_cast<std::size_t>(QUAD_EDGES[k].second);
+                        const Node ns = (QUAD_CORNER_IJ[a][axis] == side) ? corners[a] : corners[b2];
+                        if (!extend_sheet(start_of, pending, edges[k], ns)) return std::nullopt;
+                    }
+                }
+            }
+
+            Sheet sheet;
+            sheet.edges.reserve(start_of.size());
+            for (const auto &[e, from] : start_of) {
+                sheet.edges.push_back(SheetEdge{e, from});
+            }
+            if (!collect_sheet_faces(start_of, sheet) || !collect_sheet_blocks(start_of, sheet)) {
+                return std::nullopt;
+            }
+            return sheet;
+        }
+
+        /**
+         * @brief Where a cut at @p AParam falls along one sheet edge, as a parameter along that
+         * edge's *own* stored curve.
+         *
+         * A sheet measures its parameter from `SheetEdge::from`, but each edge's stored curve runs
+         * whichever way it was built — so on an edge whose curve starts at the far end, the same cut
+         * sits at `1 - AParam`. Every part of the cut goes through here, which is what keeps the
+         * whole sheet cut on one side.
+         *
+         * @param AEdge One edge of a sheet, from `find_sheet()`.
+         * @param AParam The cut parameter, as `cut_sheet()` defines it.
+         * @return The matching parameter along @p AEdge's own curve.
+         */
+        double cut_parameter(const SheetEdge &AEdge, double AParam) {
+            return (curve_start_node(AEdge.edge) == AEdge.from) ? AParam : 1.0 - AParam;
+        }
+
+        /**
+         * @brief The point a cut at @p AParam would fall on, along one sheet edge.
+         * @param AEdge One edge of a sheet, from `find_sheet()`.
+         * @param AParam The cut parameter, as `cut_sheet()` defines it.
+         * @return That point, on the edge's own curve.
+         */
+        Point3d cut_point(const SheetEdge &AEdge, double AParam) {
+            return AEdge.edge->info().curve.value(cut_parameter(AEdge, AParam));
+        }
+
+        /**
+         * @brief Cuts the blocking along the whole sheet through @p AEdge, at parameter @p AParam.
+         *
+         * Every edge of the sheet gains a node, every face it crosses an edge, every block it crosses
+         * a face — so one hex becomes 2, and the cut propagates to every block sharing those edges
+         * (see `find_sheet()`). The result stays conformal: 2 blocks that were sewn are still sewn,
+         * through the 2 halves of the face they shared.
+         *
+         * **Curvature is preserved exactly.** Each half keeps the parent's own geometry, restricted:
+         * an edge's curve, a face's surface and a block's volume are De Casteljau *subdivisions* of
+         * what they were cut out of (see `BezierCurve::split()`), never a refit from the new
+         * boundaries. Sampling the cut blocking therefore traces the very same points as sampling it
+         * before — the point at `(u,v,w)` of a block cut at `s` along `u` is the point at `(u/s,v,w)`
+         * of its low half. Re-deriving the halves through `coons_surface_from_edges()` instead would
+         * move the surface, since the restriction of a Coons patch to a sub-rectangle is not the
+         * Coons patch of that sub-rectangle's boundary.
+         *
+         * Classification is inherited rather than recomputed, which needs no geometric query and
+         * cannot invent a target: each half of a cell keeps the cell's own `geom_targets`, and a cell
+         * born inside another (the node on an edge, the edge inside a face, the face inside a block)
+         * takes its parent's.
+         *
+         * Worth knowing: a later `classify()` rebuilds every face's surface and block's volume from
+         * their boundaries, which is that method's documented job — and which discards the exact
+         * subdivision geometry this operation was careful to keep. Cut first, classify after, is the
+         * order that keeps both.
+         *
+         * @param AEdge The edge the cut is aimed at.
+         * @param AParam Where along @p AEdge to cut, measured along its own stored curve, strictly
+         *        inside `(0, 1)`. Every other edge of the sheet is cut at the matching parameter from
+         *        the matching side, so the cut stays homogeneous across blocks whose local frames
+         *        disagree.
+         * @return false, changing nothing at all, if @p AParam is not strictly inside `(0, 1)` or the
+         *         sheet is not homogeneously cuttable (see `find_sheet()`).
+         */
+        bool cut_sheet(Edge AEdge, double AParam) {
+            if (!(AParam > 0.0 && AParam < 1.0)) return false;
+            const std::optional<Sheet> sheet = find_sheet(AEdge);
+            if (!sheet.has_value()) return false;
+
+            // Ordered by increasing dimension, and each pass finished before the next starts: a
+            // face's own frame stops being walkable the moment one of its edges is split, so every
+            // frame the cut needs was captured by find_sheet() before any of this ran.
+            std::map<Node, MidNode> mids;
+            split_sheet_edges(*sheet, AParam, mids);
+            split_sheet_faces(*sheet, AParam, mids);
+            split_sheet_blocks(*sheet, AParam, mids);
+            return true;
         }
 
         /**
@@ -2004,6 +2212,618 @@ namespace gecko {
             HexFaceSpec{{0, 1, 3, 2}, 8, 10, 0, 4},  // Fw0 (w=0): grid[u][v]
             HexFaceSpec{{4, 5, 7, 6}, 9, 11, 1, 5}   // Fw1 (w=1): grid[u][v]
         };
+
+        // ---------------------------------------------------------------------
+        // Sheet cut: collecting the sheet
+        // ---------------------------------------------------------------------
+
+        /**
+         * @brief The endpoint of @p AEdge its own stored curve starts at, which is what a public
+         * cut parameter of 0 means for that edge.
+         * @param AEdge The edge to inspect.
+         * @return Its curve's start node.
+         */
+        Node curve_start_node(Edge AEdge) {
+            const Dart d = AEdge->dart();
+            const Node na = m_cmap.template attribute<0>(d);
+            const Node nb = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+            return (AEdge->info().curve.control_points()[0] == na->info().point) ? na : nb;
+        }
+
+        /**
+         * @brief Records @p AEdge as part of a sheet, starting at @p AFrom.
+         * @param AStart The edge-to-start-node map being built, modified in place.
+         * @param APending The traversal work list, modified in place.
+         * @param AEdge The edge to record.
+         * @param AFrom The endpoint its parameter is measured from.
+         * @return false if @p AEdge was already recorded starting at its *other* end — the sheet
+         *         disagrees with itself and no single parameter cuts it homogeneously.
+         */
+        static bool extend_sheet(std::map<Edge, Node> &AStart, std::vector<Edge> &APending, Edge AEdge, Node AFrom) {
+            const auto it = AStart.find(AEdge);
+            if (it == AStart.end()) {
+                AStart.emplace(AEdge, AFrom);
+                APending.push_back(AEdge);
+                return true;
+            }
+            return it->second == AFrom;
+        }
+
+        /** @brief The blocks incident to one edge.
+         * @param AEdge The edge to inspect.
+         * @return Its incident blocks (empty for an edge of a standalone quad). */
+        std::vector<Block> blocks_of_edge(Edge AEdge) {
+            std::vector<Block> blocks;
+            const Dart ed = AEdge->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).end();
+                 it != itend;
+                 ++it) {
+                const Block b = m_cmap.template attribute<3>(it);
+                if (b != nullptr) blocks.push_back(b);
+            }
+            return blocks;
+        }
+
+        /** @brief The faces incident to one edge that belong to no block — a standalone 2D quad
+         * block's own face, a hex's bounding faces being reached through the block instead.
+         * @param AEdge The edge to inspect.
+         * @return Its incident block-less faces. */
+        std::vector<Face> standalone_faces_of_edge(Edge AEdge) {
+            std::vector<Face> faces;
+            const Dart ed = AEdge->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<3>(it) != nullptr) continue;
+                const Face f = m_cmap.template attribute<2>(it);
+                if (f != nullptr) faces.push_back(f);
+            }
+            return faces;
+        }
+
+        /** @brief One block's 8 corners in `HEX_CORNER_UVW` order, walked from its own dart.
+         * @param ABlock The block to inspect.
+         * @return Its 8 corners.
+         * @pre The block must still be a plain hex (no edge of it split yet). */
+        std::array<Node, 8> block_local_nodes(Block ABlock) {
+            const Dart bd = ABlock->dart();
+            std::array<Node, 8> n{};
+            n[0] = m_cmap.template attribute<0>(bd);
+            n[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
+            n[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
+            n[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
+            n[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
+            n[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
+            n[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
+            n[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
+            return n;
+        }
+
+        /** @brief One face's 4 corners in its own dart-cycle order.
+         * @param AFace The face to inspect.
+         * @return Its 4 corners.
+         * @pre The face must still be a plain quad (no edge of it split yet). */
+        std::array<Node, 4> face_local_nodes(Face AFace) {
+            std::array<Node, 4> n{};
+            Dart walk = AFace->dart();
+            for (std::size_t c = 0; c < 4; ++c) {
+                n[c] = m_cmap.template attribute<0>(walk);
+                walk = m_cmap.template beta<1>(walk);
+            }
+            return n;
+        }
+
+        /** @brief One block's 12 edges, indexed to match `HEX_EDGES`.
+         * @param ABlock The block to inspect.
+         * @param ACorners Its 8 corners, from `block_local_nodes()`.
+         * @return Its 12 edges in `HEX_EDGES` order. */
+        std::array<Edge, 12> block_edges(Block ABlock, const std::array<Node, 8> &ACorners) {
+            std::array<Edge, 12> edges{};
+            const Dart bd = ABlock->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                const int a = node_index(ACorners, m_cmap.template attribute<0>(it));
+                const int b = node_index(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                edges[find_edge(HEX_EDGES, a, b)] = m_cmap.template attribute<1>(it);
+            }
+            return edges;
+        }
+
+        /** @brief One face's 4 edges, indexed to match `QUAD_EDGES`.
+         * @param AFace The face to inspect.
+         * @param ACorners Its 4 corners, from `face_local_nodes()`.
+         * @return Its 4 edges in `QUAD_EDGES` order. */
+        std::array<Edge, 4> face_edges(Face AFace, const std::array<Node, 4> &ACorners) {
+            std::array<Edge, 4> edges{};
+            const Dart fd = AFace->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                const int a = node_index(ACorners, m_cmap.template attribute<0>(it));
+                const int b = node_index(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                edges[find_edge(QUAD_EDGES, a, b)] = m_cmap.template attribute<1>(it);
+            }
+            return edges;
+        }
+
+        /** @brief Finds which slot of @p ATable holds @p AEdge.
+         * @tparam TN Number of slots.
+         * @param ATable The edge table to search.
+         * @param AEdge The edge to find.
+         * @return Its index.
+         * @pre @p AEdge must be in @p ATable. */
+        template<std::size_t TN>
+        static std::size_t table_index(const std::array<Edge, TN> &ATable, Edge AEdge) {
+            for (std::size_t k = 0; k < TN; ++k) {
+                if (ATable[k] == AEdge) return k;
+            }
+            assert(false && "Blocking::table_index: edge not found");
+            return 0;
+        }
+
+        /** @brief Which local axis one of `HEX_EDGES`' 12 entries runs along.
+         * @param AK Index into `HEX_EDGES`.
+         * @return 0/1/2 for `u`/`v`/`w`. */
+        static int hex_edge_axis(std::size_t AK) {
+            const auto a = static_cast<std::size_t>(HEX_EDGES[AK].first);
+            const auto b = static_cast<std::size_t>(HEX_EDGES[AK].second);
+            for (int ax = 0; ax < 3; ++ax) {
+                if (HEX_CORNER_UVW[a][static_cast<std::size_t>(ax)] !=
+                    HEX_CORNER_UVW[b][static_cast<std::size_t>(ax)]) {
+                    return ax;
+                }
+            }
+            assert(false && "Blocking::hex_edge_axis: degenerate edge");
+            return 0;
+        }
+
+        /** @brief Which local axis one of `QUAD_EDGES`' 4 entries runs along.
+         * @param AK Index into `QUAD_EDGES`.
+         * @return 0 for `u`, 1 for `v`. */
+        static int quad_edge_axis(std::size_t AK) {
+            const auto a = static_cast<std::size_t>(QUAD_EDGES[AK].first);
+            const auto b = static_cast<std::size_t>(QUAD_EDGES[AK].second);
+            return (QUAD_CORNER_IJ[a][0] != QUAD_CORNER_IJ[b][0]) ? 0 : 1;
+        }
+
+        /**
+         * @brief Adds to @p ASheet every face crossed by the edges of @p AStart, rejecting any face
+         * the sheet meets in a way that leaves no single cut.
+         * @param AStart The sheet's edge-to-start-node map.
+         * @param ASheet The sheet being built, modified in place.
+         * @return false if some face carries a number of sheet edges other than 0 or 2, or carries 2
+         *         that are not parallel to each other.
+         */
+        bool collect_sheet_faces(const std::map<Edge, Node> &AStart, Sheet &ASheet) {
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                const Face f = it;
+                const std::array<Node, 4> corners = face_local_nodes(f);
+                const std::array<Edge, 4> edges = face_edges(f, corners);
+
+                std::vector<std::size_t> hits;
+                for (std::size_t k = 0; k < 4; ++k) {
+                    if (AStart.count(edges[k]) != 0) hits.push_back(k);
+                }
+                if (hits.empty()) continue;
+                if (hits.size() != 2) return false;
+                const int axis = quad_edge_axis(hits[0]);
+                if (quad_edge_axis(hits[1]) != axis) return false;
+
+                const Node from = AStart.at(edges[hits[0]]);
+                ASheet.faces.push_back(SheetFace{f, corners, axis, node_index(corners, from)});
+            }
+            return true;
+        }
+
+        /**
+         * @brief Adds to @p ASheet every block crossed by the edges of @p AStart, rejecting any block
+         * the sheet meets in a way that leaves no single cut.
+         * @param AStart The sheet's edge-to-start-node map.
+         * @param ASheet The sheet being built, modified in place.
+         * @return false if some block carries a number of sheet edges other than 0 or 4, or carries 4
+         *         that are not all parallel to each other.
+         */
+        bool collect_sheet_blocks(const std::map<Edge, Node> &AStart, Sheet &ASheet) {
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                const Block b = it;
+                const std::array<Node, 8> corners = block_local_nodes(b);
+                const std::array<Edge, 12> edges = block_edges(b, corners);
+
+                std::vector<std::size_t> hits;
+                for (std::size_t k = 0; k < 12; ++k) {
+                    if (AStart.count(edges[k]) != 0) hits.push_back(k);
+                }
+                if (hits.empty()) continue;
+                if (hits.size() != 4) return false;
+                const int axis = hex_edge_axis(hits[0]);
+                for (const std::size_t k : hits) {
+                    if (hex_edge_axis(k) != axis) return false;
+                }
+
+                const Node from = AStart.at(edges[hits[0]]);
+                ASheet.blocks.push_back(SheetBlock{b, corners, axis, node_index(corners, from)});
+            }
+            return true;
+        }
+
+        // ---------------------------------------------------------------------
+        // Sheet cut: applying the cut
+        // ---------------------------------------------------------------------
+
+        /** @brief A new node inserted mid-edge by a cut, and the 2 parent corners it sits between. */
+        struct MidNode {
+            /** @brief The parent endpoint the cut parameter was measured from. */
+            Node from{};
+            /** @brief The parent endpoint at the other end. */
+            Node to{};
+        };
+
+        /** @brief Like `node_index()`, but reports absence instead of asserting.
+         * @tparam TN Number of slots.
+         * @param ANodes The node table to search.
+         * @param AN The node to find.
+         * @return Its index, or -1 when @p AN is not in @p ANodes. */
+        template<std::size_t TN>
+        static int node_index_or_none(const std::array<Node, TN> &ANodes, Node AN) {
+            for (std::size_t i = 0; i < TN; ++i) {
+                if (ANodes[i] == AN) return static_cast<int>(i);
+            }
+            return -1;
+        }
+
+        /** @brief A dart of @p AEdge whose source node is @p AFrom.
+         * @param AEdge The edge to look in.
+         * @param AFrom The node the dart must start at.
+         * @return Such a dart.
+         * @pre @p AFrom must be one of @p AEdge's 2 endpoints. */
+        Dart dart_of_edge_from(Edge AEdge, Node AFrom) {
+            for (auto it = m_cmap.template darts_of_cell<1>(AEdge->dart()).begin(),
+                      itend = m_cmap.template darts_of_cell<1>(AEdge->dart()).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<0>(it) == AFrom) return it;
+            }
+            assert(false && "Blocking::dart_of_edge_from: node is not an endpoint of the edge");
+            return AEdge->dart();
+        }
+
+        /**
+         * @brief The isoparametric boundary curve of a surface at the far end of one axis — for the
+         * low half of a split, that is exactly the curve the cut ran along.
+         * @param ASurface The surface to read the boundary off.
+         * @param AAxis 0 for the `u=1` boundary (parameterized by `v`), 1 for `v=1` (by `u`).
+         * @return The boundary curve, exactly (it is a row/column of the control grid).
+         */
+        static TEdgeCurve surface_boundary_curve(const FaceSurfaceT &ASurface, int AAxis) {
+            constexpr std::size_t n = FaceSurfaceT::Degree;
+            std::array<Point3d, TEdgeCurve::NumControlPoints> points{};
+            for (std::size_t a = 0; a <= n; ++a) {
+                points[a] = (AAxis == 0) ? ASurface.control_points()[n][a] : ASurface.control_points()[a][n];
+            }
+            return TEdgeCurve(points);
+        }
+
+        /**
+         * @brief The isoparametric boundary surface of a volume at the far end of one axis — for the
+         * low half of a split, exactly the surface the cut ran along.
+         * @param AVolume The volume to read the boundary off.
+         * @param AAxis 0/1/2 for the `u=1`/`v=1`/`w=1` boundary.
+         * @return The boundary surface, exactly (it is a slice of the control grid), parameterized by
+         *         the 2 remaining axes in increasing order.
+         */
+        static FaceSurfaceT volume_boundary_surface(const BlockVolumeT &AVolume, int AAxis) {
+            constexpr std::size_t n = BlockVolumeT::Degree;
+            typename FaceSurfaceT::ControlGrid grid{};
+            for (std::size_t a = 0; a <= n; ++a) {
+                for (std::size_t b = 0; b <= n; ++b) {
+                    if (AAxis == 0) {
+                        grid[a][b] = AVolume.control_points()[n][a][b];
+                    } else if (AAxis == 1) {
+                        grid[a][b] = AVolume.control_points()[a][n][b];
+                    } else {
+                        grid[a][b] = AVolume.control_points()[a][b][n];
+                    }
+                }
+            }
+            return FaceSurfaceT(grid);
+        }
+
+        /**
+         * @brief Re-expresses a surface given in some source frame into a target frame that differs
+         * from it by one of the 8 square symmetries.
+         *
+         * A cut produces sub-surfaces in the frame of whatever they were cut out of, but the face
+         * attribute they land on has its own frame, fixed by its dart cycle and not by us — and
+         * everything downstream (`to_mesh()`, `rebuild_face_surface()`) reads a face's surface in that
+         * own frame. Since both frames have the same 4 corners, the permutation is read straight off
+         * where those corners sit, with no geometry involved.
+         *
+         * @param ASource The surface, in the source frame.
+         * @param ACornerAB Where the target frame's local corners 0..3 sit in the source frame, each
+         *        coordinate 0 or 1, in the target's own dart-cycle order.
+         * @return The same surface, re-indexed into the target frame.
+         */
+        static FaceSurfaceT reframed_surface(const FaceSurfaceT &ASource,
+                                             const std::array<std::array<int, 2>, 4> &ACornerAB) {
+            constexpr std::size_t n = FaceSurfaceT::Degree;
+            // Corner 0 -> corner 1 is the target's own u; whichever source axis moves along it is the
+            // one the target's u maps to, and the remaining source axis takes the target's v.
+            const bool a_follows_u = (ACornerAB[1][0] != ACornerAB[0][0]);
+            typename FaceSurfaceT::ControlGrid grid{};
+            for (std::size_t p = 0; p <= n; ++p) {
+                for (std::size_t q = 0; q <= n; ++q) {
+                    const std::size_t along_a = a_follows_u ? p : q;
+                    const std::size_t along_b = a_follows_u ? q : p;
+                    const std::size_t r = (ACornerAB[0][0] == 0) ? along_a : (n - along_a);
+                    const std::size_t s = (ACornerAB[0][1] == 0) ? along_b : (n - along_b);
+                    grid[p][q] = ASource.control_points()[r][s];
+                }
+            }
+            return FaceSurfaceT(grid);
+        }
+
+        /**
+         * @brief Splits every edge of a sheet, inserting one node per edge at the cut.
+         * @param ASheet The sheet being cut.
+         * @param AParam The cut parameter, as `cut_sheet()` defines it.
+         * @param AMids Filled with every inserted node, mapped to the parent corners it lies between.
+         */
+        void split_sheet_edges(const Sheet &ASheet, double AParam, std::map<Node, MidNode> &AMids) {
+            for (const SheetEdge &se : ASheet.edges) {
+                const bool curve_starts_at_from = (curve_start_node(se.edge) == se.from);
+                const double s = cut_parameter(se, AParam);
+                const TEdgeCurve parent = se.edge->info().curve;
+                const auto [low, high] = parent.split(s);
+
+                Node mid = create_node(parent.value(s));
+                // A node born on an edge lies on whatever that edge lies on.
+                mid->info().geom_targets = se.edge->info().geom_targets;
+
+                const Dart d = dart_of_edge_from(se.edge, se.from);
+                const Node other = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                const Dart nd = m_cmap.insert_cell_0_in_cell_1(d, mid);
+
+                // insert_cell_0_in_cell_1 leaves `d` on the [from, mid] half and returns beta<1>(d),
+                // which carries the [mid, other] one; both inherit the parent's classification
+                // through CellData.h's SplitFunctor, and only the geometry needs setting.
+                m_cmap.template attribute<1>(d)->info().curve = curve_starts_at_from ? low : high;
+                m_cmap.template attribute<1>(nd)->info().curve = curve_starts_at_from ? high : low;
+
+                AMids.emplace(mid, MidNode{se.from, other});
+            }
+        }
+
+        /**
+         * @brief Splits every face of a sheet, inserting one edge per face along the cut.
+         * @param ASheet The sheet being cut.
+         * @param AParam The cut parameter, as `cut_sheet()` defines it.
+         * @param AMids Every node `split_sheet_edges()` inserted.
+         */
+        void split_sheet_faces(const Sheet &ASheet, double AParam, const std::map<Node, MidNode> &AMids) {
+            for (const SheetFace &sf : ASheet.faces) {
+                const auto axis = static_cast<std::size_t>(sf.axis);
+                const std::size_t other = 1 - axis;
+                // The sheet's parameter is measured from `from_corner`; read in the face's own frame
+                // it runs backwards whenever that corner sits at the far end of the cut axis.
+                const bool forward = (QUAD_CORNER_IJ[static_cast<std::size_t>(sf.from_corner)][axis] == 0);
+                const double t = forward ? AParam : 1.0 - AParam;
+
+                const FaceSurfaceT parent = sf.face->info().surface;
+                const auto [low, high] = (axis == 0) ? parent.split_u(t) : parent.split_v(t);
+
+                // The 2 darts the new edge must span: the ones starting at this face's 2 new nodes.
+                std::vector<Dart> mid_darts;
+                Dart walk = sf.face->dart();
+                const Dart first = walk;
+                do {
+                    if (AMids.count(m_cmap.template attribute<0>(walk)) != 0) mid_darts.push_back(walk);
+                    walk = m_cmap.template beta<1>(walk);
+                } while (walk != first);
+                assert(mid_darts.size() == 2 && "Blocking::split_sheet_faces: face must carry exactly 2 cut nodes");
+
+                const Dart nd = m_cmap.insert_cell_1_in_cell_2(mid_darts[0], mid_darts[1]);
+
+                Edge new_edge = m_cmap.template attribute<1>(nd);
+                if (new_edge == nullptr) {
+                    new_edge = create_edge();
+                    m_cmap.template set_attribute<1>(nd, new_edge);
+                }
+                // The cut runs along the low half's far isoparametric curve, exactly.
+                new_edge->info().curve = surface_boundary_curve(low, sf.axis);
+                // An edge born inside a face lies on whatever that face lies on.
+                new_edge->info().geom_targets = sf.face->info().geom_targets;
+
+                const Face half_a = m_cmap.template attribute<2>(mid_darts[0]);
+                const Face half_b = m_cmap.template attribute<2>(mid_darts[1]);
+                // Whichever half kept a parent corner from the near side of the cut is the low one.
+                std::size_t low_corner = 0;
+                for (std::size_t c = 0; c < 4; ++c) {
+                    if (QUAD_CORNER_IJ[c][axis] == 0) low_corner = c;
+                }
+                const bool a_is_low = face_has_node(half_a, sf.corners[low_corner]);
+                const Face low_face = a_is_low ? half_a : half_b;
+                const Face high_face = a_is_low ? half_b : half_a;
+
+                assign_half_face(low_face, low, sf, AMids, true, axis, other);
+                assign_half_face(high_face, high, sf, AMids, false, axis, other);
+
+                if (std::find(m_hex_faces.begin(), m_hex_faces.end(), sf.face) != m_hex_faces.end()) {
+                    const Face added = (low_face == sf.face) ? high_face : low_face;
+                    if (std::find(m_hex_faces.begin(), m_hex_faces.end(), added) == m_hex_faces.end()) {
+                        m_hex_faces.push_back(added);
+                    }
+                }
+            }
+        }
+
+        /**
+         * @brief Stores one half of a split face's surface, re-expressed in that half's own frame.
+         * @param AHalf The half face to write to.
+         * @param ASurface Its surface, still in the parent face's frame.
+         * @param ASheetFace The parent face, as the sheet captured it.
+         * @param AMids Every node `split_sheet_edges()` inserted.
+         * @param ALow Whether @p AHalf is the near-side half of the cut.
+         * @param AAxis The parent's axis the cut ran across.
+         * @param AOther The parent's other axis.
+         */
+        void assign_half_face(Face AHalf,
+                              const FaceSurfaceT &ASurface,
+                              const SheetFace &ASheetFace,
+                              const std::map<Node, MidNode> &AMids,
+                              bool ALow,
+                              std::size_t AAxis,
+                              std::size_t AOther) {
+            const std::array<Node, 4> corners = face_local_nodes(AHalf);
+            std::array<std::array<int, 2>, 4> corner_ab{};
+            for (std::size_t c = 0; c < 4; ++c) {
+                const auto mid = AMids.find(corners[c]);
+                if (mid != AMids.end()) {
+                    // A cut node sits at the far end of the near half and the near end of the far
+                    // one; across the cut it keeps the parent coordinate of the edge it was born on.
+                    const int idx = node_index(ASheetFace.corners, mid->second.from);
+                    corner_ab[c][AAxis] = ALow ? 1 : 0;
+                    corner_ab[c][AOther] = QUAD_CORNER_IJ[static_cast<std::size_t>(idx)][AOther];
+                } else {
+                    const int idx = node_index(ASheetFace.corners, corners[c]);
+                    corner_ab[c] = QUAD_CORNER_IJ[static_cast<std::size_t>(idx)];
+                }
+            }
+            AHalf->info().surface = reframed_surface(ASurface, corner_ab);
+        }
+
+        /**
+         * @brief Splits every block of a sheet, inserting one face per block along the cut.
+         * @param ASheet The sheet being cut.
+         * @param AParam The cut parameter, as `cut_sheet()` defines it.
+         * @param AMids Every node `split_sheet_edges()` inserted.
+         */
+        void split_sheet_blocks(const Sheet &ASheet, double AParam, const std::map<Node, MidNode> &AMids) {
+            for (const SheetBlock &sb : ASheet.blocks) {
+                const auto axis = static_cast<std::size_t>(sb.axis);
+                const bool forward = (HEX_CORNER_UVW[static_cast<std::size_t>(sb.from_corner)][axis] == 0);
+                const double t = forward ? AParam : 1.0 - AParam;
+
+                const BlockVolumeT parent = sb.block->info().volume;
+                const auto [low, high] = (axis == 0)   ? parent.split_u(t)
+                                         : (axis == 1) ? parent.split_v(t)
+                                                       : parent.split_w(t);
+
+                // This block's own 4 cut nodes: those lying between 2 of its corners, along its cut
+                // axis. Every other new node in the map belongs to some other block of the sheet.
+                std::vector<Node> mids;
+                for (const auto &[mid, ends] : AMids) {
+                    const int ia = node_index_or_none(sb.corners, ends.from);
+                    const int ib = node_index_or_none(sb.corners, ends.to);
+                    if (ia < 0 || ib < 0) continue;
+                    if (HEX_CORNER_UVW[static_cast<std::size_t>(ia)][axis] ==
+                        HEX_CORNER_UVW[static_cast<std::size_t>(ib)][axis]) {
+                        continue;
+                    }
+                    mids.push_back(mid);
+                }
+                assert(mids.size() == 4 && "Blocking::split_sheet_blocks: block must carry exactly 4 cut nodes");
+
+                const std::vector<Dart> path = cut_loop(sb.block, mids);
+                const Dart nd = m_cmap.insert_cell_2_in_cell_3(path.begin(), path.end());
+
+                Face new_face = m_cmap.template attribute<2>(nd);
+                if (new_face == nullptr) {
+                    new_face = create_face();
+                    m_cmap.template set_attribute<2>(nd, new_face);
+                }
+                // A face born inside a block lies on whatever that block lies on.
+                new_face->info().geom_targets = sb.block->info().geom_targets;
+                assign_cut_face(new_face, volume_boundary_surface(low, sb.axis), sb, AMids, axis);
+                if (std::find(m_hex_faces.begin(), m_hex_faces.end(), new_face) == m_hex_faces.end()) {
+                    m_hex_faces.push_back(new_face);
+                }
+
+                const Block half_a = m_cmap.template attribute<3>(nd);
+                const Block half_b = m_cmap.template attribute<3>(m_cmap.template beta<3>(nd));
+                std::size_t low_corner = 0;
+                for (std::size_t c = 0; c < 8; ++c) {
+                    if (HEX_CORNER_UVW[c][axis] == 0) low_corner = c;
+                }
+                const bool a_is_low = block_has_node(half_a, sb.corners[low_corner]);
+                (a_is_low ? half_a : half_b)->info().volume = low;
+                (a_is_low ? half_b : half_a)->info().volume = high;
+            }
+        }
+
+        /**
+         * @brief Walks the closed 4-edge loop the cut traces around one block, as the path
+         * `insert_cell_2_in_cell_3()` needs.
+         * @param ABlock The block being split.
+         * @param AMids Its own 4 cut nodes.
+         * @return 4 darts, each running from one cut node to the next around the loop.
+         */
+        std::vector<Dart> cut_loop(Block ABlock, const std::vector<Node> &AMids) {
+            std::vector<Dart> path;
+            Node current = AMids[0];
+            Node previous{};
+            for (std::size_t step = 0; step < AMids.size(); ++step) {
+                bool found = false;
+                for (auto it = m_cmap.template darts_of_cell<3>(ABlock->dart()).begin(),
+                          itend = m_cmap.template darts_of_cell<3>(ABlock->dart()).end();
+                     it != itend && !found;
+                     ++it) {
+                    if (m_cmap.template attribute<0>(it) != current) continue;
+                    const Node target = m_cmap.template attribute<0>(m_cmap.template beta<1>(it));
+                    if (std::find(AMids.begin(), AMids.end(), target) == AMids.end()) continue;
+                    if (step > 0 && target == previous) continue;
+                    path.push_back(it);
+                    previous = current;
+                    current = target;
+                    found = true;
+                }
+                assert(found && "Blocking::cut_loop: the cut nodes do not form a closed loop");
+            }
+            assert(current == AMids[0] && "Blocking::cut_loop: the loop did not close");
+            return path;
+        }
+
+        /**
+         * @brief Stores the surface of the face a block cut created, re-expressed in that face's own
+         * frame.
+         * @param AFace The new face.
+         * @param ASurface Its surface, in the parent block's 2 non-cut axes, in increasing order.
+         * @param ASheetBlock The parent block, as the sheet captured it.
+         * @param AMids Every node `split_sheet_edges()` inserted.
+         * @param AAxis The parent block's axis the cut ran across.
+         */
+        void assign_cut_face(Face AFace,
+                             const FaceSurfaceT &ASurface,
+                             const SheetBlock &ASheetBlock,
+                             const std::map<Node, MidNode> &AMids,
+                             std::size_t AAxis) {
+            // volume_boundary_surface() parameterizes by the 2 axes the cut left alone, in order.
+            std::array<std::size_t, 2> kept{};
+            std::size_t k = 0;
+            for (std::size_t ax = 0; ax < 3; ++ax) {
+                if (ax != AAxis) kept[k++] = ax;
+            }
+
+            const std::array<Node, 4> corners = face_local_nodes(AFace);
+            std::array<std::array<int, 2>, 4> corner_ab{};
+            for (std::size_t c = 0; c < 4; ++c) {
+                // Every corner of this face is a cut node, and keeps the parent-block coordinates of
+                // the edge it was born on along both axes the cut left alone.
+                const int idx = node_index(ASheetBlock.corners, AMids.at(corners[c]).from);
+                for (std::size_t a = 0; a < 2; ++a) {
+                    corner_ab[c][a] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)][kept[a]];
+                }
+            }
+            AFace->info().surface = reframed_surface(ASurface, corner_ab);
+        }
 
         /** @brief Non-owning pointer to the geometric model this blocking is built against. */
         const TGeomModel *m_geom_model;

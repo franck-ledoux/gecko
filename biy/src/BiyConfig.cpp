@@ -101,6 +101,11 @@ namespace gecko::biy {
             read_bool(j, "show_block_edges", config.show_block_edges);
             read_double(j, "block_edge_radius", config.block_edge_radius);
             read_color(j, "block_edge_color", config.block_edge_color);
+            read_color(j, "sheet_color", config.sheet_color);
+            read_double(j, "sheet_radius", config.sheet_radius);
+            read_color(j, "cut_point_color", config.cut_point_color);
+            read_double(j, "cut_point_radius", config.cut_point_radius);
+            read_double(j, "cut_snap_tolerance", config.cut_snap_tolerance);
             message = "Loaded " + path;
         } catch (const nlohmann::json::exception &e) {
             // A broken config shouldn't stop biy from starting: say so and carry on with defaults.

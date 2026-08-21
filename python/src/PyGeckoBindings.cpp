@@ -188,7 +188,25 @@ namespace gecko::python {
                  py::arg("subdivisions"),
                  py::arg("path"),
                  "Generates a mesh reproducing the blocking (subdivided ``subdivisions`` times per axis) and writes "
-                 "it as a VTK legacy ASCII file.");
+                 "it as a VTK legacy ASCII file.")
+            .def("sheet_edges",
+                 &BlockingFacade::sheet_edges,
+                 py::arg("edge_index"),
+                 "Every edge ``cut_sheet`` would split if aimed at ``edge_index`` — the whole sheet, as positions in "
+                 "the same order ``edge_vertices``/``edge_segments`` use. Empty when the sheet cannot be cut.")
+            .def("sheet_cut_points",
+                 &BlockingFacade::sheet_cut_points,
+                 py::arg("edge_index"),
+                 py::arg("param"),
+                 "Where a cut would land: one point per sheet edge, in the same order ``sheet_edges`` reports, each "
+                 "on the side the whole sheet agrees on. Empty when the sheet cannot be cut.")
+            .def("cut_sheet",
+                 &BlockingFacade::cut_sheet,
+                 py::arg("edge_index"),
+                 py::arg("param"),
+                 "Cuts the blocking along the whole sheet through ``edge_index``, at ``param`` along that edge "
+                 "(strictly between 0 and 1), splitting every block the sheet crosses in 2 and keeping the geometry "
+                 "it cut through exactly. Returns False, changing nothing, if the cut is not possible.");
     }
 
 } // namespace gecko::python

@@ -180,15 +180,16 @@ position only.
 
 ## Moving corners
 
-The left mouse button does one of two things, picked with the **mouse mode** radio buttons at the
+The left mouse button does one of three things, picked with the **mouse mode** radio buttons at the
 top of the panel or with a keypress:
 
 | Mode   | Key | Left button                                     |
 | ------ | --- | ----------------------------------------------- |
 | Camera | `C` | Polyscope's usual navigation: rotate, pan, zoom |
 | Edit   | `E` | Picks up a block corner and moves it            |
+| Cut    | `X` | Cuts the sheet under the cursor (see below)     |
 
-The two are a genuine mode rather than a modifier like `Ctrl`+drag, because of how Polyscope is
+These are genuine modes rather than a modifier like `Ctrl`+drag, because of how Polyscope is
 built: it processes camera navigation at the top of each frame, *before* the per-frame user
 callback runs. A drag therefore can't be intercepted after the fact — navigation has to be switched
 off (`options::doDefaultMouseInteraction`) ahead of the frame the drag happens in. `Ctrl` is also
@@ -204,6 +205,43 @@ The scene itself stays put while you edit. Polyscope normally recomputes the sce
 and length scale whenever a structure changes, which drags the ground plane along with it — so biy
 freezes both to the model once it's loaded (`options::automaticallyComputeSceneExtents`). Growing a
 block, or pulling a corner far out, no longer shifts the ground or rescales the view.
+
+## Cutting blocks
+
+**Cut** mode splits blocks along a *sheet*: pick an edge and a point on it, and the cut runs through
+every edge parallel to it, right across the blocking.
+
+Point at a block edge and the whole sheet lights up, with a marker on each of its edges showing
+exactly where the cut would land. The parameter follows the cursor along the edge, snapping to the
+middle as you near it (cutting in half being the common case), and the panel's `Cut at` slider takes
+an exact value when pointing is not precise enough. Click to cut.
+
+Seeing the sheet before committing is the point of the preview: a cut is never local. Two blocks
+sewn together share the very same edges, so cutting one drags its neighbour in — otherwise the face
+they share would come apart and the blocking would stop being conformal. On `two_cubes.msh`, cutting
+across the shared face touches one block; cutting along it touches both. The status line reports how
+many edges the cut split and how the block count moved.
+
+A sheet that closes back onto itself has no single well-defined cut — some face would have to be cut
+twice, or two blocks would disagree on which side the parameter runs from. biy says so and refuses,
+rather than cutting somewhere arbitrary.
+
+### Curvature is kept exactly
+
+The blocks a cut produces are not refitted to their new boundaries; they are the *restriction* of
+what they were cut out of. Every edge curve, face surface and block volume is subdivided by De
+Casteljau, which is exact — so the cut re-parameterizes the blocking without moving it anywhere.
+Meshing after a cut traces the very same points as meshing before: on a block fitted to
+`cylinder.msh`, cutting at 1/3 leaves every generated node within 5e-16 of the uncut geometry.
+
+Rebuilding the halves from their boundaries instead would move them, which is why the cut does not
+do it: the restriction of a Coons patch to a sub-rectangle is not the Coons patch of that
+sub-rectangle's own boundary curves. The difference is invisible on a straight-edged block, where
+the two agree, and plain to see on a curved one.
+
+One consequence worth knowing: `classify()` rebuilds every face and block from its boundary — that
+is its documented job — and so discards the exact geometry a cut was careful to keep. **Cut first,
+classify after** is the order that keeps both.
 
 ## Configuration
 
@@ -262,6 +300,9 @@ is a copy of the defaults:
 | Key                                                                                               | Meaning                                                                                  |
 | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `panel_width`                                                                                     | Width of biy's 2 side panels, before UI scaling                                          |
+| `sheet_color`, `sheet_radius`                                                                     | Color and thickness of the highlighted sheet in Cut mode                                 |
+| `cut_point_color`, `cut_point_radius`                                                             | Color and size of the markers showing where a cut would land                             |
+| `cut_snap_tolerance`                                                                              | How close to an edge's middle the cursor snaps the cut to exactly 0.5                    |
 | `gizmo_size`, `gizmo_dot_radius`                                                                  | Size of the orientation gizmo's canvas, and of a dot at rest                             |
 | `gizmo_color_x`, `gizmo_color_y`, `gizmo_color_z`                                                 | Color of each axis's dots and label                                                      |
 | `geometry_volume_color`                                                                           | Color of the model's volumes                                                             |

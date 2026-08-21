@@ -87,6 +87,17 @@ print(blocking.nb_cells(2), blocking.is_valid_topology())
 if blocking.can_delete_face(face_a):
     blocking.delete_face(face_a)
 
+# Cutting: pick an edge (by its position in edge_vertices()/edge_segments() order) and a parameter
+# along it. The cut runs through every edge parallel to that one, across every block they touch —
+# sheet_edges() reports which, and sheet_cut_points() where, before anything is modified.
+sheet = blocking.sheet_edges(0)                 # [] if the sheet cannot be cut evenly
+preview = blocking.sheet_cut_points(0, 0.5)     # one point per edge of `sheet`, in the same order
+blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if the cut is impossible
+
+# The halves keep the geometry they were cut out of exactly (De Casteljau subdivision, not a refit),
+# so meshing after a cut traces the same points as before. Note classify() rebuilds faces and blocks
+# from their boundaries and so discards that — cut first, classify after.
+
 # The exported mesh's nodes also carry 2 POINT_DATA scalars, "classification_dim"/"classification_tag"
 # (-1/-1 when unclassified) — the same dim/tag pair node_classification_dims() reports, for every
 # node the subdivision generates, not just the original block corners.

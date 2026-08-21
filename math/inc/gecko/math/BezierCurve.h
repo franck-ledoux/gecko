@@ -110,6 +110,49 @@ namespace gecko {
         TPointT operator()(double t) const { return value(t); }
 
         /**
+         * @brief Splits the curve at parameter @p AT into the 2 curves of the same degree covering
+         * `[0, AT]` and `[AT, 1]`.
+         *
+         * This is De Casteljau *subdivision*, and it is exact rather than a fit: the 2 halves
+         * reproduce the parent curve point for point, only reparameterized —
+         * `first.value(t) == value(t * AT)` and `second.value(t) == value(AT + t * (1 - AT))`, up to
+         * floating-point round-off. That exactness is what lets a block-structure cut keep the
+         * geometry it cut through (see `Blocking::cut_sheet()`): re-deriving the halves from their
+         * new boundaries instead would move the surface, since the restriction of a Coons patch to a
+         * sub-rectangle is not the Coons patch of that sub-rectangle's own boundary curves.
+         *
+         * The 2 halves share their junction control point exactly (`first[TN] == second[0]`), which
+         * is the point at @p AT — so a caller placing a new node there can take it from either.
+         *
+         * The construction is the same De Casteljau pyramid `value()` runs, reading off its 2 outer
+         * edges instead of only its apex: level `k`'s first point is the left half's `k`-th control
+         * point, its last point the right half's.
+         *
+         * @param AT Split parameter, strictly inside `(0, 1)` — an endpoint would make one half
+         *        degenerate, and callers are expected to reject that themselves with a real error
+         *        rather than rely on this (enforced via assert in Debug builds only).
+         * @return The `[0, AT]` half first, the `[AT, 1]` half second.
+         */
+        std::pair<BezierCurve, BezierCurve> split(double AT) const {
+            assert(AT > 0.0 && AT < 1.0 && "BezierCurve::split: AT must be strictly inside (0.0, 1.0)");
+
+            std::array<TPointT, NumControlPoints> points = m_control_points;
+            std::array<TPointT, NumControlPoints> left{};
+            std::array<TPointT, NumControlPoints> right{};
+            left[0] = points[0];
+            right[TN] = points[TN];
+
+            for (std::size_t k = 1; k <= TN; ++k) {
+                for (std::size_t i = 0; i <= TN - k; ++i) {
+                    points[i] = lerp(points[i], points[i + 1], AT);
+                }
+                left[k] = points[0];
+                right[TN - k] = points[TN - k];
+            }
+            return {BezierCurve(left), BezierCurve(right)};
+        }
+
+        /**
          * @brief Computes the K-th derivative curve of the current Bezier curve.
          *
          * Applies the derivative operation recursively K times at compile-time.

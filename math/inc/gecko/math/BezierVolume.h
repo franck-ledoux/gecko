@@ -3,6 +3,9 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <utility>
+
+#include <gecko/math/BezierCurve.h>
 
 namespace gecko {
     /**
@@ -106,7 +109,87 @@ namespace gecko {
          */
         TPointT operator()(double AU, double AV, double AW) const { return value(AU, AV, AW); }
 
+        /**
+         * @brief Splits the volume along `u = AU` into the 2 volumes of the same degree covering
+         * `u` in `[0, AU]` and `[AU, 1]`.
+         *
+         * Exact, like the `BezierCurve::split()` it is built from: a tensor-product volume is a
+         * Bezier curve in `u` whose control points are themselves surfaces in `(v, w)`, so
+         * subdividing every `u`-fiber of the control grid subdivides the volume —
+         * `first.value(u, v, w) == value(u * AU, v, w)` up to round-off, and the 2 halves share their
+         * junction isoparametric surface exactly. That is what lets `Blocking::cut_sheet()` split a
+         * curved block without moving the geometry it cut through.
+         *
+         * @param AU Split parameter, strictly inside `(0, 1)` (see `BezierCurve::split()`).
+         * @return The `[0, AU]` half first, the `[AU, 1]` half second.
+         */
+        std::pair<BezierVolume, BezierVolume> split_u(double AU) const {
+            return split_along(AU,
+                               [](ControlGrid &AGrid, std::size_t AA, std::size_t AB, std::size_t AIdx) -> TPointT & {
+                                   return AGrid[AIdx][AA][AB];
+                               });
+        }
+
+        /**
+         * @brief Splits the volume along `v = AV` into the 2 volumes of the same degree covering
+         * `v` in `[0, AV]` and `[AV, 1]`.
+         * @param AV Split parameter, strictly inside `(0, 1)` (see `BezierCurve::split()`).
+         * @return The `[0, AV]` half first, the `[AV, 1]` half second.
+         * @see split_u() for why this is exact rather than a refit.
+         */
+        std::pair<BezierVolume, BezierVolume> split_v(double AV) const {
+            return split_along(AV,
+                               [](ControlGrid &AGrid, std::size_t AA, std::size_t AB, std::size_t AIdx) -> TPointT & {
+                                   return AGrid[AA][AIdx][AB];
+                               });
+        }
+
+        /**
+         * @brief Splits the volume along `w = AW` into the 2 volumes of the same degree covering
+         * `w` in `[0, AW]` and `[AW, 1]`.
+         * @param AW Split parameter, strictly inside `(0, 1)` (see `BezierCurve::split()`).
+         * @return The `[0, AW]` half first, the `[AW, 1]` half second.
+         * @see split_u() for why this is exact rather than a refit.
+         */
+        std::pair<BezierVolume, BezierVolume> split_w(double AW) const {
+            return split_along(AW,
+                               [](ControlGrid &AGrid, std::size_t AA, std::size_t AB, std::size_t AIdx) -> TPointT & {
+                                   return AGrid[AA][AB][AIdx];
+                               });
+        }
+
     private:
+        /**
+         * @brief Shared body of `split_u()`/`split_v()`/`split_w()`: subdivides every control-grid
+         * fiber running along one axis, the 3 axes differing only in how a fiber index maps back
+         * into the grid.
+         * @tparam TAt Callable `(ControlGrid&, std::size_t, std::size_t, std::size_t) -> TPointT&`
+         *         addressing the grid entry at fiber position 3 on the fiber named by 1 and 2.
+         * @param AT Split parameter, strictly inside `(0, 1)`.
+         * @param AAt The grid-addressing callable.
+         * @return The `[0, AT]` half first, the `[AT, 1]` half second.
+         */
+        template<typename TAt>
+        std::pair<BezierVolume, BezierVolume> split_along(double AT, TAt AAt) const {
+            ControlGrid low{};
+            ControlGrid high{};
+            ControlGrid self = m_control_points;
+            for (std::size_t a = 0; a < NumControlPoints; ++a) {
+                for (std::size_t b = 0; b < NumControlPoints; ++b) {
+                    std::array<TPointT, NumControlPoints> fiber{};
+                    for (std::size_t i = 0; i < NumControlPoints; ++i) {
+                        fiber[i] = AAt(self, a, b, i);
+                    }
+                    const auto [l, h] = BezierCurve<TN, TPointT>(fiber).split(AT);
+                    for (std::size_t i = 0; i < NumControlPoints; ++i) {
+                        AAt(low, a, b, i) = l[i];
+                        AAt(high, a, b, i) = h[i];
+                    }
+                }
+            }
+            return {BezierVolume(low), BezierVolume(high)};
+        }
+
         /** @brief The `(TN+1)^3` grid storing the control points. */
         ControlGrid m_control_points{};
 

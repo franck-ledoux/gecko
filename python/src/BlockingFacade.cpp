@@ -159,6 +159,92 @@ namespace gecko::python {
     }
 
     namespace {
+        /** @brief The edge sitting at position @p index of a blocking's own edge traversal — the
+         * order every edge-indexed accessor here shares.
+         * @tparam TImpl The per-degree Impl alternative.
+         * @param impl The blocking state.
+         * @param index The position to resolve.
+         * @return That edge.
+         * @throw std::out_of_range if the blocking has no such edge. */
+        template<typename TImpl>
+        auto edge_at(TImpl &impl, int index) {
+            auto &map = impl.blocking.cmap();
+            if (index >= 0) {
+                int seen = 0;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it, ++seen) {
+                    if (seen == index) return it;
+                }
+            }
+            throw std::out_of_range("Blocking: unknown edge index " + std::to_string(index));
+        }
+    } // namespace
+
+    std::vector<int> BlockingFacade::sheet_edges(int edge_index) {
+        return std::visit(
+            [edge_index](auto &impl) {
+                const auto sheet = impl.blocking.find_sheet(edge_at(impl, edge_index));
+                std::vector<int> indices;
+                if (!sheet.has_value()) return indices;
+
+                // Back from attribute handles to the positions the caller speaks in, in one pass.
+                auto &map = impl.blocking.cmap();
+                int position = 0;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it, ++position) {
+                    for (const auto &se : sheet->edges) {
+                        if (se.edge == it) {
+                            indices.push_back(position);
+                            break;
+                        }
+                    }
+                }
+                return indices;
+            },
+            m_impl);
+    }
+
+    std::vector<std::array<double, 3>> BlockingFacade::sheet_cut_points(int edge_index, double param) {
+        return std::visit(
+            [edge_index, param](auto &impl) {
+                std::vector<std::array<double, 3>> points;
+                const auto sheet = impl.blocking.find_sheet(edge_at(impl, edge_index));
+                if (!sheet.has_value()) return points;
+
+                // Walked in the blocking's own edge order rather than the sheet's: find_sheet()
+                // returns its edges keyed by attribute handle, whose ordering is the container's and
+                // need not match the traversal sheet_edges() reports positions in. Re-walking is what
+                // makes the 2 line up entry for entry, which is what a caller pairing them expects.
+                auto &map = impl.blocking.cmap();
+                points.reserve(sheet->edges.size());
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    for (const auto &se : sheet->edges) {
+                        if (se.edge != it) continue;
+                        const auto p = impl.blocking.cut_point(se, param);
+                        points.push_back({p.x(), p.y(), p.z()});
+                        break;
+                    }
+                }
+                return points;
+            },
+            m_impl);
+    }
+
+    bool BlockingFacade::cut_sheet(int edge_index, double param) {
+        return std::visit(
+            [edge_index, param](auto &impl) {
+                if (!impl.blocking.cut_sheet(edge_at(impl, edge_index), param)) return false;
+                // A cut creates corner nodes, which have to become addressable like any other.
+                impl.index_new_nodes();
+                return true;
+            },
+            m_impl);
+    }
+    namespace {
         template<typename TImpl>
         auto find_node(TImpl &impl, int node_id) {
             const auto it = impl.nodes_by_id.find(node_id);

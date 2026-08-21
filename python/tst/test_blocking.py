@@ -245,3 +245,68 @@ def test_nb_cells_invalid_dim_raises(geom_model_path):
     blocking = gecko.Blocking(model)
     with pytest.raises(ValueError):
         blocking.nb_cells(4)
+
+
+def _unit_hex_at(x0, x1):
+    return [
+        (x0, 0.0, 0.0), (x1, 0.0, 0.0), (x1, 1.0, 0.0), (x0, 1.0, 0.0),
+        (x0, 0.0, 1.0), (x1, 0.0, 1.0), (x1, 1.0, 1.0), (x0, 1.0, 1.0),
+    ]
+
+
+def test_sheet_edges_reports_the_whole_sheet_before_cutting(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+    blocking.create_hex_block(_unit_hex_at(1.0, 2.0))
+    blocking.build_connectivity()
+
+    # Every edge belongs to some sheet, and a sheet is always reported including the edge asked for.
+    for index in range(blocking.nb_cells(1)):
+        sheet = blocking.sheet_edges(index)
+        assert index in sheet
+        # A hex edge has 3 parallel siblings; crossing into the neighbour block adds more.
+        assert len(sheet) in (4, 6)
+
+    # The 2 blocks share 2 y-running edges, so some sheet must span both blocks (6 edges) and some
+    # must stay inside one (4) — that difference is the propagation itself.
+    sizes = {len(blocking.sheet_edges(i)) for i in range(blocking.nb_cells(1))}
+    assert sizes == {4, 6}
+
+
+def test_cut_sheet_splits_the_blocks_and_keeps_the_blocking_valid(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+    assert blocking.nb_cells(3) == 1
+
+    sheet = blocking.sheet_edges(0)
+    assert len(sheet) == 4
+    assert blocking.cut_sheet(0, 0.5)
+
+    assert blocking.nb_cells(3) == 2
+    assert blocking.nb_cells(0) == 12
+    assert blocking.is_valid_topology()
+    # The cut's new corners must be addressable like any other, or they could not be dragged.
+    assert len(blocking.node_ids()) == 12
+
+
+def test_cut_sheet_refuses_out_of_range_parameters(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+
+    for bad in (0.0, 1.0, -0.5, 2.0):
+        assert not blocking.cut_sheet(0, bad)
+    assert blocking.nb_cells(3) == 1
+
+
+def test_cut_sheet_rejects_an_unknown_edge_index(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+
+    with pytest.raises(IndexError):
+        blocking.cut_sheet(999, 0.5)
+    with pytest.raises(IndexError):
+        blocking.sheet_edges(-1)

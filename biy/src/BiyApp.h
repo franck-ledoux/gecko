@@ -27,7 +27,8 @@ namespace gecko::biy {
      */
     enum class MouseMode {
         Camera, ///< Polyscope's usual navigation: rotate/pan/zoom the view.
-        Edit    ///< Navigation off; dragging picks up and moves a block corner.
+        Edit,   ///< Navigation off; dragging picks up and moves a block corner.
+        Cut     ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
     };
 
     /**
@@ -161,6 +162,15 @@ namespace gecko::biy {
         void draw_panel();
         /** @brief Starts/continues/ends a corner drag from the current mouse state. */
         void handle_drag();
+        /** @brief Tracks what the cursor is over in Cut mode, previewing the sheet it would cut, and
+         * performs the cut on click. */
+        void handle_cut();
+        /** @brief Re-reads which edge the cursor is over and rebuilds the cut preview from it.
+         * @param screen_coords Current mouse position. */
+        void update_cut_hover(glm::vec2 screen_coords);
+        /** @brief Registers (or removes, when nothing is hovered) the sheet highlight and the markers
+         * showing where the cut would land. */
+        void refresh_cut_preview();
         /** @brief Reprojects screen coordinates onto the camera-facing plane through @p AAnchor. */
         static glm::vec3 screen_to_plane(glm::vec2 screen_coords, const glm::vec3 &anchor);
 
@@ -177,6 +187,18 @@ namespace gecko::biy {
         MouseMode m_mode = MouseMode::Camera;
         /** @brief Node id of the corner currently being dragged, if any. */
         std::optional<int> m_dragged_node;
+        /** @brief Edge the cursor is currently over in Cut mode, as a position in the order
+         * `BlockingFacade::sheet_edges()` speaks, or unset when the cursor is over no edge. */
+        std::optional<int> m_hover_edge;
+        /** @brief The sheet that edge belongs to, as those same positions — empty when it cannot be
+         * cut homogeneously, which is itself worth showing rather than hiding. */
+        std::vector<int> m_sheet;
+        /** @brief Where along the hovered edge the cut would fall. Driven by the cursor, and editable
+         * as a number in the panel for a cut that has to land on an exact value. */
+        float m_cut_param = 0.5f;
+        /** @brief Last position the cut hover was computed for, so a still cursor costs nothing:
+         * each hover test is a full Polyscope pick, which is a render pass. */
+        glm::vec2 m_last_cut_mouse{-1.0f, -1.0f};
         /** @brief Subdivisions used when displaying the blocking (1 = raw block structure). */
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */

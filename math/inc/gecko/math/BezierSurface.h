@@ -3,6 +3,9 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <utility>
+
+#include <gecko/math/BezierCurve.h>
 
 namespace gecko {
     /**
@@ -92,6 +95,54 @@ namespace gecko {
          * @see value()
          */
         TPointT operator()(double AU, double AV) const { return value(AU, AV); }
+
+        /**
+         * @brief Splits the surface along `u = AU` into the 2 surfaces of the same degree covering
+         * `u` in `[0, AU]` and `[AU, 1]`.
+         *
+         * Exact, like the `BezierCurve::split()` it is built from: a tensor-product surface is a
+         * Bezier curve in `u` whose control points are themselves curves in `v`, so subdividing every
+         * `u`-fiber of the control grid subdivides the surface —
+         * `first.value(u, v) == value(u * AU, v)` up to round-off, and the 2 halves share their
+         * junction isoparametric curve exactly.
+         *
+         * @param AU Split parameter, strictly inside `(0, 1)` (see `BezierCurve::split()`).
+         * @return The `[0, AU]` half first, the `[AU, 1]` half second.
+         */
+        std::pair<BezierSurface, BezierSurface> split_u(double AU) const {
+            ControlGrid low{};
+            ControlGrid high{};
+            for (std::size_t j = 0; j < NumControlPoints; ++j) {
+                std::array<TPointT, NumControlPoints> fiber{};
+                for (std::size_t i = 0; i < NumControlPoints; ++i) {
+                    fiber[i] = m_control_points[i][j];
+                }
+                const auto [l, h] = BezierCurve<TN, TPointT>(fiber).split(AU);
+                for (std::size_t i = 0; i < NumControlPoints; ++i) {
+                    low[i][j] = l[i];
+                    high[i][j] = h[i];
+                }
+            }
+            return {BezierSurface(low), BezierSurface(high)};
+        }
+
+        /**
+         * @brief Splits the surface along `v = AV` into the 2 surfaces of the same degree covering
+         * `v` in `[0, AV]` and `[AV, 1]`.
+         * @param AV Split parameter, strictly inside `(0, 1)` (see `BezierCurve::split()`).
+         * @return The `[0, AV]` half first, the `[AV, 1]` half second.
+         * @see split_u() for why this is exact rather than a refit.
+         */
+        std::pair<BezierSurface, BezierSurface> split_v(double AV) const {
+            ControlGrid low{};
+            ControlGrid high{};
+            for (std::size_t i = 0; i < NumControlPoints; ++i) {
+                const auto [l, h] = BezierCurve<TN, TPointT>(m_control_points[i]).split(AV);
+                low[i] = l.control_points();
+                high[i] = h.control_points();
+            }
+            return {BezierSurface(low), BezierSurface(high)};
+        }
 
     private:
         /** @brief The `(TN+1) x (TN+1)` grid storing the control points. */
