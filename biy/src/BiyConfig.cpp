@@ -70,6 +70,11 @@ namespace gecko::biy {
             read_color(j, "corner_color_on_volume", config.corner_color_on_volume);
             read_double(j, "model_transparency", config.model_transparency);
             read_double(j, "panel_width", config.panel_width);
+            read_double(j, "gizmo_size", config.gizmo_size);
+            read_double(j, "gizmo_dot_radius", config.gizmo_dot_radius);
+            read_color(j, "gizmo_color_x", config.gizmo_color_x);
+            read_color(j, "gizmo_color_y", config.gizmo_color_y);
+            read_color(j, "gizmo_color_z", config.gizmo_color_z);
             read_color(j, "geometry_volume_color", config.geometry_volume_color);
             read_color(j, "geometry_surface_color", config.geometry_surface_color);
             read_color(j, "geometry_curve_color", config.geometry_curve_color);

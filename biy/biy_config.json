@@ -1,6 +1,12 @@
 {
   "panel_width": 305,
 
+  "gizmo_size": 90,
+  "gizmo_dot_radius": 7,
+  "gizmo_color_x": [0.85, 0.2, 0.2],
+  "gizmo_color_y": [0.25, 0.7, 0.25],
+  "gizmo_color_z": [0.2, 0.45, 0.9],
+
   "geometry_volume_color": [0.55, 0.6, 0.7],
   "geometry_surface_color": [0.35, 0.5, 0.8],
   "geometry_curve_color": [0.15, 0.15, 0.2],

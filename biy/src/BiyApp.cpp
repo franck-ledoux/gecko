@@ -475,6 +475,7 @@ namespace gecko::biy {
         // Kept from Polyscope's own set: a separate window reporting what was last clicked, which
         // is also how corners get picked up. Its main panel and structure list are replaced above.
         polyscope::buildPickGui();
+        draw_gizmo();
 
         handle_drag();
     }
@@ -563,6 +564,103 @@ namespace gecko::biy {
         // See this panel's own reserved-strip comment above: this is what actually makes
         // buildPickGui() start below the strip rather than back at the top of the column.
         polyscope::internal::lastRightSideFreeY = margin + height;
+    }
+
+    void BiyApp::draw_gizmo() {
+        // A flat 2D compass rather than a real 3D widget, deliberately: "bottom-right of the
+        // screen" is a screen-space request, and a world-space object anchored to the camera would
+        // need careful per-frame offset/scale math to stay pinned there under every zoom level
+        // without ever clipping through nearby scene geometry. Projecting the 6 world axes through
+        // the camera's own right/up/look basis (getCameraFrame()) onto a small ImGui canvas gets the
+        // same "always shows current orientation" property with none of that risk, at the cost of
+        // not being real depth-tested geometry — approximated below by depth-sorting and shrinking
+        // the farther dots instead.
+        const float scale = polyscope::options::uiScale;
+        const float size = static_cast<float>(m_config.gizmo_size) * scale;
+        const float margin = polyscope::internal::imguiStackMargin;
+        const ImVec2 window_pos(polyscope::view::windowWidth - size - margin,
+                                polyscope::view::windowHeight - size - margin);
+
+        ImGui::SetNextWindowPos(window_pos);
+        ImGui::SetNextWindowSize(ImVec2(size, size));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::Begin("##orientation_gizmo",
+                     nullptr,
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                         ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground);
+
+        const auto [look, up, right] = polyscope::view::getCameraParametersForCurrentView().getCameraFrame();
+        const ImVec2 center(window_pos.x + size * 0.5f, window_pos.y + size * 0.5f);
+        const float radius = size * 0.35f;
+        const float dot_radius = static_cast<float>(m_config.gizmo_dot_radius) * scale;
+
+        struct Axis {
+            glm::vec3 dir;
+            const char *label;
+            const std::array<float, 3> &color;
+            bool positive;
+        };
+        const std::array<Axis, 6> axes{{{{1, 0, 0}, "X", m_config.gizmo_color_x, true},
+                                        {{-1, 0, 0}, "", m_config.gizmo_color_x, false},
+                                        {{0, 1, 0}, "Y", m_config.gizmo_color_y, true},
+                                        {{0, -1, 0}, "", m_config.gizmo_color_y, false},
+                                        {{0, 0, 1}, "Z", m_config.gizmo_color_z, true},
+                                        {{0, 0, -1}, "", m_config.gizmo_color_z, false}}};
+
+        // Farthest-from-camera first, so nearer dots paint over farther ones where they overlap —
+        // the same painter's-algorithm depth cue a real 3D gizmo gets from the depth buffer.
+        std::array<int, 6> order{0, 1, 2, 3, 4, 5};
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            return glm::dot(axes[a].dir, look) > glm::dot(axes[b].dir, look);
+        });
+
+        ImDrawList *draw_list = ImGui::GetWindowDrawList();
+        for (const int i : order) {
+            const Axis &axis = axes[i];
+            const float depth = glm::dot(axis.dir, look); // >0 into the screen, <0 toward the viewer
+            const ImVec2 dot_pos(center.x + glm::dot(axis.dir, right) * radius,
+                                 center.y - glm::dot(axis.dir, up) * radius);
+            const float dot_size = dot_radius * (1.15f - 0.35f * depth);
+            const ImU32 color =
+                ImGui::ColorConvertFloat4ToU32(ImVec4(axis.color[0], axis.color[1], axis.color[2], 1.0f));
+
+            ImGui::SetCursorScreenPos(ImVec2(dot_pos.x - dot_size, dot_pos.y - dot_size));
+            ImGui::PushID(i);
+            ImGui::InvisibleButton("##axis", ImVec2(2 * dot_size, 2 * dot_size));
+            if (ImGui::IsItemClicked()) {
+                fly_to_axis_view(axis.dir);
+            }
+            ImGui::PopID();
+
+            if (axis.positive) {
+                draw_list->AddCircleFilled(dot_pos, dot_size, color);
+                const ImVec2 label_size = ImGui::CalcTextSize(axis.label);
+                draw_list->AddText(ImVec2(dot_pos.x - label_size.x * 0.5f, dot_pos.y - label_size.y * 0.5f),
+                                   IM_COL32_BLACK,
+                                   axis.label);
+            } else {
+                draw_list->AddCircle(dot_pos, dot_size, color, 0, 1.5f * scale);
+            }
+        }
+
+        ImGui::End();
+        ImGui::PopStyleColor();
+    }
+
+    void BiyApp::fly_to_axis_view(const glm::vec3 &axis_dir) {
+        const glm::vec3 target = polyscope::state::center();
+        const float distance = 1.5f * polyscope::state::lengthScale;
+        // Same degenerate case computeHomeView() itself guards against: lookAt() needs an up vector
+        // that isn't parallel to the view direction. Looking along the scene's own up axis is
+        // exactly that case (e.g. the +Y view when Y is up), so the scene's front axis stands in for
+        // up there instead.
+        const glm::vec3 scene_up = polyscope::view::getUpVec();
+        const bool degenerate = std::abs(glm::dot(glm::normalize(axis_dir), glm::normalize(scene_up))) > 0.99f;
+        const glm::vec3 up_for_view = degenerate ? polyscope::view::getFrontVec() : scene_up;
+
+        polyscope::view::lookAt(target + axis_dir * distance, target, up_for_view, true);
     }
 
     void BiyApp::draw_panel() {

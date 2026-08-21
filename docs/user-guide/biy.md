@@ -90,6 +90,20 @@ fine enough to show curvature whatever the mesh is set to. It is capped at **20*
 blocking's mesh grows cubically with it — 20 is already 8000 hexes per block, and the window bogs
 down before anything else does.
 
+## Orientation gizmo
+
+A small compass sits bottom-right of the 3D view: 6 dots, one per world axis, projected through the
+current camera onto a flat 2D canvas — red for X, green for Y, blue for Z, a filled dot and letter
+for the positive direction, a hollow ring for the negative one. It updates every frame, so it
+reflects the scene's actual orientation continuously, including while the view is being dragged
+with the mouse — not just after clicking one of its own dots.
+
+Click any dot to fly the camera to look straight down that axis, centered on the scene, at the same
+framing distance `Reset view` uses. It is a flat compass rather than a real 3D widget on purpose:
+"bottom-right of the screen" is a screen-space request, and pinning actual 3D geometry to a screen
+corner under every zoom level, without it ever clipping through nearby scene content, needs far more
+care than projecting 6 directions through the camera's own basis each frame.
+
 ## Classification colors
 
 Corners, block edges **and** block faces are all colored by what `classify()` put them on, so the
@@ -248,6 +262,8 @@ is a copy of the defaults:
 | Key                                                                                               | Meaning                                                                                  |
 | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `panel_width`                                                                                     | Width of biy's 2 side panels, before UI scaling                                          |
+| `gizmo_size`, `gizmo_dot_radius`                                                                  | Size of the orientation gizmo's canvas, and of a dot at rest                             |
+| `gizmo_color_x`, `gizmo_color_y`, `gizmo_color_z`                                                 | Color of each axis's dots and label                                                      |
 | `geometry_volume_color`                                                                           | Color of the model's volumes                                                             |
 | `geometry_surface_color`                                                                          | Color of the model's surfaces                                                            |
 | `geometry_curve_color`, `geometry_curve_radius`                                                   | Color and thickness of the model's curves                                                |

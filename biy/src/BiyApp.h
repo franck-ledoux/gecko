@@ -140,6 +140,16 @@ namespace gecko::biy {
          * Geometry / Blocking / Mesh tree. */
         void draw_scene_panel();
         /**
+         * @brief Draws the orientation gizmo: a small always-on-top compass, bottom-right of the 3D
+         * view, showing the 6 world axes projected through the current camera frame — so the scene's
+         * orientation reads at a glance, however the view has been rotated — with each axis dot
+         * clickable to fly the camera to look along it.
+         */
+        void draw_gizmo();
+        /** @brief Flies the camera to look along @p axis_dir at the scene's center, at Polyscope's
+         * own home-view framing distance. */
+        static void fly_to_axis_view(const glm::vec3 &axis_dir);
+        /**
          * @brief Draws one Scene subsection: a named row delegating to the structure's own
          * Polyscope UI, so the usual visibility controls come from Polyscope itself.
          * @param label The subsection's name.

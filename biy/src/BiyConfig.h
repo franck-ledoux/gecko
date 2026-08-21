@@ -43,6 +43,19 @@ namespace gecko::biy {
          * Polyscope gives the panels this replaces. */
         double panel_width = 305.0;
 
+        /** @brief Side length of the orientation gizmo's square canvas, bottom-right of the 3D view,
+         * in pixels before UI scaling. */
+        double gizmo_size = 90.0;
+        /** @brief Radius of a gizmo axis dot at rest, before UI scaling and the depth-based scaling
+         * applied to the nearer/farther axis (see `BiyApp::draw_gizmo()`). */
+        double gizmo_dot_radius = 7.0;
+        /** @brief Color of the X axis dots/label. */
+        std::array<float, 3> gizmo_color_x{0.85f, 0.2f, 0.2f};
+        /** @brief Color of the Y axis dots/label. */
+        std::array<float, 3> gizmo_color_y{0.25f, 0.7f, 0.25f};
+        /** @brief Color of the Z axis dots/label. */
+        std::array<float, 3> gizmo_color_z{0.2f, 0.45f, 0.9f};
+
         /** @brief Color of the geometric model's volumes, drawn as their boundary. */
         std::array<float, 3> geometry_volume_color{0.55f, 0.6f, 0.7f};
         /** @brief Color of the geometric model's surfaces. */
