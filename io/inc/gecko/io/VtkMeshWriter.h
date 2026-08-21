@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <gecko/mesh/UnstructuredMesh.h>
 
@@ -57,17 +58,27 @@ namespace gecko::io {
          * grouping elements by topological dimension the way Gmsh's `$Elements` sections do, so
          * edges, faces and cells are all written into the same 2 arrays, in that order. A node
          * carrying no edge/face/cell of its own is still present in `POINTS` but contributes no
-         * `CELLS` entry (VTK legacy has no standalone "point element"). No group/tag data is written
-         * (VTK legacy's optional `POINT_DATA`/`CELL_DATA` scalar sections are out of scope for this
-         * export — see issue #22's "VTK legacy export of the block structure" ask, satisfied by
-         * `write(path, blocking.to_mesh(1))`: 1 subdivision reproduces exactly the block corners,
-         * one quad/hex per top-cell).
+         * `CELLS` entry (VTK legacy has no standalone "point element"). No `CELL_DATA` is written
+         * (out of scope for this export — see issue #22's "VTK legacy export of the block structure"
+         * ask, satisfied by `write(path, blocking.to_mesh(1))`: 1 subdivision reproduces exactly the
+         * block corners, one quad/hex per top-cell).
+         *
+         * @p ANodeIntVariables optionally names `Variable<Int>` node variables already registered on
+         * @p mesh (see `UnstructuredMesh::add_variable`) to write as `POINT_DATA`/`SCALARS` sections —
+         * e.g. `Blocking::NODE_CLASSIFICATION_DIM_VARIABLE`/`NODE_CLASSIFICATION_TAG_VARIABLE`. A name
+         * not actually present on @p mesh is silently skipped, so callers can pass a fixed list
+         * without checking each one first. Nothing is written when the list is empty or none of its
+         * names are present — this writer stays a general VTK legacy exporter, agnostic of what any
+         * particular variable name means; it is the caller's job to know which variables exist.
          *
          * @param path Path of the .vtk file to write (overwritten if it already exists).
          * @param mesh Mesh structure to write.
+         * @param ANodeIntVariables Names of `Variable<Int>` node variables to write as `POINT_DATA`.
          * @throw std::runtime_error if the file cannot be opened for writing.
          */
-        static void write(const std::string &path, const UnstructuredMesh<TopologyTraits> &mesh) {
+        static void write(const std::string &path,
+                          const UnstructuredMesh<TopologyTraits> &mesh,
+                          const std::vector<std::string> &ANodeIntVariables = {}) {
             std::ofstream file(path);
             if (!file) {
                 throw std::runtime_error("gecko::io::VtkMeshWriter::write: cannot open file '" + path +
@@ -122,6 +133,21 @@ namespace gecko::io {
             }
             for (UInt i = 0; i < mesh.nb_cells(); ++i) {
                 file << VtkElementTraits<TopologyTraits>::cell_type << "\n";
+            }
+
+            bool wrote_point_data_header = false;
+            for (const std::string &name : ANodeIntVariables) {
+                if (!mesh.template has_variable<CellType::Node>(name)) continue;
+                if (!wrote_point_data_header) {
+                    file << "POINT_DATA " << mesh.nb_nodes() << "\n";
+                    wrote_point_data_header = true;
+                }
+                const auto &values = mesh.template get_variable<Int, CellType::Node>(name);
+                file << "SCALARS " << name << " int 1\n";
+                file << "LOOKUP_TABLE default\n";
+                for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+                    file << values[i] << "\n";
+                }
             }
         }
     };

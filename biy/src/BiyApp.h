@@ -9,6 +9,10 @@
 
 #include <glm/glm.hpp>
 
+namespace polyscope {
+    class Structure;
+} // namespace polyscope
+
 #include "BiyConfig.h"
 #include "BlockingFacade.h"
 #include "GeomModelFacade.h"
@@ -127,6 +131,32 @@ namespace gecko::biy {
                                  bool visible);
         /** @brief Creates a hex block spanning the model's bounding box, scaled by @p AMargin. */
         void create_bounding_box(double margin);
+        /** @brief Registers (or removes) the mesh the blocking generates, at `m_subdivisions`. */
+        void refresh_mesh();
+        /** @brief Draws the "BIY operations" window: the parts of Polyscope's own panel worth
+         * keeping, then biy's controls. */
+        void draw_operations_panel();
+        /** @brief Draws the "Scene" window, which replaces Polyscope's "Structures" panel with a
+         * Geometry / Blocking / Mesh tree. */
+        void draw_scene_panel();
+        /**
+         * @brief Draws the orientation gizmo: a small always-on-top compass, bottom-right of the 3D
+         * view, showing the 6 world axes projected through the current camera frame — so the scene's
+         * orientation reads at a glance, however the view has been rotated — with each axis dot
+         * clickable to fly the camera to look along it.
+         */
+        void draw_gizmo();
+        /** @brief Flies the camera to look along @p axis_dir at the scene's center, at Polyscope's
+         * own home-view framing distance. */
+        static void fly_to_axis_view(const glm::vec3 &axis_dir);
+        /**
+         * @brief Draws one Scene subsection: a named row delegating to the structure's own
+         * Polyscope UI, so the usual visibility controls come from Polyscope itself.
+         * @param label The subsection's name.
+         * @param structure The structure to expose, or nullptr when the model has none of that kind
+         *        (a boundary-representation model has no volume, say), which draws a greyed row.
+         */
+        static void draw_scene_entry(const char *label, polyscope::Structure *structure);
         /** @brief Draws the button panel. Assumes the ImGui frame is already set up. */
         void draw_panel();
         /** @brief Starts/continues/ends a corner drag from the current mouse state. */
@@ -151,6 +181,8 @@ namespace gecko::biy {
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */
         bool m_show_block_edges = true;
+        /** @brief Whether the generated mesh is currently drawn. */
+        bool m_show_mesh = false;
         /** @brief Whether each kind of control display is currently drawn. */
         bool m_show_edge_control = false;
         /** @copydoc m_show_edge_control */

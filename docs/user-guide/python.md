@@ -87,6 +87,9 @@ print(blocking.nb_cells(2), blocking.is_valid_topology())
 if blocking.can_delete_face(face_a):
     blocking.delete_face(face_a)
 
+# The exported mesh's nodes also carry 2 POINT_DATA scalars, "classification_dim"/"classification_tag"
+# (-1/-1 when unclassified) — the same dim/tag pair node_classification_dims() reports, for every
+# node the subdivision generates, not just the original block corners.
 blocking.write_vtk(subdivisions=4, path="blocking.vtk")
 ```
 

@@ -66,6 +66,22 @@ namespace gecko {
         using Node = typename Map::template Attribute_handle<0>::type;
 
         /**
+         * @brief Name of the per-node `Variable<Int>` `to_mesh()` writes giving the dimension of the
+         * geometric entity each mesh node is classified on: 0 vertex, 1 curve, 2 surface, 3 volume,
+         * or -1 if unclassified. Every mesh node inherits the classification of the block structure
+         * cell it was sampled from — a corner node's own, an edge/face/block-interior point's
+         * generating edge/face/block (see `CellData.h`'s `geom_targets`, and `node_classification_dims()`'s
+         * matching "first target speaks for all" convention for a node classified on several entities
+         * at once).
+         */
+        static constexpr std::string_view NODE_CLASSIFICATION_DIM_VARIABLE = "classification_dim";
+        /**
+         * @brief Name of the per-node `Variable<Int>` `to_mesh()` writes giving the `entity_tag()` of
+         * the geometric entity named by `NODE_CLASSIFICATION_DIM_VARIABLE`, or -1 if unclassified.
+         */
+        static constexpr std::string_view NODE_CLASSIFICATION_TAG_VARIABLE = "classification_tag";
+
+        /**
          * @brief Per-dimension distance thresholds for snapping a blocking onto its geometric model.
          *
          * Three separate values rather than one because the scales genuinely differ: 2 distinct
@@ -362,6 +378,10 @@ namespace gecko {
          * quad/hex per top-cell, at the block corners) — see `io::VtkMeshWriter`'s own doc comment
          * for the intended use of that as the "block structure" VTK export.
          *
+         * Every mesh node also gets 2 `Variable<Int>` written under `NODE_CLASSIFICATION_DIM_VARIABLE`
+         * and `NODE_CLASSIFICATION_TAG_VARIABLE`, inheriting the classification of whichever
+         * Node/Edge/Face/Block attribute it was sampled from — see those constants' own doc.
+         *
          * @param ASubdivisions Number of intervals to subdivide every parametric axis into; must be
          *        >= 1. Uniform across the whole blocking (a documented V1 limitation — no
          *        per-block/per-edge subdivision counts, no non-conformal adjacency).
@@ -371,26 +391,31 @@ namespace gecko {
             assert(ASubdivisions >= 1 && "Blocking::to_mesh: ASubdivisions must be >= 1");
             const std::size_t s = ASubdivisions;
             UnstructuredMesh<CubicTraits> mesh;
+            Variable<Int> &dims =
+                mesh.template add_variable<Int, CellType::Node>(std::string(NODE_CLASSIFICATION_DIM_VARIABLE));
+            Variable<Int> &tags =
+                mesh.template add_variable<Int, CellType::Node>(std::string(NODE_CLASSIFICATION_TAG_VARIABLE));
 
             std::map<Node, NodeId> node_ids;
             for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
                  it != itend;
                  ++it) {
                 node_ids[it] = mesh.add_node(it->info().point);
+                record_node_classification(dims, tags, node_ids[it], it->info().geom_targets);
             }
 
             std::map<Edge, EdgeChain> edge_chains;
             for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
                  it != itend;
                  ++it) {
-                edge_chains[it] = build_edge_chain(it, node_ids, mesh, s);
+                edge_chains[it] = build_edge_chain(it, node_ids, mesh, dims, tags, s);
             }
 
             std::map<Face, FaceGrid> face_grids;
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                FaceGrid fg = build_face_grid(it, node_ids, edge_chains, mesh, s);
+                FaceGrid fg = build_face_grid(it, node_ids, edge_chains, mesh, dims, tags, s);
                 if (std::find(m_hex_faces.begin(), m_hex_faces.end(), it) == m_hex_faces.end()) {
                     for (std::size_t i = 0; i < s; ++i) {
                         for (std::size_t j = 0; j < s; ++j) {
@@ -404,7 +429,7 @@ namespace gecko {
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                emit_hex_cells(it, node_ids, edge_chains, face_grids, mesh, s);
+                emit_hex_cells(it, node_ids, edge_chains, face_grids, mesh, dims, tags, s);
             }
 
             return mesh;
@@ -1432,18 +1457,45 @@ namespace gecko {
         }
 
         /**
+         * @brief Writes one mesh node's classification into `ADims`/`ATags`: the dimension and tag
+         * of @p ATargets' first entry (see `NODE_CLASSIFICATION_DIM_VARIABLE`'s doc for the "first
+         * target speaks for all" convention, also used by `BlockingFacade`'s `classification_dim()`),
+         * or -1/-1 when @p ATargets is empty (unclassified).
+         * @param ADims The `NODE_CLASSIFICATION_DIM_VARIABLE` variable, modified in place.
+         * @param ATags The `NODE_CLASSIFICATION_TAG_VARIABLE` variable, modified in place.
+         * @param AId The mesh node to record classification for.
+         * @param ATargets The owning block-structure cell's `geom_targets`.
+         */
+        static void record_node_classification(Variable<Int> &ADims,
+                                               Variable<Int> &ATags,
+                                               NodeId AId,
+                                               const std::vector<std::pair<GroupDim, Int>> &ATargets) {
+            if (ATargets.empty()) {
+                ADims[AId.value] = -1;
+                ATags[AId.value] = -1;
+            } else {
+                ADims[AId.value] = static_cast<Int>(ATargets.front().first);
+                ATags[AId.value] = ATargets.front().second;
+            }
+        }
+
+        /**
          * @brief Builds one edge's `to_mesh()` node-id chain: its 2 endpoints reuse the already
          * mapped corner node ids, its `S-1` interior points are newly added mesh nodes sampled
-         * directly from the edge's own curve.
+         * directly from the edge's own curve, classified on `AEdge` itself.
          * @param AEdge The edge to sample.
          * @param ANodeIds Already-populated node-attribute-to-mesh-id map (its corner endpoints).
          * @param AMesh The mesh being built, appended to for interior points.
+         * @param ADims The `NODE_CLASSIFICATION_DIM_VARIABLE` variable, extended for interior points.
+         * @param ATags The `NODE_CLASSIFICATION_TAG_VARIABLE` variable, extended for interior points.
          * @param AS Subdivisions per axis.
          * @return The built chain.
          */
         EdgeChain build_edge_chain(Edge AEdge,
                                    const std::map<Node, NodeId> &ANodeIds,
                                    UnstructuredMesh<CubicTraits> &AMesh,
+                                   Variable<Int> &ADims,
+                                   Variable<Int> &ATags,
                                    std::size_t AS) {
             const Dart d = AEdge->dart();
             const Node na = m_cmap.template attribute<0>(d);
@@ -1459,6 +1511,7 @@ namespace gecko {
             for (std::size_t i = 1; i < AS; ++i) {
                 const double t = static_cast<double>(i) / static_cast<double>(AS);
                 chain.ids[i] = AMesh.add_node(AEdge->info().curve.value(t));
+                record_node_classification(ADims, ATags, chain.ids[i], AEdge->info().geom_targets);
             }
             return chain;
         }
@@ -1473,6 +1526,8 @@ namespace gecko {
          * @param ANodeIds Already-populated node-attribute-to-mesh-id map.
          * @param AEdgeChains Already-populated edge-attribute-to-chain map (its 4 boundary edges).
          * @param AMesh The mesh being built, appended to for interior points.
+         * @param ADims The `NODE_CLASSIFICATION_DIM_VARIABLE` variable, extended for interior points.
+         * @param ATags The `NODE_CLASSIFICATION_TAG_VARIABLE` variable, extended for interior points.
          * @param AS Subdivisions per axis.
          * @return The built grid.
          */
@@ -1480,6 +1535,8 @@ namespace gecko {
                                  const std::map<Node, NodeId> &ANodeIds,
                                  const std::map<Edge, EdgeChain> &AEdgeChains,
                                  UnstructuredMesh<CubicTraits> &AMesh,
+                                 Variable<Int> &ADims,
+                                 Variable<Int> &ATags,
                                  std::size_t AS) {
             FaceGrid fg;
             const Dart fd = AFace->dart();
@@ -1511,6 +1568,7 @@ namespace gecko {
                     const double u = static_cast<double>(i) / static_cast<double>(AS);
                     const double v = static_cast<double>(j) / static_cast<double>(AS);
                     fg.grid[i][j] = AMesh.add_node(AFace->info().surface.value(u, v));
+                    record_node_classification(ADims, ATags, fg.grid[i][j], AFace->info().geom_targets);
                 }
             }
             return fg;
@@ -1697,6 +1755,8 @@ namespace gecko {
          * @param AEdgeChains Already-populated edge-attribute-to-chain map.
          * @param AFaceGrids Already-populated face-attribute-to-grid map (its 6 boundary faces).
          * @param AMesh The mesh being built, appended to for interior points and sub-cells.
+         * @param ADims The `NODE_CLASSIFICATION_DIM_VARIABLE` variable, extended for interior points.
+         * @param ATags The `NODE_CLASSIFICATION_TAG_VARIABLE` variable, extended for interior points.
          * @param AS Subdivisions per axis.
          */
         void emit_hex_cells(Block ABlock,
@@ -1704,6 +1764,8 @@ namespace gecko {
                             const std::map<Edge, EdgeChain> &AEdgeChains,
                             const std::map<Face, FaceGrid> &AFaceGrids,
                             UnstructuredMesh<CubicTraits> &AMesh,
+                            Variable<Int> &ADims,
+                            Variable<Int> &ATags,
                             std::size_t AS) {
             const Dart bd = ABlock->dart();
             std::array<Node, 8> local_nodes{};
@@ -1756,6 +1818,7 @@ namespace gecko {
                         const double v = static_cast<double>(j) / static_cast<double>(AS);
                         const double w = static_cast<double>(k) / static_cast<double>(AS);
                         grid[i][j][k] = AMesh.add_node(ABlock->info().volume.value(u, v, w));
+                        record_node_classification(ADims, ATags, grid[i][j][k], ABlock->info().geom_targets);
                     }
                 }
             }

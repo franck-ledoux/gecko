@@ -1,6 +1,7 @@
 #include "BlockingFacade.h"
 
 #include <stdexcept>
+#include <type_traits>
 
 #include <gecko/io/VtkMeshWriter.h>
 
@@ -147,8 +148,12 @@ namespace gecko::python {
         check_subdivisions(subdivisions, "Blocking.write_vtk");
         std::visit(
             [subdivisions, &path](auto &impl) {
+                using Blocking = std::decay_t<decltype(impl.blocking)>;
                 const auto mesh = impl.blocking.to_mesh(static_cast<SizeT>(subdivisions));
-                io::VtkMeshWriter<CubicTraits>::write(path, mesh);
+                io::VtkMeshWriter<CubicTraits>::write(path,
+                                                      mesh,
+                                                      {std::string(Blocking::NODE_CLASSIFICATION_DIM_VARIABLE),
+                                                       std::string(Blocking::NODE_CLASSIFICATION_TAG_VARIABLE)});
             },
             m_impl);
     }

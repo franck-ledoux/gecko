@@ -288,6 +288,61 @@ TEST_CASE("cubic_hex_block_to_mesh_reflects_curved_geometry", "[BlockTestSuite]"
     REQUIRE(found_bulged_node);
 }
 
+TEST_CASE("quad_block_to_mesh_propagates_node_classification_from_owning_cells", "[BlockTestSuite]") {
+    // Classification is assigned by hand rather than through classify()'s geometric snapping: this
+    // isolates to_mesh()'s own propagation logic (the thing this test exists for) from classify()'s
+    // separate, already-covered snapping behavior (see blocking_classification_tests.cpp).
+    const FacetedGeometry geom = make_minimal_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    const std::array<Point3d, 4> corners = {
+        Point3d(0.0, 0.0, 0.0), Point3d(2.0, 0.0, 0.0), Point3d(2.0, 2.0, 0.0), Point3d(0.0, 2.0, 0.0)};
+    auto face = blocking.create_quad_block(corners);
+
+    auto node_it = blocking.cmap().attributes<0>().begin();
+    node_it->info().geom_targets = {{GroupDim::Dim0, 7}};
+
+    auto edge_it = blocking.cmap().attributes<1>().begin();
+    edge_it->info().geom_targets = {{GroupDim::Dim1, 11}};
+
+    face->info().geom_targets = {{GroupDim::Dim2, 1}};
+
+    const SizeT s = 2;
+    auto mesh = blocking.to_mesh(s);
+    auto &dims = mesh.get_variable<Int, CellType::Node>(
+        std::string(Blocking<FacetedGeometry>::NODE_CLASSIFICATION_DIM_VARIABLE));
+    auto &tags = mesh.get_variable<Int, CellType::Node>(
+        std::string(Blocking<FacetedGeometry>::NODE_CLASSIFICATION_TAG_VARIABLE));
+    REQUIRE(dims.size() == mesh.nb_nodes());
+    REQUIRE(tags.size() == mesh.nb_nodes());
+
+    // s=2 gives exactly 1 interior sample point per edge (dim0=1) and 1 for the face (dim0=1,1);
+    // the tagged corner/edge/face must each contribute exactly that many matching nodes, and every
+    // other node (the 3 untouched corners, 3 untouched edges' interior points) must read -1/-1.
+    int classified_as_vertex = 0, classified_as_curve = 0, classified_as_surface = 0, unclassified = 0;
+    for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+        const Int dim = dims[i];
+        const Int tag = tags[i];
+        if (dim == -1) {
+            REQUIRE(tag == -1);
+            ++unclassified;
+        } else if (dim == static_cast<Int>(GroupDim::Dim0)) {
+            REQUIRE(tag == 7);
+            ++classified_as_vertex;
+        } else if (dim == static_cast<Int>(GroupDim::Dim1)) {
+            REQUIRE(tag == 11);
+            ++classified_as_curve;
+        } else {
+            REQUIRE(dim == static_cast<Int>(GroupDim::Dim2));
+            REQUIRE(tag == 1);
+            ++classified_as_surface;
+        }
+    }
+    REQUIRE(classified_as_vertex == 1);
+    REQUIRE(classified_as_curve == 1);
+    REQUIRE(classified_as_surface == 1);
+    REQUIRE(unclassified == static_cast<int>(mesh.nb_nodes()) - 3);
+}
+
 TEST_CASE("hex_block_to_mesh_at_s1_can_be_exported_to_vtk_legacy", "[BlockTestSuite]") {
     // Issue #22's "VTK legacy export of the block structure" ask: to_mesh(1) reproduces exactly
     // the coarse block topology (block corners, one hex per top-cell), suitable for VtkMeshWriter.
@@ -319,4 +374,41 @@ TEST_CASE("hex_block_to_mesh_at_s1_can_be_exported_to_vtk_legacy", "[BlockTestSu
     REQUIRE(content.find("POINTS 8 double") != std::string::npos);
     REQUIRE(content.find("CELLS 1 9") != std::string::npos);
     REQUIRE(content.find("\n12\n") != std::string::npos); // VTK_HEXAHEDRON
+}
+
+TEST_CASE("hex_block_to_mesh_classification_variables_can_be_exported_to_vtk_legacy", "[BlockTestSuite]") {
+    // The 2 node classification variables to_mesh() always writes are ordinary named node
+    // variables from VtkMeshWriter's point of view — this exercises passing their names through to
+    // write(), end to end from an unclassified block (everything reads -1/-1).
+    const FacetedGeometry geom = make_minimal_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    const std::array<Point3d, 8> corners = {Point3d(0.0, 0.0, 0.0),
+                                            Point3d(1.0, 0.0, 0.0),
+                                            Point3d(1.0, 1.0, 0.0),
+                                            Point3d(0.0, 1.0, 0.0),
+                                            Point3d(0.0, 0.0, 1.0),
+                                            Point3d(1.0, 0.0, 1.0),
+                                            Point3d(1.0, 1.0, 1.0),
+                                            Point3d(0.0, 1.0, 1.0)};
+    blocking.create_hex_block(corners);
+
+    const auto path = (std::filesystem::temp_directory_path() / "gecko_block_to_vtk_classification_test.vtk").string();
+    io::CubicVtkWriter::write(path,
+                              blocking.to_mesh(1),
+                              {std::string(Blocking<FacetedGeometry>::NODE_CLASSIFICATION_DIM_VARIABLE),
+                               std::string(Blocking<FacetedGeometry>::NODE_CLASSIFICATION_TAG_VARIABLE)});
+
+    std::ifstream in(path);
+    REQUIRE(in.is_open());
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    const std::string content = ss.str();
+    in.close();
+    std::filesystem::remove(path);
+
+    REQUIRE(content.find("POINT_DATA 8") != std::string::npos);
+    REQUIRE(content.find("SCALARS classification_dim int 1\nLOOKUP_TABLE default\n-1\n-1\n-1\n-1\n-1\n-1\n-1\n-1\n") !=
+            std::string::npos);
+    REQUIRE(content.find("SCALARS classification_tag int 1\nLOOKUP_TABLE default\n-1\n-1\n-1\n-1\n-1\n-1\n-1\n-1\n") !=
+            std::string::npos);
 }

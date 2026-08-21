@@ -1,6 +1,9 @@
 #include "GeomModelFacade.h"
 
+#include <algorithm>
+#include <map>
 #include <stdexcept>
+#include <unordered_map>
 
 #include <gecko/utils/Groups.h>
 
@@ -101,6 +104,92 @@ namespace gecko::python {
                             static_cast<int>(nodes[3].value)});
         }
         return tets;
+    }
+
+    std::vector<std::array<int, 3>> GeomModelFacade::volume_boundary_triangles() const {
+        const auto &mesh = m_model->mesh();
+
+        // Canonicalize each tet face by its sorted node ids, and count how many tets touch it: a
+        // face touched once is on the boundary, one touched twice is shared between two tets and
+        // therefore interior. std::array's own operator< (lexicographic) is enough to key a
+        // std::map on the canonical form, no custom hash needed.
+        std::map<std::array<int, 3>, std::pair<int, std::array<int, 3>>> face_count;
+        for (UInt c = 0; c < mesh.nb_cells(); ++c) {
+            const auto nodes = mesh.cell_nodes(CellId{c});
+            for (const auto &local : SimplicialTraits::Cell::FaceNodes) {
+                std::array<int, 3> face{static_cast<int>(nodes[local[0]].value),
+                                        static_cast<int>(nodes[local[1]].value),
+                                        static_cast<int>(nodes[local[2]].value)};
+                std::array<int, 3> key = face;
+                std::sort(key.begin(), key.end());
+                auto &[count, orientation] = face_count[key];
+                if (count == 0) orientation = face;
+                ++count;
+            }
+        }
+
+        std::vector<std::array<int, 3>> boundary;
+        for (const auto &[key, entry] : face_count) {
+            if (entry.first == 1) boundary.push_back(entry.second);
+        }
+        return boundary;
+    }
+
+    namespace {
+        /**
+         * @brief Walks every curve of @p AModel, compacting the backing mesh nodes they use into a
+         * dense numbering — so callers get a self-contained point list rather than indices into the
+         * whole mesh.
+         * @param AModel The model to walk.
+         * @param APositions Filled with one position per used node, in first-seen order.
+         * @param ASegments Filled with one index pair per curve segment.
+         */
+        void gather_curves(const FacetedGeometry &AModel,
+                           std::vector<std::array<double, 3>> *APositions,
+                           std::vector<std::array<int, 2>> *ASegments) {
+            const auto &mesh = AModel.mesh();
+            std::unordered_map<UInt, int> index_of;
+            const auto index = [&](NodeId node) {
+                const auto [it, inserted] = index_of.try_emplace(node.value, static_cast<int>(index_of.size()));
+                if (inserted && APositions != nullptr) {
+                    const auto &p = mesh.node(node);
+                    APositions->push_back({p.x(), p.y(), p.z()});
+                }
+                return it->second;
+            };
+
+            for (const auto &curve : AModel.curves()) {
+                for (const EdgeId e : curve.edges()) {
+                    const auto nodes = mesh.edge_nodes(e);
+                    const int a = index(nodes[0]);
+                    const int b = index(nodes[1]);
+                    if (ASegments != nullptr) ASegments->push_back({a, b});
+                }
+            }
+        }
+    } // namespace
+
+    std::vector<std::array<double, 3>> GeomModelFacade::curve_vertices() const {
+        std::vector<std::array<double, 3>> positions;
+        gather_curves(*m_model, &positions, nullptr);
+        return positions;
+    }
+
+    std::vector<std::array<int, 2>> GeomModelFacade::curve_segments() const {
+        std::vector<std::array<int, 2>> segments;
+        gather_curves(*m_model, nullptr, &segments);
+        return segments;
+    }
+
+    std::vector<std::array<double, 3>> GeomModelFacade::vertex_positions() const {
+        const auto &mesh = m_model->mesh();
+        std::vector<std::array<double, 3>> positions;
+        positions.reserve(m_model->nb_vertices());
+        for (const auto &vertex : m_model->vertices()) {
+            const auto &p = mesh.node(vertex.node());
+            positions.push_back({p.x(), p.y(), p.z()});
+        }
+        return positions;
     }
 
     std::vector<std::pair<int, int>> GeomModelFacade::group_entities(int id) const {

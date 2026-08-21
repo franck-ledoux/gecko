@@ -91,6 +91,46 @@ namespace gecko::python {
         [[nodiscard]] std::vector<std::array<int, 4>> mesh_tets() const;
 
         /**
+         * @brief Gets the outer boundary of the model's tetrahedral mesh — its "skin", as opposed to
+         * every one of its tets.
+         *
+         * A tetrahedron's face is on the boundary when it belongs to exactly one tet; one shared by
+         * two is interior. Computed directly from mesh_tets() rather than assumed to coincide with
+         * mesh_triangles() (the file's own tagged surface elements, which happen to match here for a
+         * well-formed CAD-derived `.msh` but aren't a structural guarantee), so a volume's skin is
+         * always right even for a mesh with tets but no surface tags of its own.
+         * @return One triple of mesh_vertices() indices per boundary face; empty if the model has no
+         *         tetrahedra.
+         */
+        [[nodiscard]] std::vector<std::array<int, 3>> volume_boundary_triangles() const;
+
+        /**
+         * @brief Gets the points making up the model's curves.
+         *
+         * Only the backing mesh nodes a curve actually passes through, not the whole mesh — the
+         * curves are a tiny part of it, and a caller drawing them should not have to carry (or
+         * render) every other node. Use with curve_segments(), which indexes into this.
+         * @return One (x,y,z) triple per point used by a curve.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> curve_vertices() const;
+
+        /**
+         * @brief Gets the segments making up the model's curves.
+         *
+         * Only the mesh edges belonging to a reconstructed curve, unlike mesh_triangles(), which
+         * returns the whole backing mesh: a `.msh` carries edges for its curves only.
+         * @return One pair of curve_vertices() indices per segment, curve after curve.
+         */
+        [[nodiscard]] std::vector<std::array<int, 2>> curve_segments() const;
+
+        /**
+         * @brief Gets the positions of the model's vertices — the geometric corner points, not the
+         * backing mesh's nodes.
+         * @return One (x,y,z) triple per vertex, in vertex_tags() order.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> vertex_positions() const;
+
+        /**
          * @brief Gives access to the wrapped model. Not exposed to Python — used only by
          * BlockingFacade to build the real gecko::Blocking against this model.
          * @return The wrapped model.

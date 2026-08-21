@@ -49,7 +49,19 @@ namespace gecko::python {
                  "Node index triples of every triangle of the model's backing mesh.")
             .def("mesh_tets",
                  &GeomModelFacade::mesh_tets,
-                 "Node index quadruples of every tetrahedron of the model's backing mesh (empty for a boundary rep).");
+                 "Node index quadruples of every tetrahedron of the model's backing mesh (empty for a boundary rep).")
+            .def("volume_boundary_triangles",
+                 &GeomModelFacade::volume_boundary_triangles,
+                 "Node index triples of the tetrahedral mesh's own outer boundary — its skin, not its interior tets.")
+            .def("curve_vertices",
+                 &GeomModelFacade::curve_vertices,
+                 "(x,y,z) points the model's curves pass through, indexed by curve_segments().")
+            .def("curve_segments",
+                 &GeomModelFacade::curve_segments,
+                 "Index pairs into curve_vertices() for every segment making up the model's curves.")
+            .def("vertex_positions",
+                 &GeomModelFacade::vertex_positions,
+                 "(x,y,z) position of each of the model's vertices, in vertex_tags() order.");
 
         py::class_<BlockingFacade>(m, "Blocking", "A structured (quad/hex) blocking of a GeomModel.")
             .def(py::init<const GeomModelFacade &, int>(),
