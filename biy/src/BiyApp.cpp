@@ -132,6 +132,7 @@ namespace gecko::biy {
         polyscope::options::buildDefaultGuiPanels = false;
         polyscope::options::openImGuiWindowForUserCallback = false;
         polyscope::internal::leftWindowsWidth = static_cast<float>(m_config.panel_width) * polyscope::options::uiScale;
+        polyscope::internal::rightWindowsWidth = static_cast<float>(m_config.panel_width) * polyscope::options::uiScale;
 
         register_model();
         m_status = "Loaded " + model_path + " (order " + std::to_string(order) + ") — " + config_message;
@@ -151,19 +152,22 @@ namespace gecko::biy {
     void BiyApp::register_model() {
         const auto vertices = m_model->mesh_vertices();
         const auto triangles = m_model->mesh_triangles();
-        const auto tets = m_model->mesh_tets();
         const auto curve_points = m_model->curve_vertices();
         const auto curve_segments = m_model->curve_segments();
         const auto points = m_model->vertex_positions();
+        const auto volume_boundary = m_model->volume_boundary_triangles();
 
         // The model's 4 kinds of entity get 4 structures, matching the Geometry section's
         // subsections one for one — where it used to be a single undifferentiated triangle soup
         // plus a hidden tet mesh, with its curves and vertices not displayed at all.
-        if (!tets.empty()) {
-            auto *volume = polyscope::registerTetMesh(GEOM_VOLUMES, vertices, tets);
-            // A Polyscope volume mesh draws only its boundary, which is what a volume should look
-            // like here; its interior tetrahedra are deliberately never shown.
-            volume->setColor(to_glm(m_config.geometry_volume_color));
+        if (!volume_boundary.empty()) {
+            // A genuine SurfaceMesh over the tet mesh's own boundary faces, not a VolumeMesh: unlike
+            // what the name suggests, Polyscope's VolumeMesh always renders every tet face, interior
+            // ones included (reordered back-to-front, but still drawn) — there is no toggle to turn
+            // that off. Showing "a volume as its boundary" therefore means computing that boundary
+            // ourselves (see volume_boundary_triangles()) and drawing it as a plain surface.
+            auto *volume = polyscope::registerSurfaceMesh(GEOM_VOLUMES, vertices, volume_boundary);
+            volume->setSurfaceColor(to_glm(m_config.geometry_volume_color));
             volume->setTransparency(static_cast<float>(m_config.model_transparency));
             volume->setEnabled(m_config.show_geometry_volumes);
         }
@@ -173,10 +177,14 @@ namespace gecko::biy {
             // opaque model hides the very thing being edited.
             surface->setSurfaceColor(to_glm(m_config.geometry_surface_color));
             surface->setTransparency(static_cast<float>(m_config.model_transparency));
-            // On a model with volumes the two coincide — a volume is drawn as its boundary, which is
-            // made of these very triangles — so showing both just makes them fight over the depth
-            // buffer. The volume wins by default; surfaces stay one click away in the Scene panel.
-            surface->setEnabled(m_config.show_geometry_surfaces && tets.empty());
+            // Not necessarily redundant with "volumes" even when both are present: volumes shows
+            // only the true outer skin of the tet mesh, while surfaces is every *tagged* surface —
+            // on a model with an internal partition between two volumes (two_cubes.msh: 286 tagged
+            // triangles against a 260-triangle outer boundary), that partition is real surface
+            // content with no counterpart in "volumes" at all. So both follow their own config flag
+            // independently; where they do coincide (a model with no internal walls, e.g. a single
+            // solid), the two can be told apart in the Scene panel same as any other overlap.
+            surface->setEnabled(m_config.show_geometry_surfaces);
         }
         if (!curve_segments.empty()) {
             auto *curves = polyscope::registerCurveNetwork(GEOM_CURVES, curve_points, curve_segments);
@@ -485,9 +493,6 @@ namespace gecko::biy {
         ImGui::Separator();
 
         draw_panel();
-        // Captured so the Scene window below can be stacked directly under this one, the way
-        // Polyscope stacks its own panels.
-        m_operations_panel_height = ImGui::GetWindowHeight();
         ImGui::End();
     }
 
@@ -506,15 +511,16 @@ namespace gecko::biy {
     }
 
     void BiyApp::draw_scene_panel() {
-        ImGui::SetNextWindowPos(ImVec2(polyscope::internal::imguiStackMargin,
-                                       m_operations_panel_height + 2 * polyscope::internal::imguiStackMargin));
-        ImGui::SetNextWindowSize(ImVec2(polyscope::internal::leftWindowsWidth,
-                                        polyscope::view::windowHeight - m_operations_panel_height -
-                                            3 * polyscope::internal::imguiStackMargin));
+        // On the opposite side from "BIY operations" — its own full-height column, not stacked
+        // under the other one — so the two read as independent panels rather than one long list.
+        const float margin = polyscope::internal::imguiStackMargin;
+        const float width = polyscope::internal::rightWindowsWidth;
+        ImGui::SetNextWindowPos(ImVec2(polyscope::view::windowWidth - width - margin, margin));
+        ImGui::SetNextWindowSize(ImVec2(width, polyscope::view::windowHeight - 2 * margin));
         ImGui::Begin("Scene", nullptr);
 
         if (ImGui::CollapsingHeader("Geometry", ImGuiTreeNodeFlags_DefaultOpen)) {
-            draw_scene_entry("volumes", volume_or_null(GEOM_VOLUMES));
+            draw_scene_entry("volumes", surface_or_null(GEOM_VOLUMES));
             draw_scene_entry("surfaces", surface_or_null(GEOM_SURFACES));
             draw_scene_entry("curves", curves_or_null(GEOM_CURVES));
             draw_scene_entry("points", points_or_null(GEOM_POINTS));

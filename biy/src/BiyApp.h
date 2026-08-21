@@ -173,8 +173,6 @@ namespace gecko::biy {
         bool m_show_block_edges = true;
         /** @brief Whether the generated mesh is currently drawn. */
         bool m_show_mesh = false;
-        /** @brief Height the operations panel took last frame, so the Scene panel stacks under it. */
-        float m_operations_panel_height = 0.0f;
         /** @brief Whether each kind of control display is currently drawn. */
         bool m_show_edge_control = false;
         /** @copydoc m_show_edge_control */

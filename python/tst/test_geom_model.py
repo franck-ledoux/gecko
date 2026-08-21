@@ -99,6 +99,52 @@ $EndElements
         assert a != b
 
 
+def test_volume_boundary_triangles(tmp_path):
+    # 2 unit tets glued along one shared face, so the mesh has exactly 1 interior face (the shared
+    # one) and 6 boundary faces (4 per tet, minus the 2 that make up the shared one).
+    msh = """\
+$MeshFormat
+2.2 0 8
+$EndMeshFormat
+$Nodes
+5
+1 0 0 0
+2 1 0 0
+3 0 1 0
+4 0 0 1
+5 1 1 1
+$EndNodes
+$Elements
+2
+1 4 0 1 2 3 4
+2 4 0 1 2 3 5
+$EndElements
+"""
+    path = tmp_path / "two_tets.msh"
+    path.write_text(msh)
+    model = gecko.GeomModel(str(path))
+
+    boundary = model.volume_boundary_triangles()
+    assert len(boundary) == 6
+
+    # No duplicate faces, and no index out of range.
+    vertices = model.mesh_vertices()
+    seen = set()
+    for tri in boundary:
+        assert all(0 <= i < len(vertices) for i in tri)
+        key = tuple(sorted(tri))
+        assert key not in seen
+        seen.add(key)
+
+    # The face shared by both tets (nodes 1,2,3, i.e. indices 0,1,2) must not appear.
+    assert (0, 1, 2) not in seen
+
+
+def test_volume_boundary_triangles_empty_without_tets(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    assert model.volume_boundary_triangles() == []
+
+
 def test_missing_file_raises(tmp_path):
     with pytest.raises(RuntimeError):
         gecko.GeomModel(str(tmp_path / "does_not_exist.msh"))

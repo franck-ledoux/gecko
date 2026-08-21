@@ -1,5 +1,7 @@
 #include "GeomModelFacade.h"
 
+#include <algorithm>
+#include <map>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -102,6 +104,35 @@ namespace gecko::python {
                             static_cast<int>(nodes[3].value)});
         }
         return tets;
+    }
+
+    std::vector<std::array<int, 3>> GeomModelFacade::volume_boundary_triangles() const {
+        const auto &mesh = m_model->mesh();
+
+        // Canonicalize each tet face by its sorted node ids, and count how many tets touch it: a
+        // face touched once is on the boundary, one touched twice is shared between two tets and
+        // therefore interior. std::array's own operator< (lexicographic) is enough to key a
+        // std::map on the canonical form, no custom hash needed.
+        std::map<std::array<int, 3>, std::pair<int, std::array<int, 3>>> face_count;
+        for (UInt c = 0; c < mesh.nb_cells(); ++c) {
+            const auto nodes = mesh.cell_nodes(CellId{c});
+            for (const auto &local : SimplicialTraits::Cell::FaceNodes) {
+                std::array<int, 3> face{static_cast<int>(nodes[local[0]].value),
+                                        static_cast<int>(nodes[local[1]].value),
+                                        static_cast<int>(nodes[local[2]].value)};
+                std::array<int, 3> key = face;
+                std::sort(key.begin(), key.end());
+                auto &[count, orientation] = face_count[key];
+                if (count == 0) orientation = face;
+                ++count;
+            }
+        }
+
+        std::vector<std::array<int, 3>> boundary;
+        for (const auto &[key, entry] : face_count) {
+            if (entry.first == 1) boundary.push_back(entry.second);
+        }
+        return boundary;
     }
 
     namespace {

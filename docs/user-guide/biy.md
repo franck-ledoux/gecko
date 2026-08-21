@@ -47,11 +47,11 @@ window draws, so a change made either way shows up immediately in the other.
 
 ## The panels
 
-biy replaces Polyscope's own windows with two of its own, both the width Polyscope gives its
-panels (`panel_width` in the config):
+biy replaces Polyscope's own windows with two of its own, on opposite sides of the 3D view and
+both the width Polyscope gives its panels (`panel_width` in the config):
 
-**BIY operations** — Polyscope's *Reset view*, *Screenshot*, *View* and *Appearance* controls,
-rebuilt here from its public builders, followed by biy's own:
+**BIY operations** (left) — Polyscope's *Reset view*, *Screenshot*, *View* and *Appearance*
+controls, rebuilt here from its public builders, followed by biy's own:
 
 | Button              | What it does                                                             |
 | ------------------- | ------------------------------------------------------------------------ |
@@ -63,7 +63,8 @@ rebuilt here from its public builders, followed by biy's own:
 Polyscope's *Debug* section is dropped — it is an internal texture inspector, and unlike the others
 it is not exposed as a callable builder.
 
-**Scene** — replaces Polyscope's "Structures" list with a tree that speaks biy's own vocabulary.
+**Scene** (right) — replaces Polyscope's "Structures" list with a tree that speaks biy's own
+vocabulary.
 Each row delegates to the structure's own Polyscope panel, so the visibility controls are the usual
 ones; a row greys out when the model has nothing of that kind (a boundary-representation file has no
 volume, a 2D blocking no blocks).
@@ -74,10 +75,13 @@ volume, a 2D blocking no blocks).
 | Blocking | blocks, faces, edges, vertices    |
 | Mesh     | quads, hexes                      |
 
-A **volume** is drawn as its boundary — that is simply what a Polyscope volume mesh renders — and
-its interior tetrahedra are never shown. On a model that has volumes, *surfaces* start hidden: they
-are the very triangles the volume's boundary is made of, so drawing both only makes them fight over
-the depth buffer. One click brings them back.
+A **volume** is drawn as its true outer boundary, computed directly from the tetrahedral mesh (a
+face belonging to exactly one tet); *not* what `polyscope::registerTetMesh` itself would show —
+despite its name, a Polyscope volume mesh renders every tet face, interior ones included, with no
+way to turn that off. *surfaces* is a separate thing entirely: every surface the file tags, which
+on a model with an internal partition between two volumes includes that partition (`two_cubes.msh`:
+286 tagged triangles against a 260-triangle outer boundary — the 26-triangle difference *is* the
+partition). The two are shown independently for exactly that reason.
 
 **Blocking** shows the block structure itself, **Mesh** the mesh it generates. `subdivisions`
 therefore controls the Mesh section alone; the blocking is drawn at its own display resolution,
