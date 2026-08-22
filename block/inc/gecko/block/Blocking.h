@@ -136,8 +136,11 @@ namespace gecko {
                 const int b = node_index(nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(QUAD_EDGES, a, b);
                 Edge e = create_edge();
-                e->info().curve = curves[k];
                 m_cmap.template set_attribute<1>(it, e);
+                // `curves[k]` runs from QUAD_EDGES[k].first to .second; store_curve() flips it if
+                // this edge's own dart runs the other way, so the class' orientation invariant holds
+                // from the moment the edge exists.
+                store_curve(e, curves[k], nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]);
             }
 
             Face f = m_cmap.template create_attribute<2>();
@@ -201,8 +204,8 @@ namespace gecko {
                 const int b = node_index(nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(HEX_EDGES, a, b);
                 Edge e = create_edge();
-                e->info().curve = curves[k];
                 m_cmap.template set_attribute<1>(it, e);
+                store_curve(e, curves[k], nodes[static_cast<std::size_t>(HEX_EDGES[k].first)]);
             }
 
             // The 6 bounding faces' Coons surfaces, built once from the 12 edges above, in the
@@ -813,7 +816,7 @@ namespace gecko {
                 const Node n0 = m_cmap.template attribute<0>(d);
                 const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
                 if (n0 != ANode && n1 != ANode) continue;
-                it->info().curve = straight_curve(n0->info().point, n1->info().point);
+                store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
             }
 
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
@@ -1326,14 +1329,16 @@ namespace gecko {
                     dense.front() = p0;
                     dense.back() = p1;
 
-                    AEdge->info().curve = tangent_constrained_curve(dense,
-                                                                    chord_length_parameters(dense),
-                                                                    oriented_tangent(curve->tangent(p0), chord),
-                                                                    oriented_tangent(curve->tangent(p1), chord));
+                    store_curve(AEdge,
+                                tangent_constrained_curve(dense,
+                                                          chord_length_parameters(dense),
+                                                          oriented_tangent(curve->tangent(p0), chord),
+                                                          oriented_tangent(curve->tangent(p1), chord)),
+                                n0);
                     return;
                 }
             }
-            AEdge->info().curve = interpolating_curve(samples);
+            store_curve(AEdge, interpolating_curve(samples), n0);
         }
 
         /**
@@ -1556,17 +1561,67 @@ namespace gecko {
         }
 
         /**
-         * @brief Returns @p ACurve as-is if it already starts at @p AExpectedStart, or its reversed
-         * copy otherwise — used to orient an already-fitted edge curve consistently for
-         * `coons_surface_from_edges()`/`tfi_volume_from_faces()` regardless of which of its 2
-         * incident faces/blocks last stored it.
-         * @param ACurve The curve to orient.
-         * @param AExpectedStart The position its first control point must have.
-         * @return @p ACurve, oriented to start at @p AExpectedStart.
+         * @brief Returns @p AEdge's curve oriented to start at @p AExpectedStart, reversing it when
+         * the edge stores it the other way round — used to orient an already-fitted edge curve
+         * consistently for `coons_surface_from_edges()`/`tfi_volume_from_faces()` regardless of which
+         * of its 2 incident faces/blocks is asking.
+         *
+         * The comparison is on node *identity*, never on position. Which way an edge stores its curve
+         * is a combinatorial fact — `store_curve()` keeps it pinned to the edge's own dart — and
+         * asking geometry about it instead is both slower and wrong: 2 ways of computing the same
+         * corner agree as real numbers and not as doubles, so an equality test on coordinates
+         * silently answers "the other end" for any cell whose curve and nodes were built by different
+         * routes (see `curve_start_node()`).
+         *
+         * @param AEdge The edge whose curve is wanted.
+         * @param AExpectedStart The node its first control point must sit on.
+         * @return That curve, oriented to start at @p AExpectedStart.
          */
-        static TEdgeCurve oriented_curve(const TEdgeCurve &ACurve, const Point3d &AExpectedStart) {
-            if (ACurve.control_points()[0] == AExpectedStart) return ACurve;
-            return reversed_curve(ACurve);
+        TEdgeCurve oriented_curve(Edge AEdge, Node AExpectedStart) {
+            if (curve_start_node(AEdge) == AExpectedStart) return AEdge->info().curve;
+            return reversed_curve(AEdge->info().curve);
+        }
+
+        /**
+         * @brief The node an edge's stored curve starts at.
+         *
+         * Purely combinatorial, and deliberately anchored to the *lower of the edge's 2 endpoint
+         * handles* rather than to its own dart: an edge carries darts pointing both ways, which of
+         * them the attribute names is CGAL's business, and CGAL does re-point it — during the very
+         * cell insertions a cut is made of. Ordering the 2 endpoints instead depends on nothing that
+         * moves. Attribute handles already order this way elsewhere here (they key the maps in
+         * `to_mesh()` and `find_sheet()`).
+         *
+         * Position is never consulted. Asking geometry which end a curve starts at is what broke
+         * repeated cuts: an edge born inside a face takes its curve from a surface's control grid
+         * while its nodes were placed by evaluating another curve, so the 2 agree as real numbers and
+         * not as doubles, and an equality test on coordinates then answers "the other end".
+         *
+         * @param AEdge The edge to inspect.
+         * @return Its curve's start node.
+         */
+        Node curve_start_node(Edge AEdge) {
+            const Dart d = AEdge->dart();
+            const Node a = m_cmap.template attribute<0>(d);
+            const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+            // Which dart is asked decides only *which pair* comes back, never its order — every dart
+            // of an edge spans the same 2 nodes.
+            return (a < b) ? a : b;
+        }
+
+        /**
+         * @brief Stores a curve on an edge, oriented to the class' invariant — reversing @p ACurve
+         * when @p AStart is not the end `curve_start_node()` names.
+         *
+         * Every write of an edge's curve goes through here, which is what lets `curve_start_node()`
+         * answer by looking rather than by measuring.
+         *
+         * @param AEdge The edge to write to.
+         * @param ACurve The curve, running from @p AStart to the edge's other endpoint.
+         * @param AStart The node @p ACurve starts at.
+         */
+        void store_curve(Edge AEdge, const TEdgeCurve &ACurve, Node AStart) {
+            AEdge->info().curve = (curve_start_node(AEdge) == AStart) ? ACurve : reversed_curve(ACurve);
         }
 
         /**
@@ -1671,8 +1726,7 @@ namespace gecko {
                 const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(QUAD_EDGES, a, b);
                 const Edge e = m_cmap.template attribute<1>(it);
-                curves[k] = oriented_curve(e->info().curve,
-                                           local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]->info().point);
+                curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]);
             }
             AFace->info().surface = coons_surface_from_edges(curves[0], curves[2], curves[3], curves[1]);
         }
@@ -1742,8 +1796,7 @@ namespace gecko {
                 const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(HEX_EDGES, a, b);
                 const Edge e = m_cmap.template attribute<1>(it);
-                curves[k] = oriented_curve(e->info().curve,
-                                           local_nodes[static_cast<std::size_t>(HEX_EDGES[k].first)]->info().point);
+                curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(HEX_EDGES[k].first)]);
             }
 
             std::array<FaceSurfaceT, 6> face_surfaces{};
@@ -1804,11 +1857,15 @@ namespace gecko {
             const Dart d = AEdge->dart();
             const Node na = m_cmap.template attribute<0>(d);
             const Node nb = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-            const bool start_is_a = (AEdge->info().curve.control_points()[0] == na->info().point);
+            // Asked of the class' own orientation invariant rather than by comparing the curve's
+            // first control point against a node's coordinates: the 2 can differ in their last bits
+            // for any edge whose curve and nodes were built by different routes, and the chain would
+            // then be laid down backwards.
+            const Node start = curve_start_node(AEdge);
 
             EdgeChain chain;
-            chain.start = start_is_a ? na : nb;
-            const Node end = start_is_a ? nb : na;
+            chain.start = start;
+            const Node end = (start == na) ? nb : na;
             chain.ids.resize(AS + 1);
             chain.ids[0] = ANodeIds.at(chain.start);
             chain.ids[AS] = ANodeIds.at(end);
@@ -2314,28 +2371,6 @@ namespace gecko {
         // ---------------------------------------------------------------------
 
         /**
-         * @brief The endpoint of @p AEdge its own stored curve starts at, which is what a public
-         * cut parameter of 0 means for that edge.
-         * @param AEdge The edge to inspect.
-         * @return Its curve's start node.
-         */
-        Node curve_start_node(Edge AEdge) {
-            const Dart d = AEdge->dart();
-            const Node na = m_cmap.template attribute<0>(d);
-            const Node nb = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-            // Whichever endpoint is *nearer*, rather than exactly equal to, the curve's first control
-            // point. Exact equality is the idiom elsewhere in this class and it holds there, because
-            // the curve and the node were built from the same expression — but an edge a cut created
-            // inside a face gets its curve from a surface's control grid while its nodes were placed
-            // by evaluating another edge's curve. The 2 agree to rounding and not to the last bit, and
-            // an equality test then silently answers "the other end", which flips that edge's cut to
-            // 1-t and tears the sheet out of plane. The 2 endpoints are far apart next to that noise,
-            // so the nearer one is never ambiguous.
-            const Point3d &start = AEdge->info().curve.control_points()[0];
-            return (Vector3d(start, na->info().point).norm() <= Vector3d(start, nb->info().point).norm()) ? na : nb;
-        }
-
-        /**
          * @brief Records @p AEdge as part of a sheet, starting at @p AFrom.
          * @param AStart The edge-to-start-node map being built, modified in place.
          * @param APending The traversal work list, modified in place.
@@ -2611,20 +2646,18 @@ namespace gecko {
          * class runs by comparing positions (`oriented_curve()`, `curve_start_node()`), which then
          * pick the wrong end of the edge.
          *
-         * Which end goes where is decided by proximity, the 2 nodes being far apart next to that
-         * rounding.
+         * Which end is which is the caller's to know — it comes out of the frame the curve was read
+         * from, not out of comparing coordinates.
          *
-         * @param ACurve The curve to pin.
-         * @param AA One endpoint node's position.
-         * @param AB The other endpoint node's position.
+         * @param ACurve The curve to pin, already running from @p AStart towards @p AEnd.
+         * @param AStart The position its first control point must take.
+         * @param AEnd The position its last control point must take.
          * @return @p ACurve with its 2 end control points replaced by those positions.
          */
-        static TEdgeCurve pinned_curve(TEdgeCurve ACurve, const Point3d &AA, const Point3d &AB) {
+        static TEdgeCurve pinned_curve(TEdgeCurve ACurve, const Point3d &AStart, const Point3d &AEnd) {
             constexpr std::size_t last = TEdgeCurve::NumControlPoints - 1;
-            const bool starts_at_a =
-                Vector3d(ACurve.control_points()[0], AA).norm() <= Vector3d(ACurve.control_points()[0], AB).norm();
-            ACurve[0] = starts_at_a ? AA : AB;
-            ACurve[last] = starts_at_a ? AB : AA;
+            ACurve[0] = AStart;
+            ACurve[last] = AEnd;
             return ACurve;
         }
 
@@ -2726,9 +2759,15 @@ namespace gecko {
 
                 // insert_cell_0_in_cell_1 leaves `d` on the [from, mid] half and returns beta<1>(d),
                 // which carries the [mid, other] one; both inherit the parent's classification
-                // through CellData.h's SplitFunctor, and only the geometry needs setting.
-                m_cmap.template attribute<1>(d)->info().curve = curve_starts_at_from ? low : high;
-                m_cmap.template attribute<1>(nd)->info().curve = curve_starts_at_from ? high : low;
+                // through CellData.h's SplitFunctor, and only the geometry needs setting. Which half
+                // is which follows from where the parent's curve started, a node identity read before
+                // the split — never from where the halves happen to land.
+                store_curve(m_cmap.template attribute<1>(d),
+                            curve_starts_at_from ? low : high,
+                            curve_starts_at_from ? se.from : mid);
+                store_curve(m_cmap.template attribute<1>(nd),
+                            curve_starts_at_from ? high : low,
+                            curve_starts_at_from ? mid : other);
 
                 AMids.emplace(mid, MidNode{se.from, other});
             }
@@ -2769,11 +2808,23 @@ namespace gecko {
                     new_edge = create_edge();
                     m_cmap.template set_attribute<1>(nd, new_edge);
                 }
-                // The cut runs along the low half's far isoparametric curve, exactly — then pinned
-                // onto the 2 nodes it joins, which the sheet placed by evaluating another curve.
-                new_edge->info().curve = pinned_curve(surface_boundary_curve(low, sf.axis),
-                                                      m_cmap.template attribute<0>(mid_darts[0])->info().point,
-                                                      m_cmap.template attribute<0>(mid_darts[1])->info().point);
+                // The cut runs along the low half's far isoparametric curve, exactly.
+                // surface_boundary_curve() always runs along the axis the cut left alone, from its 0
+                // end to its 1 end, so which of the 2 cut nodes it starts at is known outright — the
+                // one born on the edge whose parent corners sit at 0 along that axis.
+                const Node mid_a = m_cmap.template attribute<0>(mid_darts[0]);
+                const Node mid_b = m_cmap.template attribute<0>(mid_darts[1]);
+                const int side_a =
+                    QUAD_CORNER_IJ[static_cast<std::size_t>(node_index(sf.corners, AMids.at(mid_a).from))][other];
+                const Node curve_start = (side_a == 0) ? mid_a : mid_b;
+                const Node curve_end = (side_a == 0) ? mid_b : mid_a;
+                // Pinned onto those 2 nodes: read off a surface, the curve reaches them only to
+                // rounding, and an edge's curve has to pass through its own endpoints exactly.
+                store_curve(new_edge,
+                            pinned_curve(surface_boundary_curve(low, sf.axis),
+                                         curve_start->info().point,
+                                         curve_end->info().point),
+                            curve_start);
                 // An edge born inside a face lies on whatever that face lies on.
                 new_edge->info().geom_targets = sf.face->info().geom_targets;
 

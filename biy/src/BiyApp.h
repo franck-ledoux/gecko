@@ -163,8 +163,12 @@ namespace gecko::biy {
         /** @brief Starts/continues/ends a corner drag from the current mouse state. */
         void handle_drag();
         /** @brief Tracks what the cursor is over in Cut mode, previewing the sheet it would cut, and
-         * performs the cut on click. */
+         * performs the cut on a click or on space. */
         void handle_cut();
+        /** @brief Cuts the sheet the preview is currently showing, reporting what happened both in
+         * the status line and on the terminal.
+         * @param trigger How the cut was asked for, for the terminal line ("click" or "space"). */
+        void perform_cut(const char *trigger);
         /** @brief Re-reads which edge the cursor is over and rebuilds the cut preview from it.
          * @param screen_coords Current mouse position. */
         void update_cut_hover(glm::vec2 screen_coords);

@@ -709,7 +709,8 @@ namespace gecko::biy {
                 break;
             case MouseMode::Cut:
                 ImGui::TextWrapped("Point at a block edge: the whole sheet that would be cut lights up, and the "
-                                   "markers show where. Click to cut. Camera navigation is off.");
+                                   "markers show where. Click, or press Space, to cut it. Camera navigation "
+                                   "is off.");
                 break;
             default:
                 ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split blocks.");
@@ -933,6 +934,23 @@ namespace gecko::biy {
     void BiyApp::handle_cut() {
         if (!m_blocking || m_mode != MouseMode::Cut) return;
         ImGuiIO &io = ImGui::GetIO();
+
+        // Space cuts too. A trackpad tap is a genuinely unreliable way to say "here": it fires a
+        // click and a small cursor jolt together, and it can be shorter than a frame. A key is
+        // neither, and it also lets a careful cut be placed without the pointer being nudged off the
+        // edge in the act of pressing.
+        const bool by_key = !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_Space);
+        const bool by_click = !io.WantCaptureMouse && io.MouseClicked[0];
+
+        if (by_click || by_key) {
+            // Acts on the sheet the preview is *currently showing*, without re-testing what is under
+            // the cursor first. That is the point: the pointer often shifts a pixel or two in the act
+            // of clicking, and on edges this thin that is enough to fall off them — re-testing here
+            // would clear the hover and swallow the click, which is exactly the "sometimes nothing
+            // happens" this fixes. What you saw highlighted is what gets cut.
+            perform_cut(by_key ? "space" : "click");
+            return;
+        }
         if (io.WantCaptureMouse) return;
 
         const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
@@ -944,15 +962,27 @@ namespace gecko::biy {
             update_cut_hover(mouse);
             refresh_cut_preview();
         }
+    }
 
-        if (!io.MouseClicked[0]) return;
+    void BiyApp::perform_cut(const char *trigger) {
+        // Everything here also goes to the terminal the Python console runs in: the status line is
+        // one line at the bottom of a panel and is easy to miss, and "I pressed it and nothing
+        // happened" needs an answer that stays on screen.
+        const auto report = [trigger](const std::string &message) {
+            std::cout << "biy [cut by " << trigger << "]: " << message << std::endl;
+        };
 
         if (!m_hover_edge) {
-            m_status = "Point at a block edge to cut it";
+            m_status = "Nothing under the cursor to cut";
+            report("no block edge under the cursor. Point at one — the sheet lights up when you are on "
+                   "it — then click or press space. If the edges are hidden in the Scene panel, "
+                   "nothing can be picked.");
             return;
         }
         if (m_sheet.empty()) {
-            m_status = "That sheet cannot be cut evenly — it closes back onto itself";
+            m_status = "That sheet cannot be cut evenly";
+            report("that sheet closes back onto itself, so no single cut splits it evenly. Refused "
+                   "rather than cut somewhere arbitrary.");
             return;
         }
 
@@ -960,6 +990,8 @@ namespace gecko::biy {
         const std::size_t before = m_blocking->nb_cells(3);
         if (!m_blocking->cut_sheet(*m_hover_edge, m_cut_param)) {
             m_status = "Cut refused at t=" + format_param(m_cut_param);
+            report("the kernel refused the cut at t=" + format_param(m_cut_param) + " on edge " +
+                   std::to_string(*m_hover_edge) + ".");
             return;
         }
         const std::size_t after = m_blocking->nb_cells(3);
@@ -974,7 +1006,10 @@ namespace gecko::biy {
 
         m_status = "Cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) +
                    (after > before ? " — blocks " + std::to_string(before) + " to " + std::to_string(after) : "");
+        report("cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) + ", blocks " +
+               std::to_string(before) + " -> " + std::to_string(after) + ".");
     }
+
     void BiyApp::handle_drag() {
         if (!m_blocking || m_mode != MouseMode::Edit) return;
         ImGuiIO &io = ImGui::GetIO();
