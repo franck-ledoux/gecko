@@ -572,3 +572,26 @@ def test_deleting_blocks_never_bends_a_straight_grid(geom_model_path):
     while blocking.nb_cells(3) > 0:
         blocking.delete_block(random.randrange(blocking.nb_cells(3)))
         assert worst_bend() < 1e-12
+
+
+def test_edge_bends_is_zero_on_a_straight_blocking(geom_model_path):
+    # The diagnostic's own contract: a straight blocking reads as zero whatever is done to it, so a
+    # non-zero reading is always worth chasing rather than sometimes expected.
+    import random
+
+    random.seed(11)
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_TALL_BOX)
+    assert max(blocking.edge_bends()) < 1e-12
+
+    for _ in range(3):
+        assert blocking.cut_sheet(random.randrange(blocking.nb_cells(1)), round(random.uniform(0.1, 0.9), 3))
+        assert max(blocking.edge_bends()) < 1e-12
+    while blocking.nb_cells(3) > 0:
+        blocking.delete_block(random.randrange(blocking.nb_cells(3)))
+        assert not blocking.edge_bends() or max(blocking.edge_bends()) < 1e-12
+
+    # And it reports one entry per edge, so a caller can say which edge is at fault.
+    blocking.create_hex_block(_TALL_BOX)
+    assert len(blocking.edge_bends()) == blocking.nb_cells(1)

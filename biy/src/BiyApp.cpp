@@ -68,6 +68,26 @@ namespace gecko::biy {
 
         glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
 
+        /**
+         * @brief The worst departure from straightness anywhere in the blocking, as a line for the
+         * terminal.
+         *
+         * Reported after every cut and deletion, because a straight blocking has to stay straight
+         * through both — cutting a straight edge gives straight halves and deleting moves nothing —
+         * and because when it does not, this number says *where the fault is*: a large value means
+         * the geometry itself was corrupted, a value at rounding while the screen shows curves means
+         * the drawing was, and those are opposite places to look.
+         */
+        std::string bend_report(python::BlockingFacade &blocking) {
+            const auto bends = blocking.edge_bends();
+            if (bends.empty()) return {};
+            const auto worst = std::max_element(bends.begin(), bends.end());
+            std::ostringstream out;
+            out << std::scientific << std::setprecision(2) << " worst edge bend " << *worst << " (edge "
+                << std::distance(bends.begin(), worst) << ")";
+            return out.str();
+        }
+
         /** @brief A cut parameter, short enough to sit in the status line. */
         std::string format_param(double value) {
             std::ostringstream out;
@@ -1044,7 +1064,7 @@ namespace gecko::biy {
         m_status = "Cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) +
                    (after > before ? " — blocks " + std::to_string(before) + " to " + std::to_string(after) : "");
         report("cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) + ", blocks " +
-               std::to_string(before) + " -> " + std::to_string(after) + ".");
+               std::to_string(before) + " -> " + std::to_string(after) + "." + bend_report(*m_blocking));
     }
 
     void BiyApp::update_delete_hover(glm::vec2 screen_coords) {
@@ -1178,7 +1198,7 @@ namespace gecko::biy {
         m_status = "Deleted block " + std::to_string(index) + " — blocks " + std::to_string(before) + " to " +
                    std::to_string(after);
         report("deleted block " + std::to_string(index) + ", blocks " + std::to_string(before) + " -> " +
-               std::to_string(after) + ".");
+               std::to_string(after) + "." + bend_report(*m_blocking));
     }
 
     void BiyApp::handle_drag() {

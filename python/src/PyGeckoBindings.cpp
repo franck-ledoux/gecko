@@ -196,6 +196,10 @@ namespace gecko::python {
                  "Signed volume of every block, from its own stored geometry. Exact at 1 subdivision for a block "
                  "with planar faces; converges as it grows for a curved one. A negative value means that block's "
                  "frame is inverted.")
+            .def("edge_bends",
+                 &BlockingFacade::edge_bends,
+                 "How far each edge departs from a straight line — the largest distance from one of its interior "
+                 "control points to its own chord. A straight blocking reads as zero here whatever is done to it.")
             .def("delete_block",
                  &BlockingFacade::delete_block,
                  py::arg("block_index"),

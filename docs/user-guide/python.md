@@ -87,6 +87,11 @@ print(blocking.nb_cells(2), blocking.is_valid_topology())
 if blocking.can_delete_face(face_a):
     blocking.delete_face(face_a)
 
+# How far each edge departs from a straight line: the largest distance from one of its interior
+# control points to its own chord. A straight blocking reads as zero here whatever is done to it, so
+# a non-zero entry says the geometry is at fault and a zero one says the drawing is.
+print(max(blocking.edge_bends()))
+
 # Deleting a block takes with it every face, edge and corner that existed only because of it;
 # whatever it shared with a neighbour stays, as that neighbour's boundary. The index is a position
 # in the block traversal — the same order mesh_hexes() and block_volumes() use.

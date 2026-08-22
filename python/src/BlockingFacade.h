@@ -69,6 +69,21 @@ namespace gecko::python {
         int create_hex_block(const std::vector<std::array<double, 3>> &corners);
 
         /**
+         * @brief How far each edge departs from a straight line: the largest distance from one of its
+         * interior control points to the chord joining its 2 endpoints, per edge.
+         *
+         * A diagnostic rather than a modelling quantity. A straight blocking must read as zero here
+         * whatever has been done to it — cutting a straight edge gives straight halves, and deleting
+         * moves nothing — so a non-zero entry with nothing classified to justify it means the
+         * geometry has been corrupted, and a zero one while the screen shows curves means the
+         * drawing has.
+         *
+         * @return One deviation per edge, in the order edge_vertices()/edge_classification_dims()
+         *         use. Always 0 at degree 1, whose edges cannot bend.
+         */
+        [[nodiscard]] std::vector<double> edge_bends() const;
+
+        /**
          * @brief Deletes one block, along with every face, edge and corner that existed only because
          * of it — what it shared with a neighbouring block stays, as that neighbour's boundary.
          * @param block_index A block, as its position in the order mesh_hexes()/block_volumes() use.

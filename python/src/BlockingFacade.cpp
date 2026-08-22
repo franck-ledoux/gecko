@@ -202,6 +202,35 @@ namespace gecko::python {
             m_impl);
     }
 
+    std::vector<double> BlockingFacade::edge_bends() const {
+        return std::visit(
+            [](const auto &impl) {
+                const auto &map = impl.blocking.cmap();
+                std::vector<double> bends;
+                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    const auto &points = it->info().curve.control_points();
+                    const Point3d &start = points.front();
+                    const Point3d &end = points.back();
+                    const Vector3d chord(start, end);
+                    const double length2 = chord.dot(chord);
+                    double worst = 0.0;
+                    for (std::size_t k = 1; k + 1 < points.size(); ++k) {
+                        const Vector3d offset(start, points[k]);
+                        // Distance to the chord's *line*, clamped to the segment: an interior control
+                        // point of a straight edge projects inside it, and one that does not is
+                        // already the anomaly this is looking for.
+                        const double t = (length2 > 0.0) ? offset.dot(chord) / length2 : 0.0;
+                        worst = std::max(worst, (offset - chord * t).norm());
+                    }
+                    bends.push_back(worst);
+                }
+                return bends;
+            },
+            m_impl);
+    }
+
     void BlockingFacade::write_vtk(int subdivisions, const std::string &path) {
         check_subdivisions(subdivisions, "Blocking.write_vtk");
         std::visit(
