@@ -357,8 +357,9 @@ namespace gecko::python {
          */
         bool cut_sheet(int edge_index, double param);
 
-        /** @brief Per-degree state; public only so the .cpp's free-function helpers can name it —
-         * never part of the class' actual (Python-facing) interface. */
+        /** @brief The blocking and the id books kept alongside it; public only so the .cpp's
+         * free-function helpers can name it — never part of the class' actual (Python-facing)
+         * interface. */
         struct Impl {
             using BlockingT = Blocking<FacetedGeometry>;
 
@@ -411,30 +412,6 @@ namespace gecko::python {
 
     private:
         Impl m_impl;
-
-        /**
-         * @brief Runs @p AWork against the blocking state.
-         *
-         * A single call now, but it used to fan out over a `std::variant` of one alternative per
-         * degree — the degree being a template parameter meant a degree-3 blocking was a different
-         * C++ type from a degree-1 one, and this façade had to hold every one of them at once. With
-         * the degree carried by the object there is one type, and one alternative left. Kept as a
-         * seam rather than folded into each method so this refactor did not also rewrite 38 method
-         * bodies; inlining it is a tidy-up of its own.
-         *
-         * @tparam TWork Callable taking the blocking state.
-         * @param AWork The work to run.
-         * @return Whatever @p AWork returns.
-         */
-        template<typename TWork>
-        decltype(auto) with_impl(TWork AWork) {
-            return AWork(m_impl);
-        }
-        /** @copydoc with_impl */
-        template<typename TWork>
-        decltype(auto) with_impl(TWork AWork) const {
-            return AWork(m_impl);
-        }
     };
 
 } // namespace gecko::python
