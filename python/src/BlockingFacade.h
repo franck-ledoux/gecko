@@ -283,6 +283,15 @@ namespace gecko::python {
          *         empty list when the sheet cannot be cut homogeneously.
          * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
          */
+        /**
+         * @brief Measures every block of the blocking, from its own stored geometry.
+         * @param subdivisions Intervals per parametric axis (>= 1). Exact at 1 for a block whose
+         *        faces are planar; converges as it grows for a curved or warped one.
+         * @return One signed volume per block, in the order nb_cells(3) counts them. A negative
+         *         value means that block's frame is inverted.
+         */
+        [[nodiscard]] std::vector<double> block_volumes(int subdivisions);
+
         [[nodiscard]] std::vector<int> sheet_edges(int edge_index);
 
         /**

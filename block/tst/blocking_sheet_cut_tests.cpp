@@ -365,3 +365,107 @@ TEST_CASE("cutting_2_sewn_hexes_splits_both_and_stays_conformal", "[BlockTestSui
     REQUIRE(mesh.nb_cells() == 4);
     REQUIRE(mesh.nb_nodes() == 18);
 }
+
+namespace {
+    /** @brief The 1x1x2 block these last tests exercise, in `create_hex_block`'s expected HEX8
+     * order: extreme points (0,0,0) and (1,1,2), long axis z. */
+    std::array<Point3d, 8> tall_box() {
+        return {Point3d(0.0, 0.0, 0.0),
+                Point3d(1.0, 0.0, 0.0),
+                Point3d(1.0, 1.0, 0.0),
+                Point3d(0.0, 1.0, 0.0),
+                Point3d(0.0, 0.0, 2.0),
+                Point3d(1.0, 0.0, 2.0),
+                Point3d(1.0, 1.0, 2.0),
+                Point3d(0.0, 1.0, 2.0)};
+    }
+} // namespace
+
+TEST_CASE("cutting_a_1x1x2_block_in_half_gives_2_blocks_of_volume_1", "[BlockTestSuite]") {
+    // Volume is what makes this bite: the corners of a half can be right while the parametrization
+    // between them is wrong, and only integrating the block's own stored geometry notices.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block(tall_box());
+    REQUIRE(blocking.block_volumes()[0] == Approx(2.0).margin(1e-12));
+
+    const auto e = edge_between(blocking, Point3d(0.0, 0.0, 0.0), Point3d(0.0, 0.0, 2.0));
+    REQUIRE(blocking.cut_sheet(e, 0.5));
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 2);
+
+    // Sampled finely as well as coarsely: a half carrying the wrong sub-volume, or the right one in
+    // a rotated frame, still agrees with its corners and disagrees everywhere between them.
+    for (const SizeT s : {SizeT(1), SizeT(2), SizeT(4)}) {
+        const auto volumes = blocking.block_volumes(s);
+        REQUIRE(volumes.size() == 2);
+        REQUIRE(volumes[0] == Approx(1.0).margin(1e-12));
+        REQUIRE(volumes[1] == Approx(1.0).margin(1e-12));
+    }
+
+    // The 2 halves must meet along one face carrying exactly the 4 midplane corners.
+    std::vector<Point3d> midplane;
+    for (auto it = blocking.cmap().attributes<0>().begin(), end = blocking.cmap().attributes<0>().end(); it != end;
+         ++it) {
+        if (std::abs(it->info().point.z() - 1.0) < 1e-12) midplane.push_back(it->info().point);
+    }
+    REQUIRE(midplane.size() == 4);
+    for (const Point3d &want :
+         {Point3d(0.0, 0.0, 1.0), Point3d(0.0, 1.0, 1.0), Point3d(1.0, 1.0, 1.0), Point3d(1.0, 0.0, 1.0)}) {
+        REQUIRE(lies_in(want, midplane, 1e-12));
+    }
+}
+
+TEST_CASE("cutting_off_centre_splits_the_volume_in_the_same_ratio", "[BlockTestSuite]") {
+    // At exactly 0.5 a swapped side, a transposed frame and a mirrored half all still measure 1 and
+    // 1. Off-centre they cannot, which makes this the sharper of the 2 checks.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block(tall_box());
+
+    const auto e = edge_between(blocking, Point3d(0.0, 0.0, 0.0), Point3d(0.0, 0.0, 2.0));
+    REQUIRE(blocking.cut_sheet(e, 0.25));
+
+    auto volumes = blocking.block_volumes(4);
+    REQUIRE(volumes.size() == 2);
+    std::sort(volumes.begin(), volumes.end());
+    REQUIRE(volumes[0] == Approx(0.5).margin(1e-12));
+    REQUIRE(volumes[1] == Approx(1.5).margin(1e-12));
+
+    // A quarter of the way from the edge's own start, so the cut plane sits at z=0.5 and every
+    // corner of the blocking lies on one of the 3 planes it leaves behind.
+    for (auto it = blocking.cmap().attributes<0>().begin(), end = blocking.cmap().attributes<0>().end(); it != end;
+         ++it) {
+        const double z = it->info().point.z();
+        REQUIRE((std::abs(z) < 1e-12 || std::abs(z - 0.5) < 1e-12 || std::abs(z - 2.0) < 1e-12));
+    }
+}
+
+TEST_CASE("every_edge_of_a_block_cuts_it_into_2_positive_volumes_summing_to_the_whole", "[BlockTestSuite]") {
+    // Sweeps all 12 edges rather than trusting one: which frame each half lands in is CGAL's choice,
+    // and the frame bugs this guards against showed on some edges while sparing others.
+    for (int index = 0; index < 12; ++index) {
+        const FacetedGeometry geom = make_far_geom_model();
+        Blocking<FacetedGeometry> blocking(geom);
+        blocking.create_hex_block(tall_box());
+
+        int seen = 0;
+        Blocking<FacetedGeometry>::Edge target{};
+        for (auto it = blocking.cmap().attributes<1>().begin(), end = blocking.cmap().attributes<1>().end(); it != end;
+             ++it, ++seen) {
+            if (seen == index) target = it;
+        }
+        REQUIRE(blocking.cut_sheet(target, 0.25));
+
+        auto volumes = blocking.block_volumes(4);
+        REQUIRE(volumes.size() == 2);
+        // Positive, so neither half came out inverted, and adding back up to what they came from.
+        REQUIRE(volumes[0] > 0.0);
+        REQUIRE(volumes[1] > 0.0);
+        REQUIRE(volumes[0] + volumes[1] == Approx(2.0).margin(1e-12));
+        std::sort(volumes.begin(), volumes.end());
+        REQUIRE(volumes[0] == Approx(0.5).margin(1e-12));
+        REQUIRE(volumes[1] == Approx(1.5).margin(1e-12));
+    }
+}

@@ -189,6 +189,12 @@ namespace gecko::python {
                  py::arg("path"),
                  "Generates a mesh reproducing the blocking (subdivided ``subdivisions`` times per axis) and writes "
                  "it as a VTK legacy ASCII file.")
+            .def("block_volumes",
+                 &BlockingFacade::block_volumes,
+                 py::arg("subdivisions") = 1,
+                 "Signed volume of every block, from its own stored geometry. Exact at 1 subdivision for a block "
+                 "with planar faces; converges as it grows for a curved one. A negative value means that block's "
+                 "frame is inverted.")
             .def("sheet_edges",
                  &BlockingFacade::sheet_edges,
                  py::arg("edge_index"),

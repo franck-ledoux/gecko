@@ -310,3 +310,79 @@ def test_cut_sheet_rejects_an_unknown_edge_index(geom_model_path):
         blocking.cut_sheet(999, 0.5)
     with pytest.raises(IndexError):
         blocking.sheet_edges(-1)
+
+
+# The 1x1x2 block of the cut scenario, in create_hex_block's expected HEX8 order.
+_TALL_BOX = [
+    (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0),
+    (0.0, 0.0, 2.0), (1.0, 0.0, 2.0), (1.0, 1.0, 2.0), (0.0, 1.0, 2.0),
+]
+
+
+def _edge_between(blocking, p, q):
+    """The edge joining 2 positions, as a position in the order the cut API speaks."""
+    ends = blocking.edge_vertices(1)
+    for i in range(blocking.nb_cells(1)):
+        pair = {tuple(round(x, 9) for x in ends[i * 2]), tuple(round(x, 9) for x in ends[i * 2 + 1])}
+        if pair == {p, q}:
+            return i
+    raise AssertionError("no edge between %r and %r" % (p, q))
+
+
+def test_cutting_a_tall_block_in_half_gives_two_blocks_of_volume_one(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_TALL_BOX)
+    assert blocking.block_volumes() == pytest.approx([2.0])
+
+    edge = _edge_between(blocking, (0.0, 0.0, 0.0), (0.0, 0.0, 2.0))
+    assert blocking.cut_sheet(edge, 0.5)
+
+    assert blocking.nb_cells(3) == 2
+    assert blocking.is_valid_topology()
+
+    # Measured from each block's own stored geometry, coarsely and finely: a half carrying the wrong
+    # sub-volume, or the right one in a rotated frame, still matches its corners and misses in
+    # between. Volume is the check that notices.
+    for subdivisions in (1, 2, 4):
+        assert blocking.block_volumes(subdivisions) == pytest.approx([1.0, 1.0])
+
+    # The 2 halves meet along one face carrying exactly the 4 midplane corners.
+    midplane = sorted(tuple(round(c, 9) for c in blocking.node_position(i))
+                      for i in blocking.node_ids()
+                      if abs(blocking.node_position(i)[2] - 1.0) < 1e-9)
+    assert midplane == [(0.0, 0.0, 1.0), (0.0, 1.0, 1.0), (1.0, 0.0, 1.0), (1.0, 1.0, 1.0)]
+
+
+def test_cutting_off_centre_splits_the_volume_in_the_same_ratio(geom_model_path):
+    # At exactly 0.5 a swapped side, a transposed frame and a mirrored half all still measure 1 and
+    # 1; off-centre they cannot, which makes this the sharper check of the two.
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_TALL_BOX)
+
+    edge = _edge_between(blocking, (0.0, 0.0, 0.0), (0.0, 0.0, 2.0))
+    assert blocking.cut_sheet(edge, 0.25)
+
+    assert sorted(blocking.block_volumes(4)) == pytest.approx([0.5, 1.5])
+    # A quarter of the way from the edge's own start, so the cut plane lands at z=0.5.
+    zs = sorted({round(blocking.node_position(i)[2], 9) for i in blocking.node_ids()})
+    assert zs == [0.0, 0.5, 2.0]
+
+
+@pytest.mark.parametrize("degree", [1, 3])
+def test_every_edge_cuts_a_block_into_two_positive_volumes(geom_model_path, degree):
+    # Which frame each half lands in is CGAL's choice, and frame bugs show on some edges while
+    # sparing others — so sweep all 12 rather than trusting one.
+    for index in range(12):
+        model = gecko.GeomModel(geom_model_path)
+        blocking = gecko.Blocking(model, degree=degree)
+        blocking.create_hex_block(_TALL_BOX)
+        assert blocking.cut_sheet(index, 0.25)
+
+        volumes = blocking.block_volumes(4)
+        assert len(volumes) == 2
+        # Positive, so neither half came out inverted, and adding back up to the whole.
+        assert min(volumes) > 0.0
+        assert sum(volumes) == pytest.approx(2.0)
+        assert sorted(volumes) == pytest.approx([0.5, 1.5])

@@ -141,9 +141,15 @@ namespace gecko {
             }
 
             Face f = m_cmap.template create_attribute<2>();
-            // EdgeU0, EdgeU1, EdgeV0, EdgeV1 per QUAD_EDGES' own indices 0,2,3,1.
-            f->info().surface = coons_surface_from_edges(curves[0], curves[2], curves[3], curves[1]);
             m_cmap.template set_attribute<2>(d1, f);
+            // Pinned, because `set_attribute` is free to leave the attribute pointing at any dart of
+            // the cell, and everything that later reads a face's surface — `build_face_grid()`,
+            // `rebuild_face_surface()` — anchors `(u,v)` to the cycle starting at *that* dart. Left
+            // to chance, the stored surface and its readers would disagree by a square symmetry.
+            f->set_dart(d1);
+            // Built from that cycle rather than from `curves` directly, so the frame holds whatever
+            // dart the cell ends up on later.
+            rebuild_face_surface(f);
             return f;
         }
 
@@ -219,20 +225,37 @@ namespace gecko {
                     fd = m_cmap.template beta<1>(fd);
                 }
                 const std::size_t f = find_face(corner_idx);
+                (void)f;
                 Face face = create_face();
-                face->info().surface = face_surfaces[f];
                 m_cmap.template set_attribute<2>(it, face);
+                face->set_dart(it);
+                // Deliberately *not* `face_surfaces[f]`: that one is parameterized in HEX_FACES'
+                // frame, while everything that later reads a face's surface — `build_face_grid()`,
+                // `rebuild_face_surface()` — anchors `(u,v)` to the face's own dart cycle, which is
+                // some rotation or reflection of it. Storing the HEX_FACES form would leave the 2
+                // disagreeing by a square symmetry. That went unnoticed for as long as faces were
+                // only ever sampled on a uniform grid, which a transpose maps onto itself; a sheet
+                // cut is the first thing to sample one asymmetrically, and it put the edge it
+                // inserts across the wrong axis. Rebuilding here yields the very same Coons patch,
+                // in the frame the rest of the class agrees on.
+                rebuild_face_surface(face);
                 m_hex_faces.push_back(face);
             }
 
             Block b = m_cmap.template create_attribute<3>();
-            b->info().volume = tfi_volume_from_faces(face_surfaces[0],
-                                                     face_surfaces[1],
-                                                     face_surfaces[2],
-                                                     face_surfaces[3],
-                                                     face_surfaces[4],
-                                                     face_surfaces[5]);
             m_cmap.template set_attribute<3>(d1, b);
+            // Pinned for the same reason as the faces above: `emit_hex_cells()` and
+            // `rebuild_block_volume()` both walk the block's corners from whatever dart the
+            // attribute holds, so leaving it unpinned lets the stored volume and its readers
+            // disagree by a cube symmetry.
+            b->set_dart(d1);
+            // Rebuilt from the block's own dart cycle rather than assembled from `face_surfaces`
+            // directly, for the same reason the faces above are: the TFI of those 6 surfaces is
+            // parameterized in the order the caller passed its corners in, while `emit_hex_cells()`
+            // and `rebuild_block_volume()` both anchor `(u,v,w)` to the cycle CGAL gives the 3-cell.
+            // The 2 differ by a cube symmetry whenever those disagree, which a uniform sampling
+            // hides and a sheet cut does not — it would split the block across the wrong axis.
+            rebuild_block_volume(b);
             return b;
         }
 
@@ -609,6 +632,79 @@ namespace gecko {
                 return std::nullopt;
             }
             return sheet;
+        }
+
+        /**
+         * @brief Measures the volume one block encloses, from its own stored geometry.
+         *
+         * The block's `volume.value(u,v,w)` is sampled on an `(S+1)^3` grid and the resulting `S^3`
+         * sub-hexes are each split into 6 tetrahedra around a main diagonal, whose signed volumes are
+         * summed. That makes the answer **exact** for a block whose faces are planar — an axis-aligned
+         * box at `ASubdivisions = 1` measures its extent exactly — and an approximation that converges
+         * as `ASubdivisions` grows for a curved or warped one, whose bilinear faces no tetrahedral
+         * split can follow exactly.
+         *
+         * The result is signed, so a block whose frame ended up inverted reports a negative volume
+         * rather than silently reading as valid.
+         *
+         * @param ABlock The block to measure.
+         * @param ASubdivisions Intervals per parametric axis; must be >= 1.
+         * @return Its signed volume.
+         */
+        double block_volume(Block ABlock, SizeT ASubdivisions = 1) {
+            assert(ASubdivisions >= 1 && "Blocking::block_volume: ASubdivisions must be >= 1");
+            const std::size_t s = ASubdivisions;
+            const auto at = [&](std::size_t i, std::size_t j, std::size_t k) {
+                const double d = static_cast<double>(s);
+                return ABlock->info().volume.value(
+                    static_cast<double>(i) / d, static_cast<double>(j) / d, static_cast<double>(k) / d);
+            };
+
+            // The 6 tetrahedra around the 0-6 diagonal, which tile a hexahedron of planar faces.
+            static constexpr std::array<std::array<std::size_t, 4>, 6> TETS = {std::array<std::size_t, 4>{0, 1, 2, 6},
+                                                                               {0, 2, 3, 6},
+                                                                               {0, 3, 7, 6},
+                                                                               {0, 7, 4, 6},
+                                                                               {0, 4, 5, 6},
+                                                                               {0, 5, 1, 6}};
+            double total = 0.0;
+            for (std::size_t i = 0; i < s; ++i) {
+                for (std::size_t j = 0; j < s; ++j) {
+                    for (std::size_t k = 0; k < s; ++k) {
+                        // The sub-hex's 8 corners, in the same HEX8 order HEX_CORNER_UVW describes.
+                        const std::array<Point3d, 8> c = {at(i, j, k),
+                                                          at(i + 1, j, k),
+                                                          at(i + 1, j + 1, k),
+                                                          at(i, j + 1, k),
+                                                          at(i, j, k + 1),
+                                                          at(i + 1, j, k + 1),
+                                                          at(i + 1, j + 1, k + 1),
+                                                          at(i, j + 1, k + 1)};
+                        for (const auto &t : TETS) {
+                            const Vector3d u(c[t[0]], c[t[1]]);
+                            const Vector3d v(c[t[0]], c[t[2]]);
+                            const Vector3d w(c[t[0]], c[t[3]]);
+                            total += u.cross(v).dot(w) / 6.0;
+                        }
+                    }
+                }
+            }
+            return total;
+        }
+
+        /**
+         * @brief Measures every block of the blocking, in the order `attributes<3>()` traverses them.
+         * @param ASubdivisions Intervals per parametric axis; must be >= 1 (see `block_volume()`).
+         * @return One signed volume per block.
+         */
+        std::vector<double> block_volumes(SizeT ASubdivisions = 1) {
+            std::vector<double> volumes;
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                volumes.push_back(block_volume(it, ASubdivisions));
+            }
+            return volumes;
         }
 
         /**
@@ -2701,6 +2797,86 @@ namespace gecko {
         }
 
         /**
+         * @brief Re-expresses a volume given in some source frame into a target frame that differs
+         * from it by one of the 48 cube symmetries.
+         *
+         * The 3D counterpart of `reframed_surface()`, and needed for the same reason: a cut produces
+         * sub-volumes in the frame of the block they were cut out of, but each half is a *new* 3-cell
+         * whose own frame comes from its own dart cycle — which CGAL builds, not us, and which is
+         * generally some rotation or reflection of the parent's. Everything that later reads a
+         * block's volume (`emit_hex_cells()`, `rebuild_block_volume()`) anchors `(u,v,w)` to that own
+         * cycle, so the sub-volume has to be re-indexed into it.
+         *
+         * @param ASource The volume, in the source frame.
+         * @param ACornerUVW Where the target frame's 8 local corners sit in the source frame, each
+         *        coordinate 0 or 1, in `HEX_CORNER_UVW` order.
+         * @return The same volume, re-indexed into the target frame.
+         */
+        static BlockVolumeT reframed_volume(const BlockVolumeT &ASource,
+                                            const std::array<std::array<int, 3>, 8> &ACornerUVW) {
+            constexpr std::size_t n = BlockVolumeT::Degree;
+            // Corner 0 to corners 1/3/4 walk the target's own u/v/w; whichever source axis moves
+            // along each is the one it maps to, and corner 0's own position gives the direction.
+            std::array<std::size_t, 3> axis_of{};
+            for (std::size_t target = 0; target < 3; ++target) {
+                const std::size_t neighbour = (target == 0) ? 1 : (target == 1 ? 3 : 4);
+                for (std::size_t k = 0; k < 3; ++k) {
+                    if (ACornerUVW[neighbour][k] != ACornerUVW[0][k]) axis_of[target] = k;
+                }
+            }
+
+            typename BlockVolumeT::ControlGrid grid{};
+            for (std::size_t p = 0; p <= n; ++p) {
+                for (std::size_t q = 0; q <= n; ++q) {
+                    for (std::size_t r = 0; r <= n; ++r) {
+                        const std::array<std::size_t, 3> along{p, q, r};
+                        std::array<std::size_t, 3> src{};
+                        for (std::size_t target = 0; target < 3; ++target) {
+                            const std::size_t k = axis_of[target];
+                            src[k] = (ACornerUVW[0][k] == 0) ? along[target] : (n - along[target]);
+                        }
+                        grid[p][q][r] = ASource.control_points()[src[0]][src[1]][src[2]];
+                    }
+                }
+            }
+            return BlockVolumeT(grid);
+        }
+
+        /**
+         * @brief Stores one half of a split block's volume, re-expressed in that half's own frame.
+         * @param AHalf The half block to write to.
+         * @param AVolume Its volume, still in the parent block's frame.
+         * @param ASheetBlock The parent block, as the sheet captured it.
+         * @param AMids Every node `split_sheet_edges()` inserted.
+         * @param ALow Whether @p AHalf is the near-side half of the cut.
+         * @param AAxis The parent's axis the cut ran across.
+         */
+        void assign_half_block(Block AHalf,
+                               const BlockVolumeT &AVolume,
+                               const SheetBlock &ASheetBlock,
+                               const std::map<Node, MidNode> &AMids,
+                               bool ALow,
+                               std::size_t AAxis) {
+            const std::array<Node, 8> corners = block_local_nodes(AHalf);
+            std::array<std::array<int, 3>, 8> corner_uvw{};
+            for (std::size_t c = 0; c < 8; ++c) {
+                const auto mid = AMids.find(corners[c]);
+                if (mid != AMids.end()) {
+                    // A cut node keeps the parent coordinates of the edge it was born on across the
+                    // 2 axes the cut left alone, and sits at the far end of the near half along the
+                    // third — the near end of the far half.
+                    const int idx = node_index(ASheetBlock.corners, mid->second.from);
+                    corner_uvw[c] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)];
+                    corner_uvw[c][AAxis] = ALow ? 1 : 0;
+                } else {
+                    const int idx = node_index(ASheetBlock.corners, corners[c]);
+                    corner_uvw[c] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)];
+                }
+            }
+            AHalf->info().volume = reframed_volume(AVolume, corner_uvw);
+        }
+
+        /**
          * @brief Splits every block of a sheet, inserting one face per block along the cut.
          * @param ASheet The sheet being cut.
          * @param AParam The cut parameter, as `cut_sheet()` defines it.
@@ -2754,8 +2930,8 @@ namespace gecko {
                     if (HEX_CORNER_UVW[c][axis] == 0) low_corner = c;
                 }
                 const bool a_is_low = block_has_node(half_a, sb.corners[low_corner]);
-                (a_is_low ? half_a : half_b)->info().volume = low;
-                (a_is_low ? half_b : half_a)->info().volume = high;
+                assign_half_block(a_is_low ? half_a : half_b, low, sb, AMids, true, axis);
+                assign_half_block(a_is_low ? half_b : half_a, high, sb, AMids, false, axis);
             }
         }
 

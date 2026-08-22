@@ -181,6 +181,11 @@ namespace gecko::python {
         }
     } // namespace
 
+    std::vector<double> BlockingFacade::block_volumes(int subdivisions) {
+        check_subdivisions(subdivisions, "Blocking.block_volumes");
+        return std::visit([subdivisions](auto &impl) { return impl.blocking.block_volumes(subdivisions); }, m_impl);
+    }
+
     std::vector<int> BlockingFacade::sheet_edges(int edge_index) {
         return std::visit(
             [edge_index](auto &impl) {

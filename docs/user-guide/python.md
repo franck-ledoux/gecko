@@ -94,6 +94,10 @@ sheet = blocking.sheet_edges(0)                 # [] if the sheet cannot be cut 
 preview = blocking.sheet_cut_points(0, 0.5)     # one point per edge of `sheet`, in the same order
 blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if the cut is impossible
 
+# What each block encloses, from its own stored geometry — exact at 1 subdivision when its faces are
+# planar, converging as it grows otherwise. Negative means that block came out inverted.
+print(blocking.block_volumes(subdivisions=1))
+
 # The halves keep the geometry they were cut out of exactly (De Casteljau subdivision, not a refit),
 # so meshing after a cut traces the same points as before. Note classify() rebuilds faces and blocks
 # from their boundaries and so discards that — cut first, classify after.
