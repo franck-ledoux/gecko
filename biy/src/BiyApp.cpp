@@ -1093,14 +1093,32 @@ namespace gecko::biy {
         // Its own 8 points rather than the whole blocking's: a structure carrying every corner would
         // draw a marker at each of them.
         const auto points = m_blocking->mesh_vertices(1);
-        std::vector<std::array<double, 3>> corners;
-        corners.reserve(8);
-        for (const int node : hexes[index]) {
-            corners.push_back(points[static_cast<std::size_t>(node)]);
+        std::array<std::array<double, 3>, 8> corners{};
+        std::array<double, 3> centre{0.0, 0.0, 0.0};
+        for (std::size_t c = 0; c < 8; ++c) {
+            corners[c] = points[static_cast<std::size_t>(hexes[index][c])];
+            for (std::size_t k = 0; k < 3; ++k) {
+                centre[k] += corners[c][k] / 8.0;
+            }
         }
+
+        // Grown very slightly about its own centre. At the block's own size the highlight sits
+        // exactly on the faces it is meant to mark and z-fights with them — half its surface
+        // winning, half losing, which reads on screen as no highlight rather than as one. A shell
+        // just outside is unambiguous, and small enough not to look like a different block.
+        const double scale = m_config.delete_highlight_scale;
+        std::vector<std::array<double, 3>> shell;
+        shell.reserve(8);
+        for (const auto &corner : corners) {
+            shell.push_back({centre[0] + (corner[0] - centre[0]) * scale,
+                             centre[1] + (corner[1] - centre[1]) * scale,
+                             centre[2] + (corner[2] - centre[2]) * scale});
+        }
+
         auto *preview = polyscope::registerHexMesh(
-            DELETE_PREVIEW, corners, std::vector<std::array<int, 8>>{{0, 1, 2, 3, 4, 5, 6, 7}});
+            DELETE_PREVIEW, shell, std::vector<std::array<int, 8>>{{0, 1, 2, 3, 4, 5, 6, 7}});
         preview->setColor(to_glm(m_config.delete_highlight_color));
+        preview->setEdgeWidth(1.0);
     }
 
     void BiyApp::handle_delete() {
@@ -1120,8 +1138,15 @@ namespace gecko::biy {
         const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
         if (mouse != m_last_delete_mouse) {
             m_last_delete_mouse = mouse;
+            const auto previous = m_hover_block;
             update_delete_hover(mouse);
             refresh_delete_preview();
+            // Said out loud as the cursor moves, not only once a block is gone: a highlight on its
+            // own leaves "am I even on one?" unanswered precisely when the answer is no.
+            if (m_hover_block != previous) {
+                m_status = m_hover_block ? "Block " + std::to_string(*m_hover_block) + " — click or Space to delete"
+                                         : "No block under the cursor";
+            }
         }
     }
 

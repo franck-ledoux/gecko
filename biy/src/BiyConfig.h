@@ -130,6 +130,10 @@ namespace gecko::biy {
 
         /** @brief Color the block under the cursor is drawn in, in Delete mode. */
         std::array<float, 3> delete_highlight_color{0.9f, 0.15f, 0.2f};
+        /** @brief How much larger than the block itself its Delete-mode highlight is drawn, about the
+         * block's own centre. Must be greater than 1: drawn at the same size it would sit exactly on
+         * the block's faces and z-fight with them, which reads as nothing at all. */
+        double delete_highlight_scale = 1.02;
 
         /**
          * @brief Picks the color a corner should be drawn in.

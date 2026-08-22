@@ -38,6 +38,7 @@
   "cut_point_radius": 0.013,
   "cut_snap_tolerance": 0.04,
   "delete_highlight_color": [0.9, 0.15, 0.2],
+  "delete_highlight_scale": 1.02,
 
   "show_edge_control": false,
   "show_face_control": false,

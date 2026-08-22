@@ -94,8 +94,10 @@ namespace gecko::python {
             [](auto &impl) {
                 impl.blocking.build_connectivity();
                 // Sewing merges each pair of coincident corners into one attribute, discarding the
-                // other — ids still pointing at the discarded one have to go.
+                // other — ids still pointing at the discarded one have to go, and whatever the merge
+                // left unnamed has to be picked up.
                 impl.forget_stale_nodes();
+                impl.index_new_nodes();
             },
             m_impl);
     }
@@ -188,9 +190,14 @@ namespace gecko::python {
         std::visit(
             [block_index](auto &impl) {
                 impl.blocking.delete_block(block_at(impl, block_index));
-                // A deletion takes corner nodes with it, so ids pointing at them have to go too —
-                // an id map holding freed attributes is worse than one that has forgotten them.
+                // A deletion takes corner nodes with it, so ids pointing at them have to go. But
+                // pruning alone leaves the map *short*: erasing a block's darts disturbs the vertex
+                // orbits of the corners it shared, and CGAL rebuilds an attribute rather than
+                // re-pointing it whenever it has to — so a corner that is still very much there can
+                // come back as a different attribute, which no id then names. Prune, then re-index,
+                // or node_ids() quietly stops listing corners the blocking still has.
                 impl.forget_stale_nodes();
+                impl.index_new_nodes();
             },
             m_impl);
     }

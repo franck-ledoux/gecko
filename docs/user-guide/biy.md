@@ -272,8 +272,15 @@ There is no precondition, unlike deleting a *face* in a 2D blocking: a block is 
 and leaving the blocking in several disconnected pieces is a legitimate thing to be in the middle
 of. There is also no undo — the status line and the terminal both report what was removed.
 
+The block under the cursor is outlined by a shell drawn just outside it — a hair larger than the
+block, not the same size, since a highlight sitting exactly on the faces it marks z-fights with them
+and reads on screen as no highlight at all. The status line names the block as the cursor moves, and
+says so when the cursor is over none, which a highlight alone cannot.
+
 Aiming needs the **blocks** row ticked in the Scene panel; with it hidden there is nothing to point
-at, and the terminal says so rather than the click doing nothing.
+at, and the terminal says so rather than the click doing nothing. Only blocks you can see are
+reachable — the blocks are drawn as solids, so the pick lands on the outermost one along the line of
+sight. Peeling a grid from the outside in works; reaching straight into the middle of one does not.
 
 ## Configuration
 
@@ -336,6 +343,7 @@ is a copy of the defaults:
 | `cut_point_color`, `cut_point_radius`                                                             | Color and size of the markers showing where a cut would land                             |
 | `cut_snap_tolerance`                                                                              | How close to an edge's middle the cursor snaps the cut to exactly 0.5                    |
 | `delete_highlight_color`                                                                          | Color of the block about to be deleted, in Delete mode                                   |
+| `delete_highlight_scale`                                                                          | How much larger than the block its highlight shell is drawn                              |
 | `gizmo_size`, `gizmo_dot_radius`                                                                  | Size of the orientation gizmo's canvas, and of a dot at rest                             |
 | `gizmo_color_x`, `gizmo_color_y`, `gizmo_color_z`                                                 | Color of each axis's dots and label                                                      |
 | `geometry_volume_color`                                                                           | Color of the model's volumes                                                             |

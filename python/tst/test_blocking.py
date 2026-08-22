@@ -515,3 +515,60 @@ def test_delete_block_rejects_an_unknown_index(geom_model_path):
     with pytest.raises(IndexError):
         blocking.delete_block(-1)
     assert blocking.nb_cells(3) == 1
+
+
+def test_deleting_blocks_keeps_every_corner_addressable(geom_model_path):
+    # Erasing a block's darts disturbs the vertex orbits of the corners it shared, and CGAL rebuilds
+    # an attribute rather than re-pointing it whenever it has to — so a corner that is still there
+    # can come back as a different attribute. Pruning the id map without re-indexing then quietly
+    # loses it, and node_ids() stops listing corners the blocking still has. Only shows up when the
+    # blocks are removed in an order that leaves survivors touching at a corner or an edge alone.
+    import random
+
+    random.seed(7)
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_TALL_BOX)
+    for _ in range(3):
+        assert blocking.cut_sheet(random.randrange(blocking.nb_cells(1)), 0.5)
+
+    while blocking.nb_cells(3) > 0:
+        blocking.delete_block(random.randrange(blocking.nb_cells(3)))
+        assert blocking.is_valid_topology()
+        # Every corner the blocking has must still be addressable, and every id must still resolve.
+        assert len(blocking.node_ids()) == blocking.nb_cells(0)
+        for node_id in blocking.node_ids():
+            blocking.node_position(node_id)
+        assert len(blocking.node_classification_dims()) == blocking.nb_cells(0)
+
+
+def test_deleting_blocks_never_bends_a_straight_grid(geom_model_path):
+    # A cut of a straight block gives straight halves, and a deletion moves nothing at all — so a
+    # grid built this way has no reason to bend, whatever order its blocks come out in. Measured on
+    # the control points, which is what the viewer draws.
+    import random
+
+    random.seed(3)
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_TALL_BOX)
+    for _ in range(3):
+        assert blocking.cut_sheet(random.randrange(blocking.nb_cells(1)), 0.5)
+
+    def worst_bend():
+        points = blocking.edge_control_points()
+        worst = 0.0
+        for e in range(len(points) // 4):
+            a, b, c, d = points[e * 4:e * 4 + 4]
+            chord = [d[k] - a[k] for k in range(3)]
+            length2 = sum(v * v for v in chord)
+            for p in (b, c):
+                ap = [p[k] - a[k] for k in range(3)]
+                t = sum(ap[k] * chord[k] for k in range(3)) / length2 if length2 > 0 else 0.0
+                worst = max(worst, sum((ap[k] - t * chord[k]) ** 2 for k in range(3)) ** 0.5)
+        return worst
+
+    assert worst_bend() < 1e-12
+    while blocking.nb_cells(3) > 0:
+        blocking.delete_block(random.randrange(blocking.nb_cells(3)))
+        assert worst_bend() < 1e-12
