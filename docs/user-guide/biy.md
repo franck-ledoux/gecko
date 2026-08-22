@@ -150,6 +150,13 @@ that curve, while a diagonal whose corners belong to different curves lands on t
 share — even though its midpoint may sit closer to a curve. Proximity is only the fallback, used
 when the boundary can't decide (an unclassified corner, say).
 
+Classifying a cell also **fits its geometry to what it landed on**, and that reaches inside the cell,
+not just around its rim. An edge on a model curve is fitted through points taken on that curve; a
+face on a model surface then has its interior pulled onto that surface, and the block behind it
+follows its own faces. Without that last step a face would be nothing but a blend of its 4 boundary
+edges — which on a sphere leaves the edges on the model and the middle of every face a fifth of the
+radius inside it, no matter how high the order goes. Blue faces really are on the blue surface.
+
 ## Snapping
 
 `classify()` takes **three** tolerances — vertex, curve, surface — editable in the panel. They are

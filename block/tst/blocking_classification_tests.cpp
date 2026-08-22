@@ -1,5 +1,8 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <map>
+#include <string>
 #include <filesystem>
 #include <vector>
 
@@ -16,6 +19,81 @@ using Catch::Approx;
 using namespace gecko;
 
 namespace {
+    /**
+     * @brief A faceted unit sphere centred on the origin: one tagged surface (tag 1) of 2048
+     * triangles, obtained by subdividing an octahedron 4 times and pushing every node out to radius
+     * 1. No tagged vertices or curves — nothing here should ever classify below dimension 2.
+     *
+     * Doubly curved on purpose. A cylinder is developable along its axis, so a Coons patch spanning
+     * one already follows it closely and cannot tell a face that was fitted to the geometry from one
+     * that merely interpolates its 4 boundary curves. A sphere separates the 2 by a factor of 4.
+     */
+    FacetedGeometry make_sphere_geom_model() {
+        std::array<Point3d, 6> axis = {Point3d(1, 0, 0),
+                                       Point3d(-1, 0, 0),
+                                       Point3d(0, 1, 0),
+                                       Point3d(0, -1, 0),
+                                       Point3d(0, 0, 1),
+                                       Point3d(0, 0, -1)};
+        std::vector<std::array<Point3d, 3>> tris;
+        for (int a = 0; a < 2; ++a) {
+            for (int b = 2; b < 4; ++b) {
+                for (int c = 4; c < 6; ++c) {
+                    tris.push_back({axis[static_cast<std::size_t>(a)],
+                                    axis[static_cast<std::size_t>(b)],
+                                    axis[static_cast<std::size_t>(c)]});
+                }
+            }
+        }
+        const auto on_sphere = [](const Point3d &AP) {
+            const double n = std::sqrt(AP.x() * AP.x() + AP.y() * AP.y() + AP.z() * AP.z());
+            return Point3d(AP.x() / n, AP.y() / n, AP.z() / n);
+        };
+        for (int pass = 0; pass < 4; ++pass) {
+            std::vector<std::array<Point3d, 3>> finer;
+            finer.reserve(tris.size() * 4);
+            for (const auto &t : tris) {
+                const Point3d m01 = on_sphere(t[0] + Vector3d(t[0], t[1]) * 0.5);
+                const Point3d m12 = on_sphere(t[1] + Vector3d(t[1], t[2]) * 0.5);
+                const Point3d m20 = on_sphere(t[2] + Vector3d(t[2], t[0]) * 0.5);
+                finer.push_back({t[0], m01, m20});
+                finer.push_back({m01, t[1], m12});
+                finer.push_back({m20, m12, t[2]});
+                finer.push_back({m01, m12, m20});
+            }
+            tris.swap(finer);
+        }
+
+        SimplicialMesh mesh;
+        GroupRegistry groups;
+        auto surf_group = groups.add_group("Sphere", GroupDim::Dim2);
+        auto &face_group = mesh.add_variable<GroupId, CellType::Face>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+        auto &face_entity = mesh.add_variable<Int, CellType::Face>(std::string(io::ENTITY_TAG_VARIABLE));
+        std::map<std::array<long, 3>, NodeId> seen;
+        const auto node_of = [&](const Point3d &AP) {
+            // Keyed on rounded coordinates so the 3 triangles meeting at a node share it: the
+            // subdivision recomputes each midpoint once per incident triangle.
+            const std::array<long, 3> key{
+                std::lround(AP.x() * 1e9), std::lround(AP.y() * 1e9), std::lround(AP.z() * 1e9)};
+            const auto it = seen.find(key);
+            if (it != seen.end()) return it->second;
+            const NodeId id = mesh.add_node(AP.x(), AP.y(), AP.z());
+            seen.emplace(key, id);
+            return id;
+        };
+        for (const auto &t : tris) {
+            const auto f = mesh.add_face(node_of(t[0]), node_of(t[1]), node_of(t[2]));
+            face_group[f.value] = surf_group;
+            face_entity[f.value] = 1;
+        }
+
+        const auto path = (std::filesystem::temp_directory_path() / "gecko_sphere_test.msh").string();
+        io::SimplicialMeshWriter::write(path, mesh, groups);
+        FacetedGeometry geom(path);
+        std::filesystem::remove(path);
+        return geom;
+    }
+
     /**
      * @brief A unit-square boundary-rep fixture: 4 tagged vertices (1-4), 4 tagged straight
      * boundary curves (10-13, one edge each) and 1 tagged surface (20, 2 triangles), all in the
@@ -388,4 +466,90 @@ TEST_CASE("hex_block_classification_against_real_multi_volume_gmsh_file", "[Bloc
 
     auto mesh = blocking.to_mesh(10);
     REQUIRE(mesh.nb_cells() == 1000);
+}
+
+TEST_CASE("a_face_classified_on_a_curved_surface_has_its_interior_on_it_too", "[BlockTestSuite]") {
+    // A face's surface is a Coons patch of its 4 boundary curves, and a Coons patch of 4 curves that
+    // lie on a sphere does not lie on the sphere — it interpolates the boundary and then blends
+    // straight across the middle. So classifying a face onto a surface has to *pull* its interior
+    // onto that surface, the way classifying an edge onto a curve pulls its interior onto the curve.
+    // Without that the edges of a block sit on the model while the middle of every face hangs a
+    // fifth of the radius inside it, and raising the order does not help, because nothing in the
+    // construction refers to the model at all.
+    const FacetedGeometry geom = make_sphere_geom_model();
+
+    const double h = 1.0 / std::sqrt(3.0); // the cube inscribed in the unit sphere
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(-h, -h, -h),
+                               Point3d(h, -h, -h),
+                               Point3d(h, h, -h),
+                               Point3d(-h, h, -h),
+                               Point3d(-h, -h, h),
+                               Point3d(h, -h, h),
+                               Point3d(h, h, h),
+                               Point3d(-h, h, h)});
+    // Nothing is tagged below dimension 2, so only the surface tolerance matters; it is opened wide
+    // enough to reach the sphere from the inscribed cube's corners.
+    blocking.classify(1e-9, 1e-9, 2.0);
+
+    // How far a point is from the sphere. Measured against the analytic radius rather than the
+    // faceted projection, so the fixture's own faceting shows up as a small constant on every row
+    // instead of being silently absorbed.
+    const auto off_sphere = [](const Point3d &AP) {
+        return std::abs(std::sqrt(AP.x() * AP.x() + AP.y() * AP.y() + AP.z() * AP.z()) - 1.0);
+    };
+
+    auto &map = blocking.cmap();
+    double worst_corner = 0.0;
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        worst_corner = std::max(worst_corner, off_sphere(it->info().point));
+    }
+    double worst_edge = 0.0;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        for (int i = 1; i < 8; ++i) {
+            worst_edge = std::max(worst_edge, off_sphere(it->info().curve.value(i / 8.0)));
+        }
+    }
+    int checked = 0;
+    double worst_face = 0.0;
+    for (auto it = map.attributes<2>().begin(), end = map.attributes<2>().end(); it != end; ++it) {
+        const auto &targets = it->info().geom_targets;
+        REQUIRE(!targets.empty());
+        REQUIRE(targets.front().first == GroupDim::Dim2);
+        ++checked;
+        for (int i = 1; i < 8; ++i) {
+            for (int j = 1; j < 8; ++j) {
+                worst_face = std::max(worst_face, off_sphere(it->info().surface.value(i / 8.0, j / 8.0)));
+            }
+        }
+    }
+    REQUIRE(checked == 6);
+
+    // The corners are projected onto the geometry outright, so they are off the analytic sphere by
+    // the fixture's faceting alone. The edges are fitted through points taken on it and carry, on
+    // top of that, the error of a cubic through 4 points of a 70-degree arc — which a cube's edge on
+    // a sphere is.
+    REQUIRE(worst_corner < 5e-3);
+    REQUIRE(worst_edge < 2e-2);
+
+    // The interior lands within about twice the edges' own error. A plain Coons patch of the very
+    // same 4 boundary curves misses by 0.18 here — more than a sixth of the radius — so this bound
+    // sits between the 2, wide enough not to be brittle and tight enough that dropping the refit
+    // fails it.
+    REQUIRE(worst_face < 9e-2);
+
+    // And the block's own volume follows its faces rather than re-deriving a Coons patch of its
+    // edges, which would put its boundary where its faces are not.
+    for (auto it = map.attributes<3>().begin(), end = map.attributes<3>().end(); it != end; ++it) {
+        for (int i = 0; i <= 4; ++i) {
+            for (int j = 0; j <= 4; ++j) {
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, j / 4.0, 0.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, j / 4.0, 1.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, 0.0, j / 4.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, 1.0, j / 4.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(0.0, i / 4.0, j / 4.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(1.0, i / 4.0, j / 4.0)) < 9e-2);
+            }
+        }
+    }
 }

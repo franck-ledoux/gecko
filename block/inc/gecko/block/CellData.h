@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -68,6 +69,18 @@ namespace gecko {
     struct FaceInfo : CellInfo {
         /** @brief The face's own surface, built via Coons construction from its 4 boundary edges. */
         TFaceSurface surface;
+        /**
+         * @brief The `NodeInfo::id` of each of the 4 corners `surface` is parameterized against, at
+         * `(u,v)` = (0,0), (1,0), (1,1), (0,1); all -1 until the face has a surface.
+         *
+         * Recorded rather than re-derived, and that is the whole point. A local frame worked out
+         * from the face on demand — from its dart, from an ordering of its corners — rests on
+         * something CGAL is free to change underneath it, and when it changes the surface stored in
+         * that frame quietly reads back rotated or mirrored. Writing the frame down alongside the
+         * surface it belongs to removes the question: whoever reads it later matches these ids
+         * against the face's corners and gets the frame the surface was actually written in.
+         */
+        std::array<Int, 4> frame{-1, -1, -1, -1};
     };
 
     /**
@@ -79,6 +92,10 @@ namespace gecko {
     struct BlockInfo : CellInfo {
         /** @brief The block's own volume, built via TFI construction from its 6 bounding faces. */
         TBlockVolume volume;
+        /** @brief The `NodeInfo::id` of each of the 8 corners `volume` is parameterized against, in
+         * `HEX_CORNER_UVW` order; all -1 until the block has a volume.
+         * @see FaceInfo::frame for why the frame is recorded and not re-derived. */
+        std::array<Int, 8> frame{-1, -1, -1, -1, -1, -1, -1, -1};
     };
 
     /**
@@ -109,15 +126,15 @@ namespace gecko {
      */
     /**
      * @struct NodeSplitFunctor
-     * @brief `Cell_attribute` on-split functor for node attributes: copies the original's data, but
-     * deliberately *not* its id, which the copy has to be given afresh.
+     * @brief `Cell_attribute` on-split functor for node attributes: copies the original's data,
+     * id included.
      *
      * CGAL splits a node attribute whenever the vertex orbit behind it comes apart — which deleting
-     * a neighbouring block does. Copying the id along with everything else leaves 2 nodes claiming
-     * the same one, and the total order a cell's canonical local frame is built from then has a tie
-     * in it. A tie means the frame is settled by whatever the traversal happens to reach first,
-     * which is not the same thing twice, and a frame that moves silently reflects the surface stored
-     * in it. Left as -1 here, and filled in by `Blocking::assign_missing_node_ids()`.
+     * a neighbouring block does — and the copy is still, geometrically and to every cell that has
+     * one as a corner, the same corner. Keeping the id is what lets a cell find its own recorded
+     * frame again afterwards (see `FaceInfo::frame`): the ids in a frame are matched against one
+     * cell's own corners, where 2 copies of a single original node never appear together, so they
+     * need only be unique within a cell and not across the map.
      */
     struct NodeSplitFunctor {
         /**
@@ -130,7 +147,6 @@ namespace gecko {
         template<class TCellAttribute>
         void operator()(TCellAttribute &ACA1, TCellAttribute &ACA2) const {
             ACA2.info() = ACA1.info();
-            ACA2.info().id = -1;
         }
     };
 

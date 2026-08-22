@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <vector>
@@ -39,6 +41,97 @@ namespace {
         FacetedGeometry geom(path);
         std::filesystem::remove(path);
         return geom;
+    }
+
+    /** @brief The edge of @p ABlocking that runs along @p AAxis and whose midpoint is nearest
+     * @p APoint. Positions are only ever compared for *nearness* here, never for equality: a cut
+     * places its node by evaluating a curve, so the node it leaves at parameter 0.37 of a unit edge
+     * is near 0.37 and not equal to it. */
+    template<typename TBlocking>
+    typename TBlocking::Edge edge_running_near(TBlocking &ABlocking, int AAxis, const Point3d &APoint) {
+        auto &map = ABlocking.cmap();
+        typename TBlocking::Edge best{};
+        double best_d = 1e30;
+        for (auto it = map.template attributes<1>().begin(), end = map.template attributes<1>().end(); it != end;
+             ++it) {
+            const auto d = it->dart();
+            const Point3d &a = map.template attribute<0>(d)->info().point;
+            const Point3d &b = map.template attribute<0>(map.template beta<1>(d))->info().point;
+            const std::array<double, 3> pa{a.x(), a.y(), a.z()};
+            const std::array<double, 3> pb{b.x(), b.y(), b.z()};
+            bool runs_along = true;
+            for (int k = 0; k < 3; ++k) {
+                const bool same = std::abs(pa[k] - pb[k]) < 1e-9;
+                if ((k == AAxis) == same) runs_along = false;
+            }
+            if (!runs_along) continue;
+            const double dist = Vector3d(a + Vector3d(a, b) * 0.5, APoint).norm();
+            if (dist < best_d) {
+                best_d = dist;
+                best = it;
+            }
+        }
+        REQUIRE(best_d < 1e30);
+        return best;
+    }
+
+    /** @brief How far the straightest possible edge would have to bend to become @p ACurve — the
+     * largest distance from a sampled point on it to the chord joining its 2 ends. On a blocking cut
+     * out of a box every edge is straight, so anything above rounding is a defect. */
+    template<typename TCurve>
+    double bend_of(const TCurve &ACurve) {
+        const Point3d a = ACurve.value(0.0);
+        const Point3d b = ACurve.value(1.0);
+        const Vector3d chord(a, b);
+        const double len2 = chord.dot(chord);
+        double worst = 0.0;
+        for (int i = 1; i < 16; ++i) {
+            const Point3d p = ACurve.value(i / 16.0);
+            const double t = (len2 > 0.0) ? std::clamp(Vector3d(a, p).dot(chord) / len2, 0.0, 1.0) : 0.0;
+            worst = std::max(worst, Vector3d(p, a + chord * t).norm());
+        }
+        return worst;
+    }
+
+    /** @brief The worst `bend_of()` over every edge of @p ABlocking. */
+    template<typename TBlocking>
+    double worst_edge_bend(TBlocking &ABlocking) {
+        double worst = 0.0;
+        auto &map = ABlocking.cmap();
+        for (auto it = map.template attributes<1>().begin(), end = map.template attributes<1>().end(); it != end;
+             ++it) {
+            worst = std::max(worst, bend_of(it->info().curve));
+        }
+        return worst;
+    }
+
+    /** @brief The block of @p ABlocking whose corner centroid is nearest @p APoint — a way to name a
+     * block for deletion that does not depend on traversal order. */
+    template<typename TBlocking>
+    typename TBlocking::Block block_near(TBlocking &ABlocking, const Point3d &APoint) {
+        auto &map = ABlocking.cmap();
+        typename TBlocking::Block best{};
+        double best_d = 1e30;
+        for (auto it = map.template attributes<3>().begin(), end = map.template attributes<3>().end(); it != end;
+             ++it) {
+            Vector3d acc(0.0, 0.0, 0.0);
+            int n = 0;
+            const auto d0 = it->dart();
+            const Point3d &origin = map.template attribute<0>(d0)->info().point;
+            for (auto c = map.template one_dart_per_incident_cell<0, 3>(d0).begin(),
+                      cend = map.template one_dart_per_incident_cell<0, 3>(d0).end();
+                 c != cend;
+                 ++c, ++n) {
+                acc += Vector3d(origin, map.template attribute<0>(c)->info().point);
+            }
+            const Point3d centre = origin + acc * (1.0 / static_cast<double>(n));
+            const double d = Vector3d(centre, APoint).norm();
+            if (d < best_d) {
+                best_d = d;
+                best = it;
+            }
+        }
+        return best;
     }
 
     /** @brief The 8 corners of an axis-aligned box, in `create_hex_block`'s expected order. */
@@ -676,4 +769,87 @@ TEST_CASE("deleting_every_block_one_by_one_empties_the_blocking", "[BlockTestSui
     blocking.create_hex_block(box(0.0, 1.0));
     REQUIRE(blocking.template nb_cells<3>() == 1);
     REQUIRE(blocking.to_mesh(1).nb_cells() == 1);
+}
+
+TEST_CASE("cutting_after_a_deletion_still_cuts_every_edge_from_the_same_end", "[BlockTestSuite]") {
+    // Cut a box, take 2 blocks out of it, and cut again. Every edge is straight throughout — it is
+    // an axis-aligned box cut by axis-aligned sheets — so any bend at all means a node was placed
+    // somewhere it does not belong.
+    //
+    // What used to put one there: an edge names the end its stored curve starts from, and it named
+    // it by comparing the 2 endpoint attribute *handles*, which are addresses. Deleting a block has
+    // CGAL rebuild the attributes whose vertex orbit came apart, and the 2 addresses can then come
+    // back in the opposite order — while the stored curve, of course, has not moved. The edge then
+    // reports the end it does not start at, so the next sheet cut through it lands at `1-t` there
+    // and at `t` on all its parallels, leaving one node out of line and every edge through it bent.
+    //
+    // Cells are named by their position in the map's own traversal, and the sequence is the shortest
+    // one a search over random cut/delete sequences found that trips it: whether a given deletion
+    // flips a given pair of addresses is not something a geometric description of the operations can
+    // pin down, so a readable "cut this edge, delete that block" sequence does not reproduce it.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+
+    const auto cut_nth = [&](std::size_t AN, double AT) {
+        auto it = blocking.cmap().attributes<1>().begin();
+        std::advance(it, static_cast<long>(AN));
+        REQUIRE(blocking.cut_sheet(it, AT));
+        REQUIRE(blocking.is_valid_topology());
+        REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    };
+    const auto delete_nth = [&](std::size_t AN) {
+        auto it = blocking.cmap().attributes<3>().begin();
+        std::advance(it, static_cast<long>(AN));
+        blocking.delete_block(it);
+        REQUIRE(blocking.is_valid_topology());
+        REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    };
+
+    cut_nth(10, 0.6);
+    cut_nth(3, 0.221);
+    delete_nth(3);
+    delete_nth(2);
+    cut_nth(20, 0.239);
+}
+
+TEST_CASE("cutting_a_holed_grid_leaves_every_edge_straight", "[BlockTestSuite]") {
+    // The same property stated the way a user meets it, and independent of any one traversal order:
+    // cut a box into a grid, punch holes in it, keep cutting, and nothing ever bends.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+
+    const auto cut_along = [&](int AAxis, const Point3d &ANear, double AT) {
+        const auto target = edge_running_near(blocking, AAxis, ANear);
+        REQUIRE(blocking.cut_sheet(target, AT));
+        REQUIRE(blocking.is_valid_topology());
+        REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    };
+    const auto delete_near = [&](const Point3d &ANear) {
+        blocking.delete_block(block_near(blocking, ANear));
+        REQUIRE(blocking.is_valid_topology());
+        REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    };
+
+    // A 2x2x2 grid, cut off-centre so a mirrored cut cannot pass unnoticed.
+    cut_along(0, Point3d(0.5, 0.0, 0.0), 0.37);
+    cut_along(1, Point3d(0.0, 0.5, 0.0), 0.43);
+    cut_along(2, Point3d(0.0, 0.0, 0.5), 0.61);
+    REQUIRE(blocking.template nb_cells<3>() == 8);
+
+    delete_near(Point3d(0.1, 0.1, 0.1));
+    delete_near(Point3d(0.9, 0.9, 0.9));
+    REQUIRE(blocking.template nb_cells<3>() == 6);
+
+    cut_along(0, Point3d(0.7, 0.0, 0.0), 0.29);
+    cut_along(1, Point3d(0.0, 0.7, 0.0), 0.71);
+    cut_along(2, Point3d(0.0, 0.0, 0.8), 0.53);
+
+    delete_near(Point3d(0.9, 0.1, 0.1));
+    delete_near(Point3d(0.1, 0.9, 0.9));
+
+    cut_along(0, Point3d(0.2, 0.0, 0.0), 0.44);
+    cut_along(1, Point3d(0.0, 0.2, 0.0), 0.36);
+    cut_along(2, Point3d(0.0, 0.0, 0.3), 0.62);
 }

@@ -73,7 +73,10 @@ face_a = blocking.create_quad_block([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
 face_b = blocking.create_quad_block([(1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)])
 blocking.build_connectivity()  # sews the shared edge between face_a and face_b
 
-blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)  # snap onto the model
+# Snap onto the model. Corners are projected onto it, and every edge, face and block is then
+# fitted to what it landed on — including the *inside* of each face, which is pulled onto its model
+# surface rather than left as a blend of the 4 boundary curves.
+blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
 # The degree is carried by the geometry, not by its C++ type, so it can be raised or lowered on a
 # blocking that already exists. Topology and classification are kept; only the representation

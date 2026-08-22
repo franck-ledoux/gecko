@@ -649,3 +649,27 @@ def test_set_degree_rejects_a_degree_below_one(geom_model_path):
     with pytest.raises(ValueError):
         blocking.set_degree(0, 1e-6)
     assert blocking.degree() == 3
+
+
+def test_cutting_after_a_deletion_still_cuts_every_edge_from_the_same_end(geom_model_path):
+    # An edge names the end its stored curve starts from. It used to name it by comparing the 2
+    # endpoint attribute addresses, and deleting a block has CGAL rebuild the attributes whose vertex
+    # orbit came apart — after which the 2 addresses can come back in the opposite order, while the
+    # stored curve has not moved. The edge then reports the end it does not start at, so the next cut
+    # through it lands at 1-t there and at t on all its parallels, leaving a node out of line.
+    #
+    # This is the shortest cut/delete sequence a search over random ones found that trips it. The
+    # indices are opaque on purpose: whether a given deletion flips a given pair of addresses is not
+    # something a readable description of the operations can pin down.
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    for step in (("cut", 10, 0.6), ("cut", 3, 0.221), ("del", 3), ("del", 2), ("cut", 20, 0.239)):
+        if step[0] == "cut":
+            assert blocking.cut_sheet(step[1], step[2])
+        else:
+            blocking.delete_block(step[1])
+        assert blocking.is_valid_topology()
+        # A box cut by axis-aligned sheets has none but straight edges, at every step.
+        assert max(blocking.edge_bends()) < 1e-12
