@@ -216,13 +216,18 @@ exactly where the cut would land. The parameter follows the cursor along the edg
 middle as you near it (cutting in half being the common case), and the panel's `Cut at` slider takes
 an exact value when pointing is not precise enough. Click **or press `Space`** to cut.
 
-`Space` is there because a trackpad tap is an unreliable way to say "here": it fires a click and a
-small cursor jolt at the same moment, and block edges are drawn thin enough that a jolt of a pixel
-or two lands beside them. So the cut acts on the sheet **currently highlighted** rather than
-re-testing what sits under the cursor at the instant of the click — what you see highlighted is what
-gets cut — and a key press avoids nudging the pointer at all. Every cut, and every refusal, also
-prints a line to the terminal the Python console runs in, so a press that seems to do nothing says
-why there and not only in the panel's status line.
+The target is the whole highlighted sheet, not the hairline underneath it: pointing at an edge, at
+the highlight drawn over it, or at any of the round markers all aim the same cut. That matters more
+than it sounds, because the highlight is drawn thicker than the edges and each marker thicker still,
+and a marker appears directly under the cursor that summoned it — so a moment after a sheet lights
+up you are no longer pointing at the edge at all.
+
+`Space` cuts as well as a click, because a trackpad tap is an unreliable way to say "here": it fires
+a click and a small cursor jolt at the same moment. For the same reason the cut acts on the sheet
+**currently highlighted** rather than re-testing what sits under the cursor at the instant of the
+click — what you see highlighted is what gets cut — and a key press avoids nudging the pointer at
+all. Every cut, and every refusal, also prints a line to the terminal the Python console runs in, so
+a press that seems to do nothing says why there and not only in the panel's status line.
 
 Seeing the sheet before committing is the point of the preview: a cut is never local. Two blocks
 sewn together share the very same edges, so cutting one drags its neighbour in — otherwise the face

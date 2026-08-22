@@ -840,7 +840,28 @@ namespace gecko::biy {
         };
 
         const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
-        if (!pick.isHit || pick.structureName != BLOCK_EDGES) {
+        if (!pick.isHit) {
+            clear();
+            return;
+        }
+
+        // Aiming a cut means aiming at any of 3 things, not just the bare edge: the edge itself, the
+        // highlight drawn over it, or one of the markers showing where the cut would land. All 3 sit
+        // on the same curve, so all 3 resolve below to the same edge and to much the same point
+        // along it — and accepting all 3 is what makes the target the width of a marker rather than
+        // the width of a hairline.
+        //
+        // The other 2 are not a nicety. The highlight is drawn thicker than the edges it traces and
+        // covers them, and each marker is thicker still and lands exactly under the cursor that
+        // summoned it — so a moment after a sheet lights up the cursor is no longer picking the edge
+        // at all. Reading that as "nothing there" made the preview flicker on and off as the cursor
+        // moved along an edge, and a cut aimed through it do nothing.
+        //
+        // They go through the same search rather than freezing the hover, deliberately: a marker
+        // follows the cursor, so holding the parameter while over one would pin the cut where it
+        // first appeared and leave it unmovable.
+        if (pick.structureName != BLOCK_EDGES && pick.structureName != SHEET_EDGES &&
+            pick.structureName != CUT_POINTS) {
             clear();
             return;
         }
