@@ -529,7 +529,10 @@ namespace gecko {
          * @param ABlock The block to delete.
          */
         void delete_block(Block ABlock) {
-            m_cmap.template remove_cell<3>(ABlock->dart());
+            // The removal renumbers whatever corner attributes it has to rebuild, which moves the
+            // canonical frames derived from those ids — so the frames are noted first and the cells
+            // they moved under are put back afterwards.
+            run_reframed([&] { m_cmap.template remove_cell<3>(ABlock->dart()); });
             // The removal may have taken faces with it, and `m_hex_faces` would go on holding
             // handles to attributes that no longer exist — which `to_mesh()` compares against and
             // `build_connectivity()` dereferences.
@@ -660,6 +663,14 @@ namespace gecko {
             for (const auto &[e, from] : start_of) {
                 sheet.edges.push_back(SheetEdge{e, from});
             }
+            // Ordered by the ids of the nodes each edge joins, never by the order `start_of` happens
+            // to hold them in: that map is keyed on attribute handles, handles are addresses, and
+            // addresses move between runs. The order matters because the cut hands out node ids in
+            // it, and the canonical frames are built on those ids — so leaving it to the allocator
+            // makes the whole operation answer differently from one run to the next.
+            std::sort(sheet.edges.begin(), sheet.edges.end(), [this](const SheetEdge &a, const SheetEdge &b) {
+                return edge_order(a.edge) < edge_order(b.edge);
+            });
             if (!collect_sheet_faces(start_of, sheet) || !collect_sheet_blocks(start_of, sheet)) {
                 return std::nullopt;
             }
@@ -809,10 +820,18 @@ namespace gecko {
             // Ordered by increasing dimension, and each pass finished before the next starts: a
             // face's own frame stops being walkable the moment one of its edges is split, so every
             // frame the cut needs was captured by find_sheet() before any of this ran.
+            // A cut renumbers corner attributes too — CGAL rebuilds whatever orbit its insertions
+            // disturb — so the frames of the cells it is *not* reshaping are noted and put back, the
+            // same way a deletion does it.
+            // Each phase gets its own record-and-restore. One pass around the whole cut is not
+            // enough: a phase legitimately reshapes some cells and stores their geometry in the frame
+            // they have at that moment, and a *later* phase can then renumber a corner under them.
+            // Wrapped phase by phase, every cell is either the one being reshaped — skipped, its
+            // geometry having just been written — or one merely renumbered, and put back.
             std::map<Node, MidNode> mids;
-            split_sheet_edges(*sheet, AParam, mids);
-            split_sheet_faces(*sheet, AParam, mids);
-            split_sheet_blocks(*sheet, AParam, mids);
+            run_reframed([&] { split_sheet_edges(*sheet, AParam, mids); });
+            run_reframed([&] { split_sheet_faces(*sheet, AParam, mids); });
+            run_reframed([&] { split_sheet_blocks(*sheet, AParam, mids); });
             // A cut both splits faces in 2 and creates one per block, so which faces belong to a
             // block has changed; re-derived rather than tracked through each of those steps.
             refresh_hex_faces();
@@ -1742,12 +1761,10 @@ namespace gecko {
          */
         void rebuild_face_surface(Face AFace) {
             const Dart fd = AFace->dart();
-            std::array<Node, 4> local_nodes{};
-            Dart walk = fd;
-            for (std::size_t c = 0; c < 4; ++c) {
-                local_nodes[c] = m_cmap.template attribute<0>(walk);
-                walk = m_cmap.template beta<1>(walk);
-            }
+            // The face's own frame, canonical rather than whichever dart happens to name it — see
+            // `face_local_nodes()`. Every reader and writer of a face's surface goes through it, or
+            // one of them ends up reading in a frame another one did not write.
+            const std::array<Node, 4> local_nodes = face_local_nodes(AFace);
 
             std::array<TEdgeCurve, 4> curves{};
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
@@ -1933,11 +1950,8 @@ namespace gecko {
                                  std::size_t AS) {
             FaceGrid fg;
             const Dart fd = AFace->dart();
-            Dart walk = fd;
-            for (std::size_t c = 0; c < 4; ++c) {
-                fg.local_nodes[c] = m_cmap.template attribute<0>(walk);
-                walk = m_cmap.template beta<1>(walk);
-            }
+            // Same canonical frame the surface was stored in — see `face_local_nodes()`.
+            fg.local_nodes = face_local_nodes(AFace);
 
             fg.grid.assign(AS + 1, std::vector<NodeId>(AS + 1));
             fg.grid[0][0] = ANodeIds.at(fg.local_nodes[0]);
@@ -2240,6 +2254,7 @@ namespace gecko {
         Node create_node(const Point3d &APoint) {
             Node n = m_cmap.template create_attribute<0>();
             n->info().point = APoint;
+            n->info().id = m_next_node_id++;
             return n;
         }
 
@@ -2403,6 +2418,199 @@ namespace gecko {
         // ---------------------------------------------------------------------
 
         /**
+         * @brief The key a node is ordered by when a canonical frame has to choose a starting corner.
+         *
+         * `NodeInfo::id` first, which survives CGAL rebuilding the attribute behind a node; then the
+         * node's own coordinates, purely to break the tie that 2 attributes carrying the *copied* id
+         * of the node they were split from would otherwise leave.
+         *
+         * That tie is not hypothetical — CGAL's split copies the info, id and all — and it must not
+         * be broken on the attribute handle. A handle is an address, addresses move between runs,
+         * and a frame resting on one answers differently every time the program starts. Coordinates
+         * are at least the same on every run, and a tie surviving *them* is 2 nodes at one point,
+         * where the frames they order are congruent anyway.
+         *
+         * @param ANode The node to order.
+         * @return Its ordering key.
+         */
+        /** @brief Every face's canonical frame, as the positions of its 4 corners. */
+        using FaceFrames = std::map<Face, std::array<Point3d, 4>>;
+        /** @brief Every block's canonical frame, as the positions of its 8 corners. */
+        using BlockFrames = std::map<Block, std::array<Point3d, 8>>;
+
+        /**
+         * @brief Records the canonical frame of every face and block, as corner *positions*.
+         *
+         * Taken before a topological edit so that `reframe_changed_cells()` can put back whatever the
+         * edit moves. Positions rather than ids because the edit is exactly what changes ids: CGAL
+         * rebuilds an attribute whose orbit came apart, and the node behind it is then a different
+         * attribute needing a new id. Positions are the one thing a removal leaves alone — the values
+         * compared are literally the same stored doubles, not 2 computations of one point — so a
+         * cell's corners can still be recognised on the other side of it.
+         *
+         * @param AFaces Filled with each face's frame.
+         * @param ABlocks Filled with each block's frame.
+         */
+        void record_frames(FaceFrames &AFaces, BlockFrames &ABlocks) {
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                const auto corners = face_local_nodes(it);
+                std::array<Point3d, 4> frame{};
+                for (std::size_t c = 0; c < 4; ++c) {
+                    frame[c] = corners[c]->info().point;
+                }
+                AFaces.emplace(it, frame);
+            }
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                const auto corners = block_local_nodes(it);
+                std::array<Point3d, 8> frame{};
+                for (std::size_t c = 0; c < 8; ++c) {
+                    frame[c] = corners[c]->info().point;
+                }
+                ABlocks.emplace(it, frame);
+            }
+        }
+
+        /**
+         * @brief Re-expresses the stored geometry of every surviving cell whose canonical frame the
+         * edit just moved.
+         *
+         * A frame is derived, not stored, so an edit that renumbers a corner silently rotates or
+         * reflects it — and the surface or volume sitting in it then reads back transformed. Left
+         * alone, the next cut through such a face takes its isocurve from the wrong side and leaves a
+         * straight edge with a bow in it. Nothing is recomputed here: the geometry is permuted into
+         * its cell's new frame, which is exact.
+         *
+         * @param AFaces Each face's frame before the edit, from `record_frames()`.
+         * @param ABlocks Each block's frame before the edit.
+         */
+        void reframe_changed_cells(const FaceFrames &AFaces, const BlockFrames &ABlocks) {
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                const auto before = AFaces.find(it);
+                if (before == AFaces.end()) continue;
+                const auto corners = face_local_nodes(it);
+                std::array<std::array<int, 2>, 4> corner_ab{};
+                bool moved = false;
+                bool reshaped = false;
+                for (std::size_t c = 0; c < 4; ++c) {
+                    const std::size_t was = position_index(before->second, corners[c]->info().point);
+                    if (was == 4) {
+                        // A corner the face did not have before: the edit split this face rather than
+                        // just renumbering it, and whoever split it already stored its geometry in the
+                        // frame it has now.
+                        reshaped = true;
+                        break;
+                    }
+                    corner_ab[c] = QUAD_CORNER_IJ[was];
+                    if (was != c) moved = true;
+                }
+                if (!reshaped && moved) it->info().surface = reframed_surface(it->info().surface, corner_ab);
+            }
+
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                const auto before = ABlocks.find(it);
+                if (before == ABlocks.end()) continue;
+                const auto corners = block_local_nodes(it);
+                std::array<std::array<int, 3>, 8> corner_uvw{};
+                bool moved = false;
+                bool reshaped = false;
+                for (std::size_t c = 0; c < 8; ++c) {
+                    const std::size_t was = position_index(before->second, corners[c]->info().point);
+                    if (was == 8) {
+                        reshaped = true;
+                        break;
+                    }
+                    corner_uvw[c] = HEX_CORNER_UVW[was];
+                    if (was != c) moved = true;
+                }
+                if (!reshaped && moved) it->info().volume = reframed_volume(it->info().volume, corner_uvw);
+            }
+        }
+
+        /**
+         * @brief Where @p APoint sits in @p AFrame.
+         * @tparam TN Number of corners.
+         * @param AFrame A recorded frame's corner positions.
+         * @param APoint The corner to locate.
+         * @return Its index in @p AFrame, or `TN` when it is not one of its corners — which marks a
+         *         cell the edit reshaped rather than merely renumbered.
+         */
+        template<std::size_t TN>
+        static std::size_t position_index(const std::array<Point3d, TN> &AFrame, const Point3d &APoint) {
+            for (std::size_t i = 0; i < TN; ++i) {
+                if (AFrame[i] == APoint) return i;
+            }
+            return TN;
+        }
+
+        /**
+         * @brief The key an edge is ordered by, as the ids of the 2 nodes it joins, smaller first.
+         *
+         * Gives the class a run-to-run stable order on edges, which it does not otherwise have —
+         * edges carry no id of their own, and ordering them by attribute handle is ordering them by
+         * address.
+         *
+         * @param AEdge The edge to order.
+         * @return Its ordering key.
+         */
+        std::pair<Int, Int> edge_order(Edge AEdge) {
+            const Dart d = AEdge->dart();
+            const Int a = m_cmap.template attribute<0>(d)->info().id;
+            const Int b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d))->info().id;
+            return {std::min(a, b), std::max(a, b)};
+        }
+
+        /**
+         * @brief Runs one topological edit, giving ids to whatever nodes it creates and putting back
+         * the frames it moved.
+         *
+         * The 3 things every edit here has to be wrapped in, in the one order that works: note the
+         * frames, edit, hand out ids for the attributes CGAL rebuilt, then re-express the cells whose
+         * frame those new ids moved. Skipping any of them leaves geometry sitting in a frame that is
+         * no longer the one it will be read in.
+         *
+         * @tparam TEdit A callable performing the edit.
+         * @param AEdit The edit to run.
+         */
+        template<typename TEdit>
+        void run_reframed(TEdit AEdit) {
+            FaceFrames faces_before;
+            BlockFrames blocks_before;
+            record_frames(faces_before, blocks_before);
+            AEdit();
+            assign_missing_node_ids();
+            reframe_changed_cells(faces_before, blocks_before);
+        }
+
+        /**
+         * @brief Gives an id to every node that has none.
+         *
+         * A node arrives without one when CGAL splits an existing attribute (see `NodeSplitFunctor`),
+         * which happens inside the very cell insertions and removals this class is built on. Run at
+         * the end of each of those, so no 2 nodes ever share an id and the order the canonical frames
+         * rest on has no tie left to settle by luck.
+         */
+        void assign_missing_node_ids() {
+            for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
+                 it != itend;
+                 ++it) {
+                if (it->info().id < 0) it->info().id = m_next_node_id++;
+            }
+        }
+
+        static std::tuple<Int, double, double, double> node_order(Node ANode) {
+            const Point3d &p = ANode->info().point;
+            return {ANode->info().id, p.x(), p.y(), p.z()};
+        }
+
+        /**
          * @brief Records @p AEdge as part of a sheet, starting at @p AFrom.
          * @param AStart The edge-to-start-node map being built, modified in place.
          * @param APending The traversal work list, modified in place.
@@ -2460,17 +2668,41 @@ namespace gecko {
          * @return Its 8 corners.
          * @pre The block must still be a plain hex (no edge of it split yet). */
         std::array<Node, 8> block_local_nodes(Block ABlock) {
-            const Dart bd = ABlock->dart();
-            std::array<Node, 8> n{};
-            n[0] = m_cmap.template attribute<0>(bd);
-            n[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
-            n[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
-            n[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
-            n[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
-            n[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
-            n[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
-            n[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
-            return n;
+            // Read from whichever of the block's darts gives the lexicographically smallest tuple of
+            // corner handles, never from `ABlock->dart()`. Every dart of a hex yields a valid frame —
+            // the 24 of them are the cube's rotations — and which one the attribute names is CGAL's
+            // to change: it re-points an attribute the moment the dart it named is erased, which a
+            // deletion next door does. A frame that moves silently rotates everything stored in it,
+            // and the block's volume is stored in it. See `face_local_nodes()` for the same trap one
+            // dimension down, and what it does to a straight edge.
+            std::array<Node, 8> best{};
+            std::array<std::tuple<Int, double, double, double>, 8> best_key{};
+            bool have = false;
+            for (auto it = m_cmap.template darts_of_cell<3>(ABlock->dart()).begin(),
+                      itend = m_cmap.template darts_of_cell<3>(ABlock->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Dart bd = it;
+                std::array<Node, 8> n{};
+                n[0] = m_cmap.template attribute<0>(bd);
+                n[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
+                n[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
+                n[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
+                n[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
+                n[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
+                n[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
+                n[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
+                std::array<std::tuple<Int, double, double, double>, 8> key{};
+                for (std::size_t c = 0; c < 8; ++c) {
+                    key[c] = node_order(n[c]);
+                }
+                if (!have || key < best_key) {
+                    best = n;
+                    best_key = key;
+                    have = true;
+                }
+            }
+            return best;
         }
 
         /** @brief One face's 4 corners in its own dart-cycle order.
@@ -2478,13 +2710,36 @@ namespace gecko {
          * @return Its 4 corners.
          * @pre The face must still be a plain quad (no edge of it split yet). */
         std::array<Node, 4> face_local_nodes(Face AFace) {
-            std::array<Node, 4> n{};
+            std::array<Node, 4> cycle{};
             Dart walk = AFace->dart();
             for (std::size_t c = 0; c < 4; ++c) {
-                n[c] = m_cmap.template attribute<0>(walk);
+                cycle[c] = m_cmap.template attribute<0>(walk);
                 walk = m_cmap.template beta<1>(walk);
             }
-            return n;
+
+            // Rotated to start at the lowest-handle corner, and run towards whichever of its 2
+            // neighbours is lower — which pins the frame against both the rotation and the
+            // reflection that `dart()` alone leaves free.
+            //
+            // Anchoring it to `dart()` instead is what bent straight edges after a deletion. A face
+            // between 2 blocks carries darts on both sides, and the 2 sides walk its cycle in
+            // *opposite* directions; deleting one block erases that side's darts, so CGAL re-points
+            // the attribute to the surviving side and the frame silently mirrors. Everything stored
+            // in the old frame — the surface above all — then reads back reflected, and the next cut
+            // through that face takes its isocurve from the wrong side of the cut. Its 2 ends still
+            // land on the right nodes, because they are pinned there, and its middle bulges out to
+            // the mirrored position: a straight edge with a bow in it.
+            std::size_t start = 0;
+            for (std::size_t c = 1; c < 4; ++c) {
+                if (node_order(cycle[c]) < node_order(cycle[start])) start = c;
+            }
+            const bool forward = node_order(cycle[(start + 1) % 4]) < node_order(cycle[(start + 3) % 4]);
+
+            std::array<Node, 4> canonical{};
+            for (std::size_t i = 0; i < 4; ++i) {
+                canonical[i] = forward ? cycle[(start + i) % 4] : cycle[(start + 4 - i) % 4];
+            }
+            return canonical;
         }
 
         /** @brief One block's 12 edges, indexed to match `HEX_EDGES`.
@@ -3021,6 +3276,9 @@ namespace gecko {
                     }
                     mids.push_back(mid);
                 }
+                // Sorted for the same reason the sheet's edges are: `AMids` is keyed on handles, and
+                // `cut_loop()` starts from whichever of these comes first.
+                std::sort(mids.begin(), mids.end(), [](Node a, Node b) { return a->info().id < b->info().id; });
                 assert(mids.size() == 4 && "Blocking::split_sheet_blocks: block must carry exactly 4 cut nodes");
 
                 const std::vector<Dart> path = cut_loop(sb.block, mids);
@@ -3139,6 +3397,9 @@ namespace gecko {
             m_hex_faces.assign(faces.begin(), faces.end());
         }
 
+        /** @brief Source of `NodeInfo::id`. Only ever increases, so an id is never reused and the
+         * order it defines never changes meaning. */
+        Int m_next_node_id = 0;
         /** @brief Non-owning pointer to the geometric model this blocking is built against. */
         const TGeomModel *m_geom_model;
         /** @brief The underlying (always dimension-3) combinatorial map. */
