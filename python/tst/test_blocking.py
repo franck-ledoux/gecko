@@ -386,3 +386,56 @@ def test_every_edge_cuts_a_block_into_two_positive_volumes(geom_model_path, degr
         assert min(volumes) > 0.0
         assert sum(volumes) == pytest.approx(2.0)
         assert sorted(volumes) == pytest.approx([0.5, 1.5])
+
+
+@pytest.mark.parametrize("degree", [1, 3])
+def test_a_sheet_stays_in_one_plane_after_an_earlier_cut(geom_model_path, degree):
+    # Needs 3 things at once, which is why cutting once, or cutting at 0.5, never showed it: a
+    # second cut, an off-centre parameter, and an edge the previous cut created inside a face. Such
+    # an edge takes its curve from a surface while its nodes came from evaluating another curve —
+    # equal as real numbers, not as doubles — so deciding which end the curve starts at by exact
+    # position equality picks the wrong one, cutting that edge at 1-t and tearing the sheet.
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=degree)
+    blocking.create_hex_block(_TALL_BOX)
+
+    edge = _edge_between(blocking, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert blocking.cut_sheet(edge, 0.4)
+
+    ends = blocking.edge_vertices(1)
+    for i in range(blocking.nb_cells(1)):
+        sheet = blocking.sheet_edges(i)
+        assert sheet, "edge %d lost its sheet" % i
+        a, b = ends[i * 2], ends[i * 2 + 1]
+        # The cut runs perpendicular to the edges it splits, so on this axis-aligned block every cut
+        # point shares the coordinate of the axis the aimed edge runs along.
+        axis = max(range(3), key=lambda k: abs(a[k] - b[k]))
+        along = [p[axis] for p in blocking.sheet_cut_points(i, 0.4)]
+        assert max(along) - min(along) < 1e-12, (
+            "sheet through edge %d is not planar: %r" % (i, sorted(along)))
+
+
+@pytest.mark.parametrize("degree", [1, 3])
+def test_repeated_off_centre_cuts_conserve_the_block(geom_model_path, degree):
+    # The same failure from where a user sees it: an out-of-plane sheet still leaves a valid map, so
+    # only the geometry notices — the mesh drifts off the block it came from.
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=degree)
+    blocking.create_hex_block(_TALL_BOX)
+
+    for a, b in (((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+                 ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                 ((0.0, 0.0, 0.0), (0.0, 0.0, 2.0))):
+        assert blocking.cut_sheet(_edge_between(blocking, a, b), 0.4)
+        assert blocking.is_valid_topology()
+
+        volumes = blocking.block_volumes(2)
+        assert min(volumes) > 0.0
+        assert sum(volumes) == pytest.approx(2.0)
+        # Nothing the cut generates may leave the box the blocking started as.
+        for p in blocking.mesh_vertices(2):
+            assert -1e-9 <= p[0] <= 1 + 1e-9
+            assert -1e-9 <= p[1] <= 1 + 1e-9
+            assert -1e-9 <= p[2] <= 2 + 1e-9
+
+    assert blocking.nb_cells(3) == 8

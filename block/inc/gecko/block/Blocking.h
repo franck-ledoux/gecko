@@ -2323,7 +2323,16 @@ namespace gecko {
             const Dart d = AEdge->dart();
             const Node na = m_cmap.template attribute<0>(d);
             const Node nb = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-            return (AEdge->info().curve.control_points()[0] == na->info().point) ? na : nb;
+            // Whichever endpoint is *nearer*, rather than exactly equal to, the curve's first control
+            // point. Exact equality is the idiom elsewhere in this class and it holds there, because
+            // the curve and the node were built from the same expression — but an edge a cut created
+            // inside a face gets its curve from a surface's control grid while its nodes were placed
+            // by evaluating another edge's curve. The 2 agree to rounding and not to the last bit, and
+            // an equality test then silently answers "the other end", which flips that edge's cut to
+            // 1-t and tears the sheet out of plane. The 2 endpoints are far apart next to that noise,
+            // so the nearer one is never ambiguous.
+            const Point3d &start = AEdge->info().curve.control_points()[0];
+            return (Vector3d(start, na->info().point).norm() <= Vector3d(start, nb->info().point).norm()) ? na : nb;
         }
 
         /**
@@ -2593,6 +2602,33 @@ namespace gecko {
         }
 
         /**
+         * @brief Moves a curve's 2 end control points exactly onto the 2 nodes it is meant to join.
+         *
+         * The curve an edge stores has to pass through that edge's own endpoint nodes exactly, and a
+         * curve read off a surface's control grid only gets there to rounding: the same corner
+         * reached through a surface and through a curve are equal as real numbers and not as doubles.
+         * Left alone, that gap is invisible geometrically and lethal to the orientation tests this
+         * class runs by comparing positions (`oriented_curve()`, `curve_start_node()`), which then
+         * pick the wrong end of the edge.
+         *
+         * Which end goes where is decided by proximity, the 2 nodes being far apart next to that
+         * rounding.
+         *
+         * @param ACurve The curve to pin.
+         * @param AA One endpoint node's position.
+         * @param AB The other endpoint node's position.
+         * @return @p ACurve with its 2 end control points replaced by those positions.
+         */
+        static TEdgeCurve pinned_curve(TEdgeCurve ACurve, const Point3d &AA, const Point3d &AB) {
+            constexpr std::size_t last = TEdgeCurve::NumControlPoints - 1;
+            const bool starts_at_a =
+                Vector3d(ACurve.control_points()[0], AA).norm() <= Vector3d(ACurve.control_points()[0], AB).norm();
+            ACurve[0] = starts_at_a ? AA : AB;
+            ACurve[last] = starts_at_a ? AB : AA;
+            return ACurve;
+        }
+
+        /**
          * @brief The isoparametric boundary curve of a surface at the far end of one axis — for the
          * low half of a split, that is exactly the curve the cut ran along.
          * @param ASurface The surface to read the boundary off.
@@ -2733,8 +2769,11 @@ namespace gecko {
                     new_edge = create_edge();
                     m_cmap.template set_attribute<1>(nd, new_edge);
                 }
-                // The cut runs along the low half's far isoparametric curve, exactly.
-                new_edge->info().curve = surface_boundary_curve(low, sf.axis);
+                // The cut runs along the low half's far isoparametric curve, exactly — then pinned
+                // onto the 2 nodes it joins, which the sheet placed by evaluating another curve.
+                new_edge->info().curve = pinned_curve(surface_boundary_curve(low, sf.axis),
+                                                      m_cmap.template attribute<0>(mid_darts[0])->info().point,
+                                                      m_cmap.template attribute<0>(mid_darts[1])->info().point);
                 // An edge born inside a face lies on whatever that face lies on.
                 new_edge->info().geom_targets = sf.face->info().geom_targets;
 

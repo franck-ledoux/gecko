@@ -1,7 +1,11 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <limits>
+#include <string>
 #include <vector>
+
+#include <unit_test_config.h>
 
 #include <gecko/block/Blocking.h>
 #include <gecko/geom/FacetedGeometry.h>
@@ -265,65 +269,72 @@ TEST_CASE("cutting_a_curved_blocking_keeps_the_curvature_rather_than_refitting_i
     // cut face onto the Coons patch of its 4 new boundary curves, which is not the surface the
     // parent block actually carried there, and its nodes would leave the parent's geometry.
     //
-    // The 3 stored geometries are bent independently rather than kept mutually consistent, because
-    // that is exactly how the cut treats them: an edge's curve, a face's surface and a block's
-    // volume are each subdivided from their own stored form, never re-derived from one another.
-    // Only strictly interior control points move, so every cell still meets its corners where the
-    // Node attributes say it does.
-    const FacetedGeometry geom = make_far_geom_model();
+    // Curved the way a user gets there — a block fitted onto a real cylinder — rather than by
+    // bending control points by hand. That matters: classify() leaves each cell's curve, surface and
+    // volume agreeing with one another, and a cut relies on exactly that agreement when it pins a
+    // new edge onto the nodes the sheet placed.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
     using CubicBlocking = Blocking<FacetedGeometry, BezierCurve<3, Point3d>>;
 
-    // Driven purely by each control point's own position, so the 2 blockings below come out
-    // identical without depending on any traversal order.
-    const auto wobble = [](const Point3d &AP) {
-        return AP + Vector3d(0.18 * std::sin(3.0 * AP.y() + 1.0),
-                             0.15 * std::sin(3.0 * AP.z() + 2.0),
-                             0.20 * std::sin(3.0 * AP.x() + 0.5));
-    };
-    const auto bend = [&wobble](CubicBlocking &ABlocking) {
-        auto &map = ABlocking.cmap();
-        for (auto it = map.attributes<1>().begin(), itend = map.attributes<1>().end(); it != itend; ++it) {
-            for (std::size_t i = 1; i < 3; ++i) {
-                it->info().curve[i] = wobble(it->info().curve[i]);
+    const auto fitted = [&geom](CubicBlocking &ABlocking) {
+        // A box around the model, then snapped onto it: the corners land on the cylinder and the
+        // edges bend to follow it.
+        double lo[3] = {1e30, 1e30, 1e30};
+        double hi[3] = {-1e30, -1e30, -1e30};
+        for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+            const Point3d &p = geom.mesh().node(NodeId{i});
+            const std::array<double, 3> c{p.x(), p.y(), p.z()};
+            for (int k = 0; k < 3; ++k) {
+                lo[k] = std::min(lo[k], c[k]);
+                hi[k] = std::max(hi[k], c[k]);
             }
         }
-        for (auto it = map.attributes<2>().begin(), itend = map.attributes<2>().end(); it != itend; ++it) {
-            for (std::size_t i = 1; i < 3; ++i) {
-                for (std::size_t j = 1; j < 3; ++j) {
-                    it->info().surface.control_point(i, j) = wobble(it->info().surface.control_point(i, j));
-                }
-            }
-        }
-        for (auto it = map.attributes<3>().begin(), itend = map.attributes<3>().end(); it != itend; ++it) {
-            for (std::size_t i = 1; i < 3; ++i) {
-                for (std::size_t j = 1; j < 3; ++j) {
-                    for (std::size_t k = 1; k < 3; ++k) {
-                        it->info().volume.control_point(i, j, k) = wobble(it->info().volume.control_point(i, j, k));
-                    }
-                }
-            }
-        }
+        ABlocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                                    Point3d(hi[0], lo[1], lo[2]),
+                                    Point3d(hi[0], hi[1], lo[2]),
+                                    Point3d(lo[0], hi[1], lo[2]),
+                                    Point3d(lo[0], lo[1], hi[2]),
+                                    Point3d(hi[0], lo[1], hi[2]),
+                                    Point3d(hi[0], hi[1], hi[2]),
+                                    Point3d(lo[0], hi[1], hi[2])});
+        ABlocking.classify(0.3);
     };
 
     CubicBlocking reference(geom);
-    reference.create_hex_block(twisted_box());
-    bend(reference);
-
+    fitted(reference);
     CubicBlocking cut(geom);
-    cut.create_hex_block(twisted_box());
-    bend(cut);
+    fitted(cut);
 
-    // Guard against silently testing a straight block: the bend has to reach the sampled geometry,
-    // not just sit in control points the evaluation never notices.
-    CubicBlocking unbent(geom);
-    unbent.create_hex_block(twisted_box());
+    // Guard against silently testing a straight block: fitting has to reach the sampled geometry.
     const auto bent_mesh = reference.to_mesh(3);
-    const auto straight_mesh = unbent.to_mesh(3);
-    REQUIRE(bent_mesh.nb_nodes() == straight_mesh.nb_nodes());
     double largest_shift = 0.0;
-    for (UInt i = 0; i < bent_mesh.nb_nodes(); ++i) {
-        largest_shift =
-            std::max(largest_shift, Vector3d(bent_mesh.node(NodeId{i}), straight_mesh.node(NodeId{i})).norm());
+    {
+        CubicBlocking straight(geom);
+        double lo[3] = {1e30, 1e30, 1e30};
+        double hi[3] = {-1e30, -1e30, -1e30};
+        for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+            const Point3d &p = geom.mesh().node(NodeId{i});
+            const std::array<double, 3> c{p.x(), p.y(), p.z()};
+            for (int k = 0; k < 3; ++k) {
+                lo[k] = std::min(lo[k], c[k]);
+                hi[k] = std::max(hi[k], c[k]);
+            }
+        }
+        straight.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                                   Point3d(hi[0], lo[1], lo[2]),
+                                   Point3d(hi[0], hi[1], lo[2]),
+                                   Point3d(lo[0], hi[1], lo[2]),
+                                   Point3d(lo[0], lo[1], hi[2]),
+                                   Point3d(hi[0], lo[1], hi[2]),
+                                   Point3d(hi[0], hi[1], hi[2]),
+                                   Point3d(lo[0], hi[1], hi[2])});
+        const auto straight_mesh = straight.to_mesh(3);
+        REQUIRE(bent_mesh.nb_nodes() == straight_mesh.nb_nodes());
+        for (UInt i = 0; i < bent_mesh.nb_nodes(); ++i) {
+            largest_shift =
+                std::max(largest_shift, Vector3d(bent_mesh.node(NodeId{i}), straight_mesh.node(NodeId{i})).norm());
+        }
     }
     REQUIRE(largest_shift > 1e-2);
 
@@ -334,8 +345,16 @@ TEST_CASE("cutting_a_curved_blocking_keeps_the_curvature_rather_than_refitting_i
         cloud.push_back(fine.node(NodeId{i}));
     }
 
-    const auto e = edge_between(cut, Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0));
-    REQUIRE(cut.cut_sheet(e, 1.0 / 3.0));
+    // Cut at 1/3 and mesh each half with 4 intervals: that samples the parent at 0,1/12,...,12/12
+    // along the cut axis and at 0,3/12,...,12/12 across the other 2 — every one a node the uncut
+    // blocking's own 12-interval mesh already carries. So the cut mesh must be a subset of it.
+    int seen = 0;
+    CubicBlocking::Edge target{};
+    for (auto it = cut.cmap().attributes<1>().begin(), end = cut.cmap().attributes<1>().end(); it != end;
+         ++it, ++seen) {
+        if (seen == 0) target = it;
+    }
+    REQUIRE(cut.cut_sheet(target, 1.0 / 3.0));
     REQUIRE(cut.is_valid_topology());
 
     const auto coarse = cut.to_mesh(4);
@@ -343,6 +362,7 @@ TEST_CASE("cutting_a_curved_blocking_keeps_the_curvature_rather_than_refitting_i
         REQUIRE(lies_in(coarse.node(NodeId{i}), cloud, 1e-9));
     }
 }
+
 TEST_CASE("cutting_2_sewn_hexes_splits_both_and_stays_conformal", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_far_geom_model();
     Blocking<FacetedGeometry> blocking(geom);
@@ -468,4 +488,98 @@ TEST_CASE("every_edge_of_a_block_cuts_it_into_2_positive_volumes_summing_to_the_
         REQUIRE(volumes[0] == Approx(0.5).margin(1e-12));
         REQUIRE(volumes[1] == Approx(1.5).margin(1e-12));
     }
+}
+
+TEST_CASE("a_sheet_stays_in_one_plane_after_an_earlier_cut", "[BlockTestSuite]") {
+    // The failure this guards against needed 3 things at once, which is why every earlier test in
+    // this file missed it: a *second* cut (the first has no cut-made edges yet), an *off-centre*
+    // parameter (at 0.5, cutting an edge from the wrong end lands in the same place), and an edge
+    // the previous cut created inside a face — whose curve comes from a surface's control grid while
+    // its nodes were placed by evaluating another curve. Those agree as real numbers and not as
+    // doubles, so deciding which end a curve starts at by exact position equality answers "the other
+    // one" for exactly those edges, cutting them at 1-t and pulling the sheet out of plane.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    blocking.create_hex_block(tall_box());
+
+    const auto e = edge_between(blocking, Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0));
+    REQUIRE(blocking.cut_sheet(e, 0.4));
+
+    // Every edge of the once-cut blocking, not just the ones the next cut happens to aim at.
+    int checked = 0;
+    for (auto it = blocking.cmap().attributes<1>().begin(), end = blocking.cmap().attributes<1>().end(); it != end;
+         ++it) {
+        const auto sheet = blocking.find_sheet(it);
+        REQUIRE(sheet.has_value());
+
+        // The cut runs perpendicular to the edges it splits, so on this axis-aligned block every
+        // cut point must share the coordinate of the axis the aimed edge runs along.
+        const auto d = it->dart();
+        const Point3d &a = blocking.cmap().attribute<0>(d)->info().point;
+        const Point3d &b = blocking.cmap().attribute<0>(blocking.cmap().beta<1>(d))->info().point;
+        const std::array<double, 3> pa{a.x(), a.y(), a.z()};
+        const std::array<double, 3> pb{b.x(), b.y(), b.z()};
+        std::size_t axis = 0;
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (std::abs(pa[k] - pb[k]) > std::abs(pa[axis] - pb[axis])) axis = k;
+        }
+
+        double lo = std::numeric_limits<double>::max();
+        double hi = std::numeric_limits<double>::lowest();
+        for (const auto &se : sheet->edges) {
+            const Point3d p = blocking.cut_point(se, 0.4);
+            const std::array<double, 3> c{p.x(), p.y(), p.z()};
+            lo = std::min(lo, c[axis]);
+            hi = std::max(hi, c[axis]);
+        }
+        REQUIRE(hi - lo == Approx(0.0).margin(1e-12));
+        ++checked;
+    }
+    REQUIRE(checked == 20);
+}
+
+TEST_CASE("repeated_off_centre_cuts_keep_the_generated_mesh_on_the_original_block", "[BlockTestSuite]") {
+    // The same failure seen from where a user would see it: the mesh. A sheet cut out of plane still
+    // leaves a valid map with sensible block volumes, and only the generated mesh — the thing biy
+    // actually draws — shows it, by drifting off the block it came from.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    blocking.create_hex_block(tall_box());
+
+    const auto measure = [&]() {
+        const auto mesh = blocking.to_mesh(2);
+        double lo_x = 0.0;
+        double hi_x = 0.0;
+        double hi_z = 0.0;
+        for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+            const Point3d &p = mesh.node(NodeId{i});
+            lo_x = std::min(lo_x, p.x());
+            hi_x = std::max(hi_x, p.x());
+            hi_z = std::max(hi_z, p.z());
+        }
+        // Nothing the cut generates may leave the box the blocking started as.
+        REQUIRE(lo_x >= Approx(0.0).margin(1e-9));
+        REQUIRE(hi_x <= Approx(1.0).margin(1e-9));
+        REQUIRE(hi_z <= Approx(2.0).margin(1e-9));
+    };
+
+    measure();
+    for (const auto &pair : {std::pair{Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0)},
+                             std::pair{Point3d(0.0, 0.0, 0.0), Point3d(0.0, 1.0, 0.0)},
+                             std::pair{Point3d(0.0, 0.0, 0.0), Point3d(0.0, 0.0, 2.0)}}) {
+        const auto target = edge_between(blocking, pair.first, pair.second);
+        REQUIRE(blocking.cut_sheet(target, 0.4));
+        REQUIRE(blocking.is_valid_topology());
+        measure();
+
+        // And the blocking still adds back up to what it started as, block by block.
+        const auto volumes = blocking.block_volumes(2);
+        double total = 0.0;
+        for (const double v : volumes) {
+            REQUIRE(v > 0.0);
+            total += v;
+        }
+        REQUIRE(total == Approx(2.0).margin(1e-12));
+    }
+    REQUIRE(blocking.template nb_cells<3>() == 8);
 }
