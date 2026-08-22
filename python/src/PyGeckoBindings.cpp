@@ -78,7 +78,8 @@ namespace gecko::python {
             .def("create_hex_block",
                  &BlockingFacade::create_hex_block,
                  py::arg("corners"),
-                 "Creates a standalone hex block from its 8 (x,y,z) corners (HEX8 ordering). Returns the new block id.")
+                 "Creates a standalone hex block from its 8 (x,y,z) corners (HEX8 ordering). Returns where it sits in "
+                 "the block traversal — a position, not a lasting id: cutting or deleting renumbers what follows.")
             .def("build_connectivity",
                  &BlockingFacade::build_connectivity,
                  "Auto-detects and sews coincident blocks created so far. Not incremental.")
@@ -195,6 +196,11 @@ namespace gecko::python {
                  "Signed volume of every block, from its own stored geometry. Exact at 1 subdivision for a block "
                  "with planar faces; converges as it grows for a curved one. A negative value means that block's "
                  "frame is inverted.")
+            .def("delete_block",
+                 &BlockingFacade::delete_block,
+                 py::arg("block_index"),
+                 "Deletes one block, along with every face, edge and corner that existed only because of it. "
+                 "What it shared with a neighbouring block stays, as that neighbour's boundary.")
             .def("sheet_edges",
                  &BlockingFacade::sheet_edges,
                  py::arg("edge_index"),

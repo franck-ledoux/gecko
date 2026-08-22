@@ -180,7 +180,7 @@ position only.
 
 ## Moving corners
 
-The left mouse button does one of three things, picked with the **mouse mode** radio buttons at the
+The left mouse button does one of four things, picked with the **mouse mode** radio buttons at the
 top of the panel or with a keypress:
 
 | Mode   | Key | Left button                                                    |
@@ -188,6 +188,7 @@ top of the panel or with a keypress:
 | Camera | `C` | Polyscope's usual navigation: rotate, pan, zoom                |
 | Edit   | `E` | Picks up a block corner and moves it                           |
 | Cut    | `X` | Cuts the sheet under the cursor — click or `Space` (see below) |
+| Delete | `D` | Deletes the block under the cursor — click or `Space`          |
 
 These are genuine modes rather than a modifier like `Ctrl`+drag, because of how Polyscope is
 built: it processes camera navigation at the top of each frame, *before* the per-frame user
@@ -256,6 +257,24 @@ One consequence worth knowing: `classify()` rebuilds every face and block from i
 is its documented job — and so discards the exact geometry a cut was careful to keep. **Cut first,
 classify after** is the order that keeps both.
 
+## Deleting blocks
+
+**Delete** mode removes a block and everything that existed only because of it. Point at a block —
+it lights up — then click or press `Space`, exactly as in Cut mode and for the same reasons.
+
+What goes is what the block owned alone. A face, edge or corner it *shared* with a neighbouring
+block stays, as that neighbour's own boundary: two blocks sewn along a face become one block with
+that face on its boundary, which is what deleting one of them ought to mean. Delete the last block
+and the blocking is simply empty, which is a state to be in rather than a broken one — it still
+meshes, and still takes a new block.
+
+There is no precondition, unlike deleting a *face* in a 2D blocking: a block is always removable,
+and leaving the blocking in several disconnected pieces is a legitimate thing to be in the middle
+of. There is also no undo — the status line and the terminal both report what was removed.
+
+Aiming needs the **blocks** row ticked in the Scene panel; with it hidden there is nothing to point
+at, and the terminal says so rather than the click doing nothing.
+
 ## Configuration
 
 At startup biy reads `biy_config.json` from the current directory. The file is optional, and may
@@ -316,6 +335,7 @@ is a copy of the defaults:
 | `sheet_color`, `sheet_radius`                                                                     | Color and thickness of the highlighted sheet in Cut mode                                 |
 | `cut_point_color`, `cut_point_radius`                                                             | Color and size of the markers showing where a cut would land                             |
 | `cut_snap_tolerance`                                                                              | How close to an edge's middle the cursor snaps the cut to exactly 0.5                    |
+| `delete_highlight_color`                                                                          | Color of the block about to be deleted, in Delete mode                                   |
 | `gizmo_size`, `gizmo_dot_radius`                                                                  | Size of the orientation gizmo's canvas, and of a dot at rest                             |
 | `gizmo_color_x`, `gizmo_color_y`, `gizmo_color_z`                                                 | Color of each axis's dots and label                                                      |
 | `geometry_volume_color`                                                                           | Color of the model's volumes                                                             |

@@ -63,6 +63,8 @@ namespace gecko::biy {
          * of its edges. Separate short-lived structures, registered only while hovering. */
         constexpr const char *SHEET_EDGES = "sheet";
         constexpr const char *CUT_POINTS = "cut";
+        /** @brief Delete-mode preview: the one block a click would remove. */
+        constexpr const char *DELETE_PREVIEW = "to delete";
 
         glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
 
@@ -174,6 +176,11 @@ namespace gecko::biy {
             m_sheet.clear();
             m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
             refresh_cut_preview();
+        }
+        if (mode != MouseMode::Delete) {
+            m_hover_block.reset();
+            m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
+            refresh_delete_preview();
         }
     }
 
@@ -499,6 +506,7 @@ namespace gecko::biy {
 
         handle_drag();
         handle_cut();
+        handle_delete();
     }
 
     void BiyApp::draw_operations_panel() {
@@ -695,6 +703,7 @@ namespace gecko::biy {
             if (ImGui::IsKeyPressed(ImGuiKey_C)) set_mouse_mode(MouseMode::Camera);
             if (ImGui::IsKeyPressed(ImGuiKey_E)) set_mouse_mode(MouseMode::Edit);
             if (ImGui::IsKeyPressed(ImGuiKey_X)) set_mouse_mode(MouseMode::Cut);
+            if (ImGui::IsKeyPressed(ImGuiKey_D)) set_mouse_mode(MouseMode::Delete);
         }
 
         ImGui::TextUnformatted("Mouse mode");
@@ -703,6 +712,8 @@ namespace gecko::biy {
         if (ImGui::RadioButton("Edit (E)", m_mode == MouseMode::Edit)) set_mouse_mode(MouseMode::Edit);
         ImGui::SameLine();
         if (ImGui::RadioButton("Cut (X)", m_mode == MouseMode::Cut)) set_mouse_mode(MouseMode::Cut);
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Delete (D)", m_mode == MouseMode::Delete)) set_mouse_mode(MouseMode::Delete);
         switch (m_mode) {
             case MouseMode::Edit:
                 ImGui::TextWrapped("Drag a block corner to move it. Camera navigation is off.");
@@ -712,8 +723,13 @@ namespace gecko::biy {
                                    "markers show where. Click, or press Space, to cut it. Camera navigation "
                                    "is off.");
                 break;
+            case MouseMode::Delete:
+                ImGui::TextWrapped("Point at a block: it lights up. Click, or press Space, to delete it — along "
+                                   "with everything that existed only because of it. Camera navigation is off.");
+                break;
             default:
-                ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split blocks.");
+                ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split blocks, "
+                                   "Delete to remove one.");
                 break;
         }
 
@@ -1029,6 +1045,115 @@ namespace gecko::biy {
                    (after > before ? " — blocks " + std::to_string(before) + " to " + std::to_string(after) : "");
         report("cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) + ", blocks " +
                std::to_string(before) + " -> " + std::to_string(after) + ".");
+    }
+
+    void BiyApp::update_delete_hover(glm::vec2 screen_coords) {
+        const auto clear = [this] { m_hover_block.reset(); };
+
+        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        if (!pick.isHit) {
+            clear();
+            return;
+        }
+        // The highlight is drawn over the block it marks and so is what the cursor picks from the
+        // moment it appears. Reading that as "nothing there" would drop the aim the instant it was
+        // made — the same trap the cut preview fell into. Here there is nothing to re-derive from
+        // it, so holding the current block is exactly right.
+        if (pick.structureName == DELETE_PREVIEW) return;
+        if (pick.structureName != BLOCK_BLOCKS || !polyscope::hasVolumeMesh(BLOCK_BLOCKS)) {
+            clear();
+            return;
+        }
+
+        // The blocks are registered as one hex per 3-cell, in the blocking's own block order, so a
+        // picked cell index *is* the index delete_block() speaks.
+        const auto hit = polyscope::getVolumeMesh(BLOCK_BLOCKS)->interpretPickResult(pick);
+        if (hit.elementType != polyscope::VolumeMeshElement::CELL) {
+            clear();
+            return;
+        }
+        m_hover_block = static_cast<int>(hit.index);
+    }
+
+    void BiyApp::refresh_delete_preview() {
+        const bool show = m_mode == MouseMode::Delete && m_hover_block.has_value();
+        if (!show) {
+            if (polyscope::hasVolumeMesh(DELETE_PREVIEW)) {
+                polyscope::removeStructure(polyscope::getVolumeMesh(DELETE_PREVIEW));
+            }
+            return;
+        }
+
+        const auto hexes = m_blocking->mesh_hexes(1);
+        const auto index = static_cast<std::size_t>(*m_hover_block);
+        if (index >= hexes.size()) {
+            m_hover_block.reset();
+            return;
+        }
+        // Its own 8 points rather than the whole blocking's: a structure carrying every corner would
+        // draw a marker at each of them.
+        const auto points = m_blocking->mesh_vertices(1);
+        std::vector<std::array<double, 3>> corners;
+        corners.reserve(8);
+        for (const int node : hexes[index]) {
+            corners.push_back(points[static_cast<std::size_t>(node)]);
+        }
+        auto *preview = polyscope::registerHexMesh(
+            DELETE_PREVIEW, corners, std::vector<std::array<int, 8>>{{0, 1, 2, 3, 4, 5, 6, 7}});
+        preview->setColor(to_glm(m_config.delete_highlight_color));
+    }
+
+    void BiyApp::handle_delete() {
+        if (!m_blocking || m_mode != MouseMode::Delete) return;
+        ImGuiIO &io = ImGui::GetIO();
+
+        const bool by_key = !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_Space);
+        const bool by_click = !io.WantCaptureMouse && io.MouseClicked[0];
+        if (by_click || by_key) {
+            // Acts on the block the highlight is showing, without re-testing what is under the
+            // cursor — see handle_cut() for why that ordering matters on a trackpad.
+            perform_delete(by_key ? "space" : "click");
+            return;
+        }
+        if (io.WantCaptureMouse) return;
+
+        const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
+        if (mouse != m_last_delete_mouse) {
+            m_last_delete_mouse = mouse;
+            update_delete_hover(mouse);
+            refresh_delete_preview();
+        }
+    }
+
+    void BiyApp::perform_delete(const char *trigger) {
+        const auto report = [trigger](const std::string &message) {
+            std::cout << "biy [delete by " << trigger << "]: " << message << std::endl;
+        };
+
+        if (!m_hover_block) {
+            m_status = "Nothing under the cursor to delete";
+            report("no block under the cursor. Point at one — it lights up when you are on it — then "
+                   "click or press space. If \"blocks\" is unticked in the Scene panel there is "
+                   "nothing to point at.");
+            return;
+        }
+
+        const int index = *m_hover_block;
+        const std::size_t before = m_blocking->nb_cells(3);
+        m_blocking->delete_block(index);
+        const std::size_t after = m_blocking->nb_cells(3);
+
+        // The highlight describes a block that no longer exists, and every index behind it has
+        // shifted, so it goes before anything is drawn again.
+        m_hover_block.reset();
+        m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
+        refresh_delete_preview();
+        refresh_view();
+
+        m_status = "Deleted block " + std::to_string(index) + " — blocks " + std::to_string(before) + " to " +
+                   std::to_string(after);
+        report("deleted block " + std::to_string(index) + ", blocks " + std::to_string(before) + " -> " +
+               std::to_string(after) + ".");
     }
 
     void BiyApp::handle_drag() {

@@ -106,6 +106,7 @@ namespace gecko::biy {
             read_color(j, "cut_point_color", config.cut_point_color);
             read_double(j, "cut_point_radius", config.cut_point_radius);
             read_double(j, "cut_snap_tolerance", config.cut_snap_tolerance);
+            read_color(j, "delete_highlight_color", config.delete_highlight_color);
             message = "Loaded " + path;
         } catch (const nlohmann::json::exception &e) {
             // A broken config shouldn't stop biy from starting: say so and carry on with defaults.

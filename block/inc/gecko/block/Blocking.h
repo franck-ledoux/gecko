@@ -507,6 +507,35 @@ namespace gecko {
             m_cmap.template remove_cell<2>(AFace->dart());
         }
 
+        /**
+         * @brief Deletes one hex block, along with every face, edge and node that existed only
+         * because of it.
+         *
+         * Topology: a single `CGAL::Combinatorial_map::remove_cell<3>()`. Removing a cell of the
+         * map's own dimension erases that cell's darts outright rather than merging it into a
+         * neighbour, and CGAL's attribute reference-counting then garbage-collects whatever is left
+         * holding no darts — so the block's private faces, edges and corners go with it, while
+         * anything it shared with a neighbouring block survives, as a boundary cell of that
+         * neighbour. Two blocks sewn along a face become one block with that face on its boundary,
+         * which is what deleting one of them ought to mean.
+         *
+         * Unlike `delete_face()`, this has no precondition: a 3-cell in a dimension-3 map is always
+         * removable, and a blocking that ends up in several disconnected pieces — or empty — is a
+         * legitimate thing to be in the middle of building.
+         *
+         * Geometry and classification of every surviving cell are left exactly as they were:
+         * deleting a block changes what exists, never what anything means.
+         *
+         * @param ABlock The block to delete.
+         */
+        void delete_block(Block ABlock) {
+            m_cmap.template remove_cell<3>(ABlock->dart());
+            // The removal may have taken faces with it, and `m_hex_faces` would go on holding
+            // handles to attributes that no longer exist — which `to_mesh()` compares against and
+            // `build_connectivity()` dereferences.
+            refresh_hex_faces();
+        }
+
         // ---------------------------------------------------------------------
         // Sheet cut
         // ---------------------------------------------------------------------
@@ -784,6 +813,9 @@ namespace gecko {
             split_sheet_edges(*sheet, AParam, mids);
             split_sheet_faces(*sheet, AParam, mids);
             split_sheet_blocks(*sheet, AParam, mids);
+            // A cut both splits faces in 2 and creates one per block, so which faces belong to a
+            // block has changed; re-derived rather than tracked through each of those steps.
+            refresh_hex_faces();
             return true;
         }
 
@@ -2841,13 +2873,6 @@ namespace gecko {
 
                 assign_half_face(low_face, low, sf, AMids, true, axis, other);
                 assign_half_face(high_face, high, sf, AMids, false, axis, other);
-
-                if (std::find(m_hex_faces.begin(), m_hex_faces.end(), sf.face) != m_hex_faces.end()) {
-                    const Face added = (low_face == sf.face) ? high_face : low_face;
-                    if (std::find(m_hex_faces.begin(), m_hex_faces.end(), added) == m_hex_faces.end()) {
-                        m_hex_faces.push_back(added);
-                    }
-                }
             }
         }
 
@@ -3009,9 +3034,6 @@ namespace gecko {
                 // A face born inside a block lies on whatever that block lies on.
                 new_face->info().geom_targets = sb.block->info().geom_targets;
                 assign_cut_face(new_face, volume_boundary_surface(low, sb.axis), sb, AMids, axis);
-                if (std::find(m_hex_faces.begin(), m_hex_faces.end(), new_face) == m_hex_faces.end()) {
-                    m_hex_faces.push_back(new_face);
-                }
 
                 const Block half_a = m_cmap.template attribute<3>(nd);
                 const Block half_b = m_cmap.template attribute<3>(m_cmap.template beta<3>(nd));
@@ -3089,6 +3111,32 @@ namespace gecko {
                 }
             }
             AFace->info().surface = reframed_surface(ASurface, corner_ab);
+        }
+
+        /**
+         * @brief Rebuilds `m_hex_faces` from the blocks that currently exist.
+         *
+         * `m_hex_faces` means "every face belonging to some block": those are the candidates
+         * `build_connectivity()` may sew at dimension 3, and the ones `to_mesh()` must *not* emit a
+         * quad for, a quad being what a standalone 2D block is made of. Derived rather than
+         * maintained by hand, because the operations that change it — a cut splitting a face in 2, a
+         * deletion taking faces away with the block that owned them — would otherwise each have to
+         * remember to, and a deletion cannot: once CGAL has garbage-collected a face attribute there
+         * is no handle left to look up and drop.
+         */
+        void refresh_hex_faces() {
+            std::set<Face> faces;
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                for (auto fit = m_cmap.template one_dart_per_incident_cell<2, 3>(it->dart()).begin(),
+                          fend = m_cmap.template one_dart_per_incident_cell<2, 3>(it->dart()).end();
+                     fit != fend;
+                     ++fit) {
+                    faces.insert(m_cmap.template attribute<2>(fit));
+                }
+            }
+            m_hex_faces.assign(faces.begin(), faces.end());
         }
 
         /** @brief Non-owning pointer to the geometric model this blocking is built against. */

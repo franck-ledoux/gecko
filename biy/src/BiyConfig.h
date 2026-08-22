@@ -128,6 +128,9 @@ namespace gecko::biy {
          * snaps to exactly 0.5 — cutting in half being by far the common case. */
         double cut_snap_tolerance = 0.04;
 
+        /** @brief Color the block under the cursor is drawn in, in Delete mode. */
+        std::array<float, 3> delete_highlight_color{0.9f, 0.15f, 0.2f};
+
         /**
          * @brief Picks the color a corner should be drawn in.
          * @param classification_dim Dimension the corner is classified on, or -1 if unclassified —

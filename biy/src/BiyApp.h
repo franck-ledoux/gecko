@@ -28,7 +28,8 @@ namespace gecko::biy {
     enum class MouseMode {
         Camera, ///< Polyscope's usual navigation: rotate/pan/zoom the view.
         Edit,   ///< Navigation off; dragging picks up and moves a block corner.
-        Cut     ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
+        Cut,    ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
+        Delete  ///< Navigation off; hovering a block highlights it, clicking deletes it.
     };
 
     /**
@@ -169,6 +170,19 @@ namespace gecko::biy {
          * the status line and on the terminal.
          * @param trigger How the cut was asked for, for the terminal line ("click" or "space"). */
         void perform_cut(const char *trigger);
+        /** @brief Tracks which block the cursor is over in Delete mode, highlighting it, and deletes
+         * it on a click or on space. */
+        void handle_delete();
+        /** @brief Re-reads which block the cursor is over.
+         * @param screen_coords Current mouse position. */
+        void update_delete_hover(glm::vec2 screen_coords);
+        /** @brief Registers (or removes, when nothing is hovered) the highlight on the block about to
+         * be deleted. */
+        void refresh_delete_preview();
+        /** @brief Deletes the block the highlight is currently showing, reporting what happened both
+         * in the status line and on the terminal.
+         * @param trigger How the deletion was asked for, for the terminal line. */
+        void perform_delete(const char *trigger);
         /** @brief Re-reads which edge the cursor is over and rebuilds the cut preview from it.
          * @param screen_coords Current mouse position. */
         void update_cut_hover(glm::vec2 screen_coords);
@@ -203,6 +217,11 @@ namespace gecko::biy {
         /** @brief Last position the cut hover was computed for, so a still cursor costs nothing:
          * each hover test is a full Polyscope pick, which is a render pass. */
         glm::vec2 m_last_cut_mouse{-1.0f, -1.0f};
+        /** @brief Block the cursor is currently over in Delete mode, as a position in the order
+         * `BlockingFacade::delete_block()` speaks, or unset when the cursor is over none. */
+        std::optional<int> m_hover_block;
+        /** @copydoc m_last_cut_mouse */
+        glm::vec2 m_last_delete_mouse{-1.0f, -1.0f};
         /** @brief Subdivisions used when displaying the blocking (1 = raw block structure). */
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */

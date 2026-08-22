@@ -87,6 +87,11 @@ print(blocking.nb_cells(2), blocking.is_valid_topology())
 if blocking.can_delete_face(face_a):
     blocking.delete_face(face_a)
 
+# Deleting a block takes with it every face, edge and corner that existed only because of it;
+# whatever it shared with a neighbour stays, as that neighbour's boundary. The index is a position
+# in the block traversal — the same order mesh_hexes() and block_volumes() use.
+blocking.delete_block(0)
+
 # Cutting: pick an edge (by its position in edge_vertices()/edge_segments() order) and a parameter
 # along it. The cut runs through every edge parallel to that one, across every block they touch —
 # sheet_edges() reports which, and sheet_cut_points() where, before anything is modified.

@@ -583,3 +583,97 @@ TEST_CASE("repeated_off_centre_cuts_keep_the_generated_mesh_on_the_original_bloc
     }
     REQUIRE(blocking.template nb_cells<3>() == 8);
 }
+
+TEST_CASE("deleting_a_lone_block_leaves_nothing_behind", "[BlockTestSuite]") {
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block(box(0.0, 1.0));
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+
+    blocking.delete_block(blocking.cmap().attributes<3>().begin());
+
+    // Everything the block owned went with it: nothing was shared, so nothing survives.
+    REQUIRE(blocking.template nb_cells<3>() == 0);
+    REQUIRE(blocking.template nb_cells<2>() == 0);
+    REQUIRE(blocking.template nb_cells<1>() == 0);
+    REQUIRE(blocking.template nb_cells<0>() == 0);
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.to_mesh(1).nb_nodes() == 0);
+}
+
+TEST_CASE("deleting_one_of_2_sewn_blocks_keeps_what_they_shared", "[BlockTestSuite]") {
+    // The case that says whether the removal cascades correctly: the shared face, its 4 edges and
+    // its 4 corners must survive as the survivor's own boundary, while the 5 faces, 8 edges and 4
+    // corners that belonged to the deleted block alone must go.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block(box(0.0, 1.0));
+    blocking.create_hex_block(box(1.0, 2.0));
+    blocking.build_connectivity();
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<0>() == 12);
+    REQUIRE(blocking.template nb_cells<2>() == 11);
+
+    blocking.delete_block(blocking.cmap().attributes<3>().begin());
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+    REQUIRE(blocking.template nb_cells<0>() == 8); // one cube's worth
+    REQUIRE(blocking.template nb_cells<1>() == 12);
+    REQUIRE(blocking.template nb_cells<2>() == 6);
+
+    // And what is left still meshes as one whole hex, the shared face now being a boundary one.
+    const auto mesh = blocking.to_mesh(1);
+    REQUIRE(mesh.nb_cells() == 1);
+    REQUIRE(mesh.nb_nodes() == 8);
+    REQUIRE(mesh.nb_faces() == 0); // a block's faces are not emitted as standalone quads
+}
+
+TEST_CASE("deleting_a_block_after_a_cut_keeps_the_face_index_sound", "[BlockTestSuite]") {
+    // A cut leaves faces belonging to blocks, and a deletion garbage-collects some of them. Once
+    // CGAL has collected a face attribute there is no handle left to look up and drop, so the
+    // "which faces belong to a block" index has to be re-derived — if it were not, to_mesh() would
+    // compare against freed attributes and emit stray quads for the survivor's own faces.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block(box(0.0, 1.0));
+
+    const auto e = edge_along(blocking, 0, 0.0);
+    REQUIRE(blocking.cut_sheet(e, 0.4));
+    REQUIRE(blocking.template nb_cells<3>() == 2);
+
+    blocking.delete_block(blocking.cmap().attributes<3>().begin());
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+
+    const auto mesh = blocking.to_mesh(2);
+    REQUIRE(mesh.nb_cells() == 8);
+    // No standalone quads: every remaining face belongs to the surviving block.
+    REQUIRE(mesh.nb_faces() == 0);
+
+    // The survivor is still a genuine block, and can be cut again.
+    const auto again = blocking.cmap().attributes<1>().begin();
+    REQUIRE(blocking.find_sheet(again).has_value());
+}
+
+TEST_CASE("deleting_every_block_one_by_one_empties_the_blocking", "[BlockTestSuite]") {
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block(box(0.0, 1.0));
+    blocking.create_hex_block(box(1.0, 2.0));
+    blocking.build_connectivity();
+
+    while (blocking.template nb_cells<3>() > 0) {
+        blocking.delete_block(blocking.cmap().attributes<3>().begin());
+        REQUIRE(blocking.is_valid_topology());
+    }
+    REQUIRE(blocking.template nb_cells<2>() == 0);
+    REQUIRE(blocking.template nb_cells<0>() == 0);
+
+    // An empty blocking is a legitimate state to be in, not a broken one: it still builds a mesh
+    // and still takes a new block.
+    REQUIRE(blocking.to_mesh(2).nb_nodes() == 0);
+    blocking.create_hex_block(box(0.0, 1.0));
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+    REQUIRE(blocking.to_mesh(1).nb_cells() == 1);
+}

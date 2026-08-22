@@ -72,15 +72,32 @@ namespace gecko::python {
         const auto points = to_points<8>(corners, "Blocking.create_hex_block");
         return std::visit(
             [&points](auto &impl) {
-                impl.blocking.create_hex_block(points);
+                const auto block = impl.blocking.create_hex_block(points);
                 impl.index_new_nodes();
-                return impl.next_block_id++;
+                // Reported as a position in the block traversal rather than a counter of its own:
+                // that is the one blocks are addressed by everywhere else here, and a counter no
+                // other method accepts is not an id, only a number.
+                auto &map = impl.blocking.cmap();
+                int index = 0;
+                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
+                     it != itend;
+                     ++it, ++index) {
+                    if (it == block) return index;
+                }
+                return -1;
             },
             m_impl);
     }
 
     void BlockingFacade::build_connectivity() {
-        std::visit([](auto &impl) { impl.blocking.build_connectivity(); }, m_impl);
+        std::visit(
+            [](auto &impl) {
+                impl.blocking.build_connectivity();
+                // Sewing merges each pair of coincident corners into one attribute, discarding the
+                // other — ids still pointing at the discarded one have to go.
+                impl.forget_stale_nodes();
+            },
+            m_impl);
     }
 
     void BlockingFacade::classify(double tol_vertex, double tol_curve, double tol_surface) {
@@ -140,6 +157,40 @@ namespace gecko::python {
                 const auto it = find_face(impl, face_id);
                 impl.blocking.delete_face(it->second);
                 impl.faces_by_id.erase(it);
+            },
+            m_impl);
+    }
+
+    namespace {
+        /** @brief The block sitting at position @p index of a blocking's own block traversal — the
+         * order `mesh_hexes()` emits its cells in, and the one `block_volumes()` reports in.
+         * @tparam TImpl The per-degree Impl alternative.
+         * @param impl The blocking state.
+         * @param index The position to resolve.
+         * @return That block.
+         * @throw std::out_of_range if the blocking has no such block. */
+        template<typename TImpl>
+        auto block_at(TImpl &impl, int index) {
+            auto &map = impl.blocking.cmap();
+            if (index >= 0) {
+                int seen = 0;
+                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
+                     it != itend;
+                     ++it, ++seen) {
+                    if (seen == index) return it;
+                }
+            }
+            throw std::out_of_range("Blocking: unknown block index " + std::to_string(index));
+        }
+    } // namespace
+
+    void BlockingFacade::delete_block(int block_index) {
+        std::visit(
+            [block_index](auto &impl) {
+                impl.blocking.delete_block(block_at(impl, block_index));
+                // A deletion takes corner nodes with it, so ids pointing at them have to go too —
+                // an id map holding freed attributes is worse than one that has forgotten them.
+                impl.forget_stale_nodes();
             },
             m_impl);
     }

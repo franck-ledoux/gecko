@@ -439,3 +439,79 @@ def test_repeated_off_centre_cuts_conserve_the_block(geom_model_path, degree):
             assert -1e-9 <= p[2] <= 2 + 1e-9
 
     assert blocking.nb_cells(3) == 8
+
+
+def test_delete_block_takes_only_what_the_block_owned(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+    blocking.create_hex_block(_unit_hex_at(1.0, 2.0))
+    blocking.build_connectivity()
+    assert blocking.nb_cells(0) == 12
+    assert blocking.nb_cells(3) == 2
+
+    blocking.delete_block(0)
+
+    # The shared face, its edges and its corners survive as the other block's boundary; the 4
+    # corners the deleted block alone owned go with it.
+    assert blocking.nb_cells(3) == 1
+    assert blocking.nb_cells(0) == 8
+    assert blocking.nb_cells(2) == 6
+    assert blocking.is_valid_topology()
+    assert len(blocking.mesh_hexes(1)) == 1
+
+    # Node ids pointing at corners that no longer exist must be gone, or reading them would touch
+    # freed attributes.
+    assert len(blocking.node_ids()) == blocking.nb_cells(0)
+    for node_id in blocking.node_ids():
+        blocking.node_position(node_id)
+
+
+def test_delete_block_after_a_cut(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+    assert blocking.cut_sheet(0, 0.4)
+    assert blocking.nb_cells(3) == 2
+
+    volumes_before = sorted(blocking.block_volumes(2))
+    blocking.delete_block(0)
+
+    assert blocking.nb_cells(3) == 1
+    assert blocking.is_valid_topology()
+    # Whichever half survived kept its own volume, untouched by the deletion.
+    assert blocking.block_volumes(2)[0] == pytest.approx(volumes_before[0]) or \
+           blocking.block_volumes(2)[0] == pytest.approx(volumes_before[1])
+    # And no stray quads: every remaining face still belongs to the surviving block.
+    assert blocking.mesh_quads(1) == []
+
+
+def test_delete_every_block_then_start_again(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+    blocking.create_hex_block(_unit_hex_at(1.0, 2.0))
+    blocking.build_connectivity()
+
+    while blocking.nb_cells(3) > 0:
+        blocking.delete_block(0)
+        assert blocking.is_valid_topology()
+
+    # An empty blocking is a state to be in, not a broken one.
+    assert blocking.nb_cells(0) == 0
+    assert blocking.node_ids() == []
+    assert blocking.mesh_hexes(1) == []
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+    assert blocking.nb_cells(3) == 1
+
+
+def test_delete_block_rejects_an_unknown_index(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
+
+    with pytest.raises(IndexError):
+        blocking.delete_block(7)
+    with pytest.raises(IndexError):
+        blocking.delete_block(-1)
+    assert blocking.nb_cells(3) == 1
