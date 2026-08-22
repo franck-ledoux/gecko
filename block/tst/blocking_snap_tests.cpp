@@ -225,7 +225,7 @@ TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[Bloc
     const FacetedGeometry geom(path);
     std::filesystem::remove(path);
 
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
     blocking.create_quad_block({Point3d(0, 0, 0), Point3d(1, 0, 0), Point3d(1, 1, 0), Point3d(0, 1, 0)});
     blocking.classify(1e-6);
 
@@ -238,7 +238,7 @@ TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[Bloc
     // No smooth cubic reproduces this polyline's kink, so the fit can only approximate it. Measure
     // that residual against what projecting the control points would have given on the very same
     // edge, rather than trusting a hand-picked threshold.
-    const auto worst_distance = [&curve](const BezierCurve<3, Point3d> &ACurve) {
+    const auto worst_distance = [&curve](const BezierCurve<Point3d> &ACurve) {
         double worst = 0.0;
         for (int i = 0; i <= 50; ++i) {
             worst = std::max(worst, curve->distance(ACurve.value(static_cast<double>(i) / 50.0)));
@@ -246,7 +246,7 @@ TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[Bloc
         return worst;
     };
 
-    BezierCurve<3, Point3d> control_point_projection;
+    BezierCurve<Point3d> control_point_projection(3);
     const Vector3d chord(Point3d(0, 0, 0), Point3d(1, 0, 0));
     for (std::size_t i = 0; i < 4; ++i) {
         Point3d cp = Point3d(0, 0, 0) + chord * (static_cast<double>(i) / 3.0);
@@ -311,7 +311,7 @@ TEST_CASE("a_curved_edge_leaves_its_ends_along_the_geometric_curve", "[BlockTest
     const FacetedGeometry geom(path);
     std::filesystem::remove(path);
 
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
     blocking.create_quad_block({Point3d(1, 0, 0), Point3d(0, 1, 0), Point3d(2, 2, 0), Point3d(2, 0, 0)});
     // Grabbed before classifying, since snapping nudges the corner onto the arc's own end node —
     // which sits at (cos(pi/2), sin(pi/2)), not exactly (0,1,0), and so no longer matches by value.

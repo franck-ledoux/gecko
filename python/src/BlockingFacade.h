@@ -6,7 +6,6 @@
 #include <set>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 #include <gecko/block/Blocking.h>
@@ -24,30 +23,44 @@ namespace gecko::python {
      * plain int ids assigned by this façade, never a gecko::Point3d or CGAL dart/attribute handle
      * — see docs/user-guide/python.md.
      *
-     * TEdgeCurve's degree (1 = straight, 2/3/4 = Bezier of that order) is chosen at construction
-     * time via a plain int, instead of being a compile-time Python-visible axis: internally this
-     * holds one of a std::variant of degree-specific implementations. The degree cannot be changed
-     * afterwards — it is baked into the C++ type — so build a new Blocking to work at another order.
+     * The edge curve degree (1 = straight, higher = Bezier of that order) is a plain int, given at
+     * construction and changeable afterwards through set_degree(). It used to be neither: the degree
+     * was a C++ template parameter, so this façade held a std::variant of one implementation per
+     * degree, could offer only the degrees it had instantiated, and could not change one without
+     * building a whole new Blocking.
      */
     class BlockingFacade {
     public:
-        /** @brief Lowest edge curve degree this facade can instantiate. */
+        /** @brief Lowest usable edge curve degree. 1 is a straight edge. */
         static constexpr int MIN_DEGREE = 1;
-        /** @brief Highest edge curve degree this facade can instantiate. */
-        static constexpr int MAX_DEGREE = 4;
 
         /**
          * @brief Constructor.
          * @param model The geometric model to build against; must outlive this Blocking (enforced
          *        on the Python side via py::keep_alive).
-         * @param degree Edge curve degree: 1 for straight edges, 2/3/4 for Bezier curves of that
-         *        order.
-         * @throw std::invalid_argument if @p degree is outside [MIN_DEGREE, MAX_DEGREE].
+         * @param degree Edge curve degree: 1 for straight edges, higher for Bezier curves of that
+         *        order. Changeable afterwards through set_degree().
+         * @throw std::invalid_argument if @p degree is below MIN_DEGREE.
          */
         explicit BlockingFacade(const GeomModelFacade &model, int degree = 1);
 
-        /** @brief Gets the edge curve degree this blocking was built with. @return The degree. */
+        /** @brief Gets the edge curve degree this blocking currently uses. @return The degree. */
         [[nodiscard]] int degree() const;
+
+        /**
+         * @brief Rebuilds every edge, face and block at a new degree, refitting them onto the model.
+         *
+         * Topology and classification are untouched; only the representation changes. Raising the
+         * order does not merely add control points, it uses them: an edge lying on a curved model
+         * curve, which at degree 1 could only be its chord, comes back following it.
+         * @param degree The new degree, at least MIN_DEGREE.
+         * @param tol_vertex Tolerance for snapping onto a vertex, as classify() takes it.
+         * @param tol_curve Tolerance for snapping onto a curve; defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface; defaults to the resolved curve
+         *        tolerance.
+         * @throw std::invalid_argument if @p degree is below MIN_DEGREE.
+         */
+        void set_degree(int degree, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
 
         /**
          * @brief Creates a new, unsewn quad block.
@@ -346,11 +359,8 @@ namespace gecko::python {
 
         /** @brief Per-degree state; public only so the .cpp's free-function helpers can name it —
          * never part of the class' actual (Python-facing) interface. */
-        template<std::size_t N>
         struct Impl {
-            using BlockingT = Blocking<FacetedGeometry, BezierCurve<N, Point3d>>;
-            /** @brief The edge curve degree this alternative was instantiated for. */
-            static constexpr int DEGREE = static_cast<int>(N);
+            using BlockingT = Blocking<FacetedGeometry>;
 
             BlockingT blocking;
             std::unordered_map<int, typename BlockingT::Face> faces_by_id;
@@ -359,7 +369,7 @@ namespace gecko::python {
             int next_block_id = 0;
             int next_node_id = 0;
 
-            explicit Impl(const FacetedGeometry &geom) : blocking(geom) {}
+            explicit Impl(const FacetedGeometry &geom, int degree) : blocking(geom, static_cast<std::size_t>(degree)) {}
 
             /**
              * @brief Drops every id whose node attribute no longer exists.
@@ -400,7 +410,31 @@ namespace gecko::python {
         };
 
     private:
-        std::variant<Impl<1>, Impl<2>, Impl<3>, Impl<4>> m_impl;
+        Impl m_impl;
+
+        /**
+         * @brief Runs @p AWork against the blocking state.
+         *
+         * A single call now, but it used to fan out over a `std::variant` of one alternative per
+         * degree — the degree being a template parameter meant a degree-3 blocking was a different
+         * C++ type from a degree-1 one, and this façade had to hold every one of them at once. With
+         * the degree carried by the object there is one type, and one alternative left. Kept as a
+         * seam rather than folded into each method so this refactor did not also rewrite 38 method
+         * bodies; inlining it is a tidy-up of its own.
+         *
+         * @tparam TWork Callable taking the blocking state.
+         * @param AWork The work to run.
+         * @return Whatever @p AWork returns.
+         */
+        template<typename TWork>
+        decltype(auto) with_impl(TWork AWork) {
+            return AWork(m_impl);
+        }
+        /** @copydoc with_impl */
+        template<typename TWork>
+        decltype(auto) with_impl(TWork AWork) const {
+            return AWork(m_impl);
+        }
     };
 
 } // namespace gecko::python

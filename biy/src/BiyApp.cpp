@@ -811,6 +811,25 @@ namespace gecko::biy {
                               MAX_SUBDIVISIONS * MAX_SUBDIVISIONS * MAX_SUBDIVISIONS);
         }
 
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("order", &m_order, 1, 1)) {
+            m_order = std::clamp(m_order, 1, MAX_ORDER);
+            if (m_blocking) {
+                // Not just more control points: the whole structure is refitted at the new order, so
+                // an edge lying on a curved model curve stops being its chord and starts following
+                // it. Uses the panel's own tolerances, the same ones Classify uses.
+                m_blocking->set_degree(m_order, m_tol_vertex, m_tol_curve, m_tol_surface);
+                refresh_view();
+                m_status = "Rebuilt at order " + std::to_string(m_order) + bend_report(*m_blocking);
+                std::cout << "biy [order " << m_order << "]: blocking refitted." << std::endl;
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("1 to %d. 1 is straight edges. Changing it refits every edge, face and block onto "
+                              "the model at the new order — topology and classification are kept.",
+                              MAX_ORDER);
+        }
+
         if (ImGui::Checkbox("Show block edges", &m_show_block_edges)) refresh_view();
 
         ImGui::BeginDisabled(m_order <= 1);

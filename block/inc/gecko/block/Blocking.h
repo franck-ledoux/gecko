@@ -30,17 +30,21 @@ namespace gecko {
      *
      * A "2D" (quad) block is a standalone 2-cell with no incident 3-cell; a "3D" (hex) block is a
      * genuine 3-cell — both live in, and can be freely mixed within, the same map (see CellData.h).
-     * `TEdgeCurve` (default `BezierCurve<1, Point3d>`, i.e. straight edges) is the "linear vs
-     * curved blocking via template instantiation" axis from issue #22: any degree `N` gives curved
-     * blocking, `N=1` collapses exactly to linear blocking through the same Coons/TFI construction
-     * (see math/CoonsPatch.h). `TGeomModel` (`GeomModelConcept`-conforming, e.g. `FacetedGeometry`)
+     * `TEdgeCurve` (default `BezierCurve<Point3d>`) names the *representation family* only — the
+     * degree is a property of the blocking, set at construction and changeable afterwards through
+     * `set_degree()`. Any degree gives a curved blocking and degree 1 collapses exactly to linear
+     * blocking, through the same Coons/TFI construction (see math/CoonsPatch.h). Keeping the family
+     * a template parameter is what leaves room for a future `NurbsCurve` to take its place without
+     * touching this class; keeping the degree out of it is what lets a structure being edited change
+     * order in place, which a degree baked into the type could not do without rebuilding every cell
+     * into a different C++ type. `TGeomModel` (`GeomModelConcept`-conforming, e.g. `FacetedGeometry`)
      * is the geometric model this blocking is built against, held for the whole lifetime of the
      * object — "a block structure always exists along a geometric model".
      *
      * @tparam TGeomModel Geometric model type, must satisfy `GeomModelConcept`.
      * @tparam TEdgeCurve Edge curve representation, must satisfy `EdgeCurveConcept`.
      */
-    template<GeomModelConcept TGeomModel, EdgeCurveConcept TEdgeCurve = BezierCurve<1, Point3d>>
+    template<GeomModelConcept TGeomModel, EdgeCurveConcept TEdgeCurve = BezierCurve<Point3d>>
     class Blocking {
         /** @brief The face representation paired with `TEdgeCurve` via `CurveSurfaceTraits` (same
          * order per issue #22) — `BezierSurface<N,Point3d>` for a `BezierCurve<N,Point3d>` edge
@@ -102,8 +106,50 @@ namespace gecko {
          * @brief Constructor.
          * @param AGeomModel The geometric model this blocking is built against; must outlive this
          *        Blocking (only a non-owning pointer is stored).
+         * @param ADegree The degree every edge curve, face surface and block volume is built at.
+         *        1 gives straight edges. Changeable later through `set_degree()`.
          */
-        explicit Blocking(const TGeomModel &AGeomModel) : m_geom_model(&AGeomModel) {}
+        explicit Blocking(const TGeomModel &AGeomModel, std::size_t ADegree = 1)
+            : m_degree(ADegree), m_geom_model(&AGeomModel) {
+            assert(ADegree >= 1 && "Blocking: degree must be at least 1");
+        }
+
+        /** @brief The degree every cell's geometry is currently built at. @return The degree. */
+        [[nodiscard]] std::size_t degree() const { return m_degree; }
+
+        /**
+         * @brief Rebuilds the whole blocking's geometry at a new degree, refitting it onto the
+         * geometric model as it goes.
+         *
+         * Topology is untouched: the same nodes, edges, faces and blocks come out, carrying the same
+         * classification. Only the representation changes — every edge is rebuilt at @p ADegree and
+         * refitted onto whatever it is classified on, and every face and block is rebuilt from those
+         * edges. Raising the order therefore does not merely add control points, it *uses* them: an
+         * edge lying on a curved model curve, which at degree 1 could only be its chord, comes back
+         * following it.
+         *
+         * Implemented as a reclassification rather than as degree elevation, deliberately. Elevation
+         * is exact and would preserve each edge's current shape, but that shape is the best fit at
+         * the *old* degree — which is precisely what the caller is asking to improve. An edge with
+         * nothing to fit onto still ends up where elevation would have put it, since a straight edge
+         * rebuilt straight at any degree is the same curve.
+         *
+         * @param ADegree The new degree, at least 1.
+         * @param ATolVertex Tolerance for snapping onto a vertex, as `classify()` takes it.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface. Defaults to the resolved curve
+         *        tolerance.
+         * @return false, changing nothing, if @p ADegree is less than 1.
+         */
+        bool set_degree(std::size_t ADegree, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            if (ADegree < 1) return false;
+            m_degree = ADegree;
+            // classify() rebuilds every cell's geometry from scratch — edges refitted onto their own
+            // classification, faces and blocks re-derived from those edges — and every one of those
+            // rebuilds now happens at the degree just set.
+            classify(ATolVertex, ATolCurve, ATolSurface);
+            return true;
+        }
 
         /**
          * @brief Creates a new, unsewn, straight-edged quad block (a standalone face, no 3-cell),
@@ -1339,13 +1385,13 @@ namespace gecko {
                 inferred.empty() ? classify_position(GroupDim::Dim1, midpoint, ATol) : nearest_of(inferred, midpoint);
             AEdge->info().geom_targets = result.targets;
 
-            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            const std::size_t n = m_degree + 1;
             const Vector3d chord(p0, p1);
 
             // The points the fitted curve must pass through: its 2 endpoints, plus interior samples
             // pulled onto the geometry. Without a classification there is nothing to pull them onto,
             // so they stay on the chord and the fit collapses to the straight edge.
-            std::array<Point3d, n> samples{};
+            std::vector<Point3d> samples(n);
             for (std::size_t i = 0; i < n; ++i) {
                 const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
                 Point3d s = p0 + chord * t;
@@ -1381,7 +1427,8 @@ namespace gecko {
                     dense.back() = p1;
 
                     store_curve(AEdge,
-                                tangent_constrained_curve(dense,
+                                tangent_constrained_curve(m_degree,
+                                                          dense,
                                                           chord_length_parameters(dense),
                                                           oriented_tangent(curve->tangent(p0), chord),
                                                           oriented_tangent(curve->tangent(p1), chord)),
@@ -1435,6 +1482,7 @@ namespace gecko {
          * extra middle control points free too), and are chosen by least squares against the
          * interior samples — the classic tangent-constrained Bezier fit.
          *
+         * @param ADegree The degree to fit at.
          * @param ASamples The points to fit, first and last being the endpoints.
          * @param AParameters The curve parameter each sample should be reproduced at, one per entry
          *        of @p ASamples — see `chord_length_parameters()`.
@@ -1443,16 +1491,17 @@ namespace gecko {
          * @return The fitted curve. Falls back to plain interpolation if either tangent is null (a
          *         degenerate faceting) or the fit is singular.
          */
-        static TEdgeCurve tangent_constrained_curve(const std::vector<Point3d> &ASamples,
+        static TEdgeCurve tangent_constrained_curve(std::size_t ADegree,
+                                                    const std::vector<Point3d> &ASamples,
                                                     const std::vector<double> &AParameters,
                                                     const Vector3d &AStartTangent,
                                                     const Vector3d &AEndTangent) {
-            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
-            constexpr std::size_t degree = n - 1;
-            std::array<Point3d, n> ends{};
+            const std::size_t n = ADegree + 1;
+            const std::size_t degree = ADegree;
+            std::vector<Point3d> ends(n);
             ends[0] = ASamples.front();
             ends[n - 1] = ASamples.back();
-            if constexpr (n < 3) {
+            if (n < 3) {
                 return interpolating_curve(ends);
             } else {
                 if (AStartTangent.norm_sq() < 1e-24 || AEndTangent.norm_sq() < 1e-24) {
@@ -1500,7 +1549,7 @@ namespace gecko {
                 const double a = (atb[0] * ata[1][1] - ata[0][1] * atb[1]) / det;
                 const double b = (ata[0][0] * atb[1] - atb[0] * ata[1][0]) / det;
 
-                TEdgeCurve fitted;
+                TEdgeCurve fitted(degree);
                 fitted[0] = p0;
                 fitted[n - 1] = pn;
                 fitted[1] = p0 + AStartTangent * a;
@@ -1527,20 +1576,20 @@ namespace gecko {
          * @return The interpolating curve. Returns the samples as-is when there is no interior
          *         control point to solve for (degree 1), where the curve already interpolates them.
          */
-        static TEdgeCurve interpolating_curve(const std::array<Point3d, TEdgeCurve::NumControlPoints> &ASamples) {
-            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
-            constexpr std::size_t degree = n - 1;
-            constexpr std::size_t unknowns = (n > 2) ? n - 2 : 0;
+        static TEdgeCurve interpolating_curve(const std::vector<Point3d> &ASamples) {
+            const std::size_t n = ASamples.size();
+            const std::size_t degree = n - 1;
+            const std::size_t unknowns = (n > 2) ? n - 2 : 0;
 
-            TEdgeCurve fitted;
+            TEdgeCurve fitted(degree);
             fitted[0] = ASamples[0];
             fitted[n - 1] = ASamples[n - 1];
-            if constexpr (unknowns == 0) {
+            if (unknowns == 0) {
                 return fitted;
             } else {
                 // Augmented system: `unknowns` equations, one per interior sample, with the 3
                 // coordinates carried as 3 right-hand sides (the matrix is the same for all of them).
-                std::array<std::array<double, unknowns + 3>, unknowns> sys{};
+                std::vector<std::vector<double>> sys(unknowns, std::vector<double>(unknowns + 3, 0.0));
                 for (std::size_t r = 0; r < unknowns; ++r) {
                     const double t = static_cast<double>(r + 1) / static_cast<double>(degree);
                     for (std::size_t c = 0; c < unknowns; ++c) {
@@ -1603,8 +1652,8 @@ namespace gecko {
          * @return The reversed curve.
          */
         static TEdgeCurve reversed_curve(const TEdgeCurve &ACurve) {
-            TEdgeCurve rev;
-            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+            TEdgeCurve rev(ACurve.degree());
+            const std::size_t n = ACurve.nb_control_points();
             for (std::size_t i = 0; i < n; ++i) {
                 rev[i] = ACurve[n - 1 - i];
             }
@@ -2277,9 +2326,9 @@ namespace gecko {
          * @param AB End point (parameter 1).
          * @return The straight curve.
          */
-        static TEdgeCurve straight_curve(const Point3d &AA, const Point3d &AB) {
-            TEdgeCurve curve;
-            constexpr std::size_t n = TEdgeCurve::NumControlPoints;
+        TEdgeCurve straight_curve(const Point3d &AA, const Point3d &AB) const {
+            TEdgeCurve curve(m_degree);
+            const std::size_t n = m_degree + 1;
             const Vector3d ab(AA, AB);
             for (std::size_t i = 0; i < n; ++i) {
                 const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
@@ -2942,7 +2991,7 @@ namespace gecko {
          * @return @p ACurve with its 2 end control points replaced by those positions.
          */
         static TEdgeCurve pinned_curve(TEdgeCurve ACurve, const Point3d &AStart, const Point3d &AEnd) {
-            constexpr std::size_t last = TEdgeCurve::NumControlPoints - 1;
+            const std::size_t last = ACurve.nb_control_points() - 1;
             ACurve[0] = AStart;
             ACurve[last] = AEnd;
             return ACurve;
@@ -2956,8 +3005,8 @@ namespace gecko {
          * @return The boundary curve, exactly (it is a row/column of the control grid).
          */
         static TEdgeCurve surface_boundary_curve(const FaceSurfaceT &ASurface, int AAxis) {
-            constexpr std::size_t n = FaceSurfaceT::Degree;
-            std::array<Point3d, TEdgeCurve::NumControlPoints> points{};
+            const std::size_t n = ASurface.degree();
+            std::vector<Point3d> points(n + 1);
             for (std::size_t a = 0; a <= n; ++a) {
                 points[a] = (AAxis == 0) ? ASurface.control_points()[n][a] : ASurface.control_points()[a][n];
             }
@@ -2973,8 +3022,8 @@ namespace gecko {
          *         the 2 remaining axes in increasing order.
          */
         static FaceSurfaceT volume_boundary_surface(const BlockVolumeT &AVolume, int AAxis) {
-            constexpr std::size_t n = BlockVolumeT::Degree;
-            typename FaceSurfaceT::ControlGrid grid{};
+            const std::size_t n = AVolume.degree();
+            auto grid = FaceSurfaceT::make_grid(n);
             for (std::size_t a = 0; a <= n; ++a) {
                 for (std::size_t b = 0; b <= n; ++b) {
                     if (AAxis == 0) {
@@ -3006,11 +3055,11 @@ namespace gecko {
          */
         static FaceSurfaceT reframed_surface(const FaceSurfaceT &ASource,
                                              const std::array<std::array<int, 2>, 4> &ACornerAB) {
-            constexpr std::size_t n = FaceSurfaceT::Degree;
+            const std::size_t n = ASource.degree();
             // Corner 0 -> corner 1 is the target's own u; whichever source axis moves along it is the
             // one the target's u maps to, and the remaining source axis takes the target's v.
             const bool a_follows_u = (ACornerAB[1][0] != ACornerAB[0][0]);
-            typename FaceSurfaceT::ControlGrid grid{};
+            auto grid = FaceSurfaceT::make_grid(n);
             for (std::size_t p = 0; p <= n; ++p) {
                 for (std::size_t q = 0; q <= n; ++q) {
                     const std::size_t along_a = a_follows_u ? p : q;
@@ -3184,7 +3233,7 @@ namespace gecko {
          */
         static BlockVolumeT reframed_volume(const BlockVolumeT &ASource,
                                             const std::array<std::array<int, 3>, 8> &ACornerUVW) {
-            constexpr std::size_t n = BlockVolumeT::Degree;
+            const std::size_t n = ASource.degree();
             // Corner 0 to corners 1/3/4 walk the target's own u/v/w; whichever source axis moves
             // along each is the one it maps to, and corner 0's own position gives the direction.
             std::array<std::size_t, 3> axis_of{};
@@ -3195,7 +3244,7 @@ namespace gecko {
                 }
             }
 
-            typename BlockVolumeT::ControlGrid grid{};
+            auto grid = BlockVolumeT::make_grid(n);
             for (std::size_t p = 0; p <= n; ++p) {
                 for (std::size_t q = 0; q <= n; ++q) {
                     for (std::size_t r = 0; r <= n; ++r) {
@@ -3397,6 +3446,8 @@ namespace gecko {
             m_hex_faces.assign(faces.begin(), faces.end());
         }
 
+        /** @brief The degree every cell's geometry is built at — see `set_degree()`. */
+        std::size_t m_degree = 1;
         /** @brief Source of `NodeInfo::id`. Only ever increases, so an id is never reused and the
          * order it defines never changes meaning. */
         Int m_next_node_id = 0;

@@ -32,9 +32,9 @@ cmake --build build --target biy
 ./build/biy/biy test_data/two_cubes.msh 1      # straight blocks
 ```
 
-The optional second argument is the **block order**: `1` for straight edges, `2`/`3`/`4` for Bezier
-edges of that degree. It is fixed for the session — the order is part of the C++ blocking's type, so
-changing it means starting biy again.
+The optional second argument is the **block order** the session *starts* at: `1` for straight edges,
+higher for Bezier edges of that degree. It is not fixed — the `order` field in the panel changes it
+at any time, and the whole structure is refitted at the new order (see [Changing the order](#changing-the-order)).
 
 Two things start together:
 
@@ -103,6 +103,30 @@ framing distance `Reset view` uses. It is a flat compass rather than a real 3D w
 "bottom-right of the screen" is a screen-space request, and pinning actual 3D geometry to a screen
 corner under every zoom level, without it ever clipping through nearby scene content, needs far more
 care than projecting 6 directions through the camera's own basis each frame.
+
+## Changing the order
+
+The **order** field in the panel sets the degree of every edge curve, face surface and block volume.
+Changing it rebuilds the whole structure at the new degree and refits it onto the model — topology
+and classification are carried across untouched, only the representation changes.
+
+That distinction matters: raising the order does not merely add control points, it *uses* them. An
+edge lying on a curved model curve can only be its chord at order 1; at order 3 it comes back
+following the curve. On a block fitted to `cylinder.msh`, the worst departure from straightness goes
+from 0 at order 1 to 0.22 at order 3 — which is the geometry it was always supposed to have.
+
+Lowering it works the same way and is equally lossless to the topology; the geometry simply has
+fewer degrees of freedom to follow the model with.
+
+The rebuild is a reclassification rather than a degree elevation, deliberately. Elevation is exact
+and would keep each edge's current shape, but that shape is the best fit at the *old* degree, which
+is precisely what asking for a higher order is asking to improve. An edge with nothing to fit onto
+still lands where elevation would have put it — a straight edge rebuilt straight at any degree is
+the same curve.
+
+The panel caps the order at 10. Nothing in the kernel does: the degree is a plain number carried by
+each curve. But a fit has only so much to say, and past that the extra control points crowd together
+without following the model any closer, while costing on every face and block that touches the edge.
 
 ## Classification colors
 

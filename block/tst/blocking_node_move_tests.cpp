@@ -150,7 +150,7 @@ TEST_CASE("move_node_rebuilds_the_incident_hex_block_volume", "[BlockTestSuite]"
 
 TEST_CASE("move_node_refits_curved_edges_of_a_degree_3_blocking", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_minimal_geom_model();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
     blocking.create_quad_block(
         {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
 

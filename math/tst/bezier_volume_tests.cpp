@@ -8,7 +8,7 @@ using namespace gecko;
 
 TEST_CASE("bezier_volume_degree_1_is_trilinear", "[MathTestSuite]") {
     // Unit cube: corners [i][j][k], i/j/k along u/v/w.
-    BezierVolume<1, Point3d>::ControlGrid grid;
+    auto grid = BezierVolume<Point3d>::make_grid(1);
     for (std::size_t i = 0; i < 2; ++i) {
         for (std::size_t j = 0; j < 2; ++j) {
             for (std::size_t k = 0; k < 2; ++k) {
@@ -16,7 +16,7 @@ TEST_CASE("bezier_volume_degree_1_is_trilinear", "[MathTestSuite]") {
             }
         }
     }
-    const BezierVolume<1, Point3d> volume(grid);
+    const BezierVolume<Point3d> volume(grid);
 
     REQUIRE(volume.value(0.0, 0.0, 0.0) == Point3d(0.0, 0.0, 0.0));
     REQUIRE(volume.value(1.0, 1.0, 1.0) == Point3d(1.0, 1.0, 1.0));
@@ -29,7 +29,7 @@ TEST_CASE("bezier_volume_degree_1_is_trilinear", "[MathTestSuite]") {
 }
 
 TEST_CASE("bezier_volume_default_constructed_control_points_are_origin", "[MathTestSuite]") {
-    const BezierVolume<1, Point3d> volume;
+    const BezierVolume<Point3d> volume;
     REQUIRE(volume.control_point(0, 0, 0) == Point3d(0.0, 0.0, 0.0));
     REQUIRE(volume.control_point(1, 1, 1) == Point3d(0.0, 0.0, 0.0));
 }
@@ -37,7 +37,7 @@ TEST_CASE("bezier_volume_default_constructed_control_points_are_origin", "[MathT
 TEST_CASE("bezier_volume_split_along_each_axis_reproduces_the_parent_exactly", "[MathTestSuite]") {
     // The 3 axes share one implementation differing only in how a fiber maps back into the grid, so
     // this checks all 3 against an asymmetric grid — a mixed-up axis cannot survive it.
-    BezierVolume<2, Point3d>::ControlGrid grid{};
+    auto grid = BezierVolume<Point3d>::make_grid(2);
     for (std::size_t i = 0; i < 3; ++i) {
         for (std::size_t j = 0; j < 3; ++j) {
             for (std::size_t k = 0; k < 3; ++k) {
@@ -47,7 +47,7 @@ TEST_CASE("bezier_volume_split_along_each_axis_reproduces_the_parent_exactly", "
             }
         }
     }
-    const BezierVolume<2, Point3d> volume(grid);
+    const BezierVolume<Point3d> volume(grid);
 
     const double s = 0.38;
     const auto [u_low, u_high] = volume.split_u(s);

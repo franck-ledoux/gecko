@@ -7,7 +7,7 @@ using Catch::Approx;
 using namespace gecko;
 
 TEST_CASE("bezier_curve_degree_1_is_a_straight_line", "[MathTestSuite]") {
-    const BezierCurve<1, Point3d> line(Point3d(0.0, 0.0, 0.0), Point3d(4.0, 0.0, 0.0));
+    const BezierCurve<Point3d> line(Point3d(0.0, 0.0, 0.0), Point3d(4.0, 0.0, 0.0));
 
     REQUIRE(line.value(0.0) == Point3d(0.0, 0.0, 0.0));
     REQUIRE(line.value(1.0) == Point3d(4.0, 0.0, 0.0));
@@ -19,7 +19,7 @@ TEST_CASE("bezier_curve_degree_1_is_a_straight_line", "[MathTestSuite]") {
 
 TEST_CASE("bezier_curve_degree_2_evaluates_via_de_casteljau", "[MathTestSuite]") {
     // Quadratic Bezier with a control point pulled off the chord: bulges toward it.
-    const BezierCurve<2, Point3d> curve(Point3d(0.0, 0.0, 0.0), Point3d(2.0, 4.0, 0.0), Point3d(4.0, 0.0, 0.0));
+    const BezierCurve<Point3d> curve(Point3d(0.0, 0.0, 0.0), Point3d(2.0, 4.0, 0.0), Point3d(4.0, 0.0, 0.0));
 
     REQUIRE(curve.value(0.0) == Point3d(0.0, 0.0, 0.0));
     REQUIRE(curve.value(1.0) == Point3d(4.0, 0.0, 0.0));
@@ -31,17 +31,24 @@ TEST_CASE("bezier_curve_degree_2_evaluates_via_de_casteljau", "[MathTestSuite]")
 }
 
 TEST_CASE("bezier_curve_default_constructed_control_points_are_origin", "[MathTestSuite]") {
-    const BezierCurve<2, Point3d> curve;
+    // Default-constructed means the lowest usable degree, since the degree now travels with the
+    // object: a straight segment with both ends at the origin. Meaningless until set, but valid —
+    // which is what CGAL needs of an attribute payload.
+    const BezierCurve<Point3d> curve;
+    REQUIRE(curve.degree() == 1);
     REQUIRE(curve[0] == Point3d(0.0, 0.0, 0.0));
     REQUIRE(curve[1] == Point3d(0.0, 0.0, 0.0));
-    REQUIRE(curve[2] == Point3d(0.0, 0.0, 0.0));
+
+    const BezierCurve<Point3d> quadratic(2);
+    REQUIRE(quadratic.degree() == 2);
+    REQUIRE(quadratic.nb_control_points() == 3);
 }
 
 TEST_CASE("bezier_curve_split_reproduces_the_parent_exactly", "[MathTestSuite]") {
     // The property the whole block-structure cut rests on: subdivision is exact, not a fit. A
     // deliberately asymmetric cubic, so a wrong-but-plausible implementation (mirrored halves,
     // swapped pyramid edges) cannot pass by symmetry.
-    const BezierCurve<3, Point3d> curve(
+    const BezierCurve<Point3d> curve(
         Point3d(0.0, 0.0, 0.0), Point3d(1.0, 3.0, 0.5), Point3d(4.0, -1.0, 2.0), Point3d(5.0, 2.0, 1.0));
 
     const double s = 0.37;
@@ -70,7 +77,7 @@ TEST_CASE("bezier_curve_split_reproduces_the_parent_exactly", "[MathTestSuite]")
 
 TEST_CASE("bezier_curve_split_of_a_straight_line_stays_straight", "[MathTestSuite]") {
     // Degree 1 is the linear-blocking case, and its halves must stay exact segments of the parent.
-    const BezierCurve<1, Point3d> line(Point3d(0.0, 0.0, 0.0), Point3d(4.0, 8.0, 0.0));
+    const BezierCurve<Point3d> line(Point3d(0.0, 0.0, 0.0), Point3d(4.0, 8.0, 0.0));
     const auto [left, right] = line.split(0.25);
 
     REQUIRE(left.control_points()[0] == Point3d(0.0, 0.0, 0.0));

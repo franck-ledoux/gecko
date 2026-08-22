@@ -69,7 +69,8 @@ namespace gecko::python {
                  py::arg("degree") = 1,
                  py::keep_alive<1, 2>(),
                  "Builds an empty blocking against model (degree=1: straight edges, degree=3: cubic Bezier edges). "
-                 "model must be kept alive for as long as this Blocking is used.")
+                 "The degree can be changed later with set_degree(). model must be kept alive for as long as this "
+                 "Blocking is used.")
             .def("create_quad_block",
                  &BlockingFacade::create_quad_block,
                  py::arg("corners"),
@@ -83,7 +84,16 @@ namespace gecko::python {
             .def("build_connectivity",
                  &BlockingFacade::build_connectivity,
                  "Auto-detects and sews coincident blocks created so far. Not incremental.")
-            .def("degree", &BlockingFacade::degree, "Edge curve degree this blocking was built with.")
+            .def("degree", &BlockingFacade::degree, "Edge curve degree this blocking currently uses.")
+            .def("set_degree",
+                 &BlockingFacade::set_degree,
+                 py::arg("degree"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Rebuilds every edge, face and block at a new degree and refits them onto the model. Topology and "
+                 "classification are untouched; raising the order lets an edge that lies on a curved model curve "
+                 "actually follow it instead of cutting across as a chord.")
             .def("classify",
                  &BlockingFacade::classify,
                  py::arg("tol_vertex"),

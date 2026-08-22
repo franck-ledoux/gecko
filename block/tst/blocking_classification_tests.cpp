@@ -228,7 +228,7 @@ TEST_CASE("quad_block_classification_snaps_corners_edges_and_face_onto_geom_mode
 
 TEST_CASE("cubic_quad_block_edge_classified_onto_bent_curve_bulges_and_propagates_to_face", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_square_geom_model_with_bent_bottom();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
 
     const std::array<Point3d, 4> corners = {
         Point3d(0.01, 0.0, 0.0), Point3d(0.99, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)};
@@ -241,7 +241,7 @@ TEST_CASE("cubic_quad_block_edge_classified_onto_bent_curve_bulges_and_propagate
     blocking.classify(0.05, 0.35);
 
     // Find the edge classified onto the bent bottom curve (tag 10).
-    using Edge = Blocking<FacetedGeometry, BezierCurve<3, Point3d>>::Edge;
+    using Edge = Blocking<FacetedGeometry>::Edge;
     Edge bottom_edge{};
     bool found = false;
     for (auto it = blocking.cmap().attributes<1>().begin(), itend = blocking.cmap().attributes<1>().end(); it != itend;

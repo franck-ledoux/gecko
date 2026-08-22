@@ -60,7 +60,8 @@ for group_id in model.group_ids():
 `Blocking` builds a structured quad/hex blocking against a `GeomModel`. Block corners are passed
 as lists of `(x, y, z)` tuples; created faces/blocks are identified by the `int` id `Blocking`
 hands back. `degree=1` (the default) gives straight edges; `degree=3` gives cubic-Bezier edges that
-`classify()` can bend onto curved geometry. Degrees 1 through 4 are available.
+`classify()` can bend onto curved geometry. Any degree of 1 or more works, and `set_degree()` changes
+it on an existing blocking.
 
 ```python
 import gecko
@@ -73,6 +74,13 @@ face_b = blocking.create_quad_block([(1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)]
 blocking.build_connectivity()  # sews the shared edge between face_a and face_b
 
 blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)  # snap onto the model
+
+# The degree is carried by the geometry, not by its C++ type, so it can be raised or lowered on a
+# blocking that already exists. Topology and classification are kept; only the representation
+# changes — and raising the order does not just add control points, it uses them: an edge that could
+# only be a chord at degree 1 comes back following the model curve it lies on.
+blocking.set_degree(3, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+print(blocking.degree())
 
 # What each cell ended up on: -1 free, 0 vertex, 1 curve, 2 surface, 3 volume. Edges and faces are
 # inferred from their own boundary, not from proximity — see the biy guide.

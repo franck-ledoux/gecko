@@ -173,11 +173,24 @@ def test_degree_one_block_control_points_are_its_corners(geom_model_path):
     assert len(blocking.block_control_lattices()) == 12
 
 
-@pytest.mark.parametrize("degree", [0, 5])
-def test_unsupported_degree_raises(geom_model_path, degree):
+@pytest.mark.parametrize("degree", [0, -1])
+def test_unusable_degree_raises(geom_model_path, degree):
     model = gecko.GeomModel(geom_model_path)
     with pytest.raises(ValueError):
         gecko.Blocking(model, degree=degree)
+
+
+def test_degree_has_no_upper_bound(geom_model_path):
+    # There used to be one, at 4, and it was an artefact of the implementation rather than a
+    # modelling limit: the degree was a template parameter, so the façade had to hold one C++ type
+    # per degree and could only offer the ones it had instantiated. Carrying the degree in the
+    # object removes the ceiling along with the variant.
+    model = gecko.GeomModel(geom_model_path)
+    for degree in (5, 7):
+        blocking = gecko.Blocking(model, degree=degree)
+        assert blocking.degree() == degree
+        blocking.create_quad_block(_QUAD_A)
+        assert len(blocking.edge_control_points()) == 4 * (degree + 1)
 
 
 def test_edge_and_face_classification_dims(geom_model_path):
@@ -595,3 +608,44 @@ def test_edge_bends_is_zero_on_a_straight_blocking(geom_model_path):
     # And it reports one entry per edge, so a caller can say which edge is at fault.
     blocking.create_hex_block(_TALL_BOX)
     assert len(blocking.edge_bends()) == blocking.nb_cells(1)
+
+
+def test_set_degree_refits_the_blocking_onto_the_model(geom_model_path):
+    # The point of changing order is not to add control points but to use them: at degree 1 an edge
+    # lying on a model curve can only be its chord, and raising the order lets it follow the curve.
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=1)
+    blocking.create_quad_block(_QUAD_A)
+    blocking.classify(1e-6)
+
+    assert blocking.degree() == 1
+    assert len(blocking.edge_control_points()) == 4 * 2
+    # A degree-1 edge has no interior control point, so it cannot bend whatever it lies on.
+    assert max(blocking.edge_bends()) == pytest.approx(0.0)
+
+    topology = (blocking.nb_cells(0), blocking.nb_cells(1), blocking.nb_cells(2))
+    classification = blocking.edge_classification_dims()
+
+    blocking.set_degree(3, 1e-6)
+
+    assert blocking.degree() == 3
+    assert len(blocking.edge_control_points()) == 4 * 4
+    # Topology and classification are carried across untouched: only the representation changed.
+    assert (blocking.nb_cells(0), blocking.nb_cells(1), blocking.nb_cells(2)) == topology
+    assert blocking.edge_classification_dims() == classification
+
+    # And back down again, on the same object — which the old degree-in-the-type design could not do
+    # at all, since a degree-3 blocking was a different C++ type from a degree-1 one.
+    blocking.set_degree(1, 1e-6)
+    assert blocking.degree() == 1
+    assert len(blocking.edge_control_points()) == 4 * 2
+    assert (blocking.nb_cells(0), blocking.nb_cells(1), blocking.nb_cells(2)) == topology
+
+
+def test_set_degree_rejects_a_degree_below_one(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_quad_block(_QUAD_A)
+    with pytest.raises(ValueError):
+        blocking.set_degree(0, 1e-6)
+    assert blocking.degree() == 3

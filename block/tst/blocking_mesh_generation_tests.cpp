@@ -268,7 +268,7 @@ TEST_CASE("cubic_hex_block_to_mesh_reflects_curved_geometry", "[BlockTestSuite]"
     const FacetedGeometry geom(path);
     std::filesystem::remove(path);
 
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
     const std::array<Point3d, 4> corners = {
         Point3d(0.01, 0.0, 0.0), Point3d(0.99, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)};
     blocking.create_quad_block(corners);

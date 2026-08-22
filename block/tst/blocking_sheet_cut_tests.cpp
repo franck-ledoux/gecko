@@ -275,7 +275,7 @@ TEST_CASE("cutting_a_curved_blocking_keeps_the_curvature_rather_than_refitting_i
     // new edge onto the nodes the sheet placed.
     std::string dir(TEST_SAMPLES_DIR);
     const FacetedGeometry geom(dir + "/cylinder.msh");
-    using CubicBlocking = Blocking<FacetedGeometry, BezierCurve<3, Point3d>>;
+    using CubicBlocking = Blocking<FacetedGeometry>;
 
     const auto fitted = [&geom](CubicBlocking &ABlocking) {
         // A box around the model, then snapped onto it: the corners land on the cylinder and the
@@ -499,7 +499,7 @@ TEST_CASE("a_sheet_stays_in_one_plane_after_an_earlier_cut", "[BlockTestSuite]")
     // doubles, so deciding which end a curve starts at by exact position equality answers "the other
     // one" for exactly those edges, cutting them at 1-t and pulling the sheet out of plane.
     const FacetedGeometry geom = make_far_geom_model();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
     blocking.create_hex_block(tall_box());
 
     const auto e = edge_between(blocking, Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0));
@@ -543,7 +543,7 @@ TEST_CASE("repeated_off_centre_cuts_keep_the_generated_mesh_on_the_original_bloc
     // leaves a valid map with sensible block volumes, and only the generated mesh — the thing biy
     // actually draws — shows it, by drifting off the block it came from.
     const FacetedGeometry geom = make_far_geom_model();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
     blocking.create_hex_block(tall_box());
 
     const auto measure = [&]() {

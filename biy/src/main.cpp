@@ -18,8 +18,8 @@ int main(int argc, char **argv) {
 
     if (argc < 2 || argc > 3) {
         std::cerr << "usage: biy <model.msh> [order]\n"
-                  << "  order  block edge order, " << BlockingFacade::MIN_DEGREE << " (straight) to "
-                  << BlockingFacade::MAX_DEGREE << "; default 3\n";
+                  << "  order  block edge order the session starts at, " << BlockingFacade::MIN_DEGREE
+                  << " (straight) or higher; default 3. Changeable from the panel.\n";
         return 1;
     }
 
@@ -33,9 +33,9 @@ int main(int argc, char **argv) {
             std::cerr << "biy: order must be a whole number, got '" << argv[2] << "'\n";
             return 1;
         }
-        if (order < BlockingFacade::MIN_DEGREE || order > BlockingFacade::MAX_DEGREE) {
+        if (order < BlockingFacade::MIN_DEGREE || order > gecko::biy::BiyApp::MAX_ORDER) {
             std::cerr << "biy: order must be between " << BlockingFacade::MIN_DEGREE << " and "
-                      << BlockingFacade::MAX_DEGREE << ", got " << order << "\n";
+                      << gecko::biy::BiyApp::MAX_ORDER << ", got " << order << "\n";
             return 1;
         }
     }

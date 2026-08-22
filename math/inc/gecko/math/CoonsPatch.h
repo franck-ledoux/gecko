@@ -13,21 +13,21 @@ namespace gecko {
     /**
      * @brief Builds the surface (via `CurveSurfaceTraits<TEdgeCurve>`, `BezierSurface` for
      * `BezierCurve` boundaries today) whose control net exactly reproduces the bilinearly-blended
-     * Coons patch of 4 degree-`TEdgeCurve::Degree` boundary curves.
+     * Coons patch of 4 boundary curves, at whatever degree they carry.
      *
      * This is the discrete (control-point-space) analog of the classic continuous Coons formula
      * `S(u,v) = (1-v)*Cu0(u) + v*Cu1(u) + (1-u)*Cv0(v) + u*Cv1(v) - bilinear(corners)`: applying the
      * same *ordinary* (unweighted) blend to each boundary curve's `i`-th/`j`-th *control point*
      * (instead of a continuous evaluation at `u=i/N`, `v=j/N`) yields the exact control net of the
      * surface a continuous Coons evaluation would trace — a standard CAGD result for polynomial
-     * boundary curves, not an approximation. For `TEdgeCurve::Degree == 1` (straight edges) this
+     * boundary curves, not an approximation. For degree-1 (straight) edges this
      * collapses exactly to bilinear corner interpolation. The return type is looked up generically
      * through `CurveSurfaceTraits`, so this function itself never names `BezierSurface`; the blend
      * below is still an unweighted control-point average, appropriate for `BezierCurve`/a uniform
      * B-spline boundary — a genuinely rational (NURBS) boundary would need a weighted variant of this
      * same construction, not just a new `CurveSurfaceTraits` specialization.
      *
-     * @tparam TEdgeCurve Boundary curve representation (e.g. `BezierCurve<N, Point3d>`); must expose
+     * @tparam TEdgeCurve Boundary curve representation (e.g. `BezierCurve<Point3d>`); must expose
      * `Degree`, an ordered, endpoint-inclusive `control_points()` (see `EdgeCurveConcept` in
      * `geom_itf`, not depended on here to keep `math` dependency-free of `geom_itf`), and a
      * `CurveSurfaceTraits<TEdgeCurve>::Surface` specialization.
@@ -44,12 +44,12 @@ namespace gecko {
                                                                               const TEdgeCurve &AEdgeU1,
                                                                               const TEdgeCurve &AEdgeV0,
                                                                               const TEdgeCurve &AEdgeV1) {
-        constexpr std::size_t N = TEdgeCurve::Degree;
-        constexpr std::size_t NumPts = N + 1;
+        const std::size_t N = AEdgeU0.degree();
+        const std::size_t NumPts = N + 1;
         using Surface = typename CurveSurfaceTraits<TEdgeCurve>::Surface;
 
         const Point3d &origin = AEdgeU0.control_points()[0];
-        typename Surface::ControlGrid grid;
+        auto grid = Surface::make_grid(N);
 
         for (std::size_t i = 0; i < NumPts; ++i) {
             const double u = static_cast<double>(i) / static_cast<double>(N == 0 ? 1 : N);
@@ -85,7 +85,7 @@ namespace gecko {
      * what a genuinely rational (NURBS) boundary would additionally require. Since each face is
      * itself built by coons_surface_from_edges(), its own boundary rows/columns already carry the
      * volume's 12 edges and 8 corners exactly, so only the 6 face grids are needed here —
-     * `AFaceU0`/`AFaceU1` alone expose all 8 corners. For `TEdgeCurve::Degree == 1` this collapses
+     * `AFaceU0`/`AFaceU1` alone expose all 8 corners. For degree-1 faces this collapses
      * exactly to trilinear corner interpolation. The return type is looked up generically through
      * `SurfaceVolumeTraits`, so this function itself never names `BezierVolume`.
      *
@@ -110,12 +110,12 @@ namespace gecko {
                                                                              const TFaceSurface &AFaceV1,
                                                                              const TFaceSurface &AFaceW0,
                                                                              const TFaceSurface &AFaceW1) {
-        constexpr std::size_t N = TFaceSurface::Degree;
-        constexpr std::size_t NumPts = N + 1;
+        const std::size_t N = AFaceU0.degree();
+        const std::size_t NumPts = N + 1;
         using Volume = typename SurfaceVolumeTraits<TFaceSurface>::Volume;
 
         const Point3d &origin = AFaceU0.control_points()[0][0];
-        typename Volume::ControlGrid grid;
+        auto grid = Volume::make_grid(N);
 
         for (std::size_t i = 0; i < NumPts; ++i) {
             const double u = static_cast<double>(i) / static_cast<double>(N == 0 ? 1 : N);

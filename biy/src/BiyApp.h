@@ -49,6 +49,12 @@ namespace gecko::biy {
          * unusable well before anything else complains. */
         static constexpr int MAX_SUBDIVISIONS = 20;
 
+        /** @brief Highest edge order the panel offers. Nothing in the kernel caps the degree — it is
+         * a plain number carried by each curve — but a fit has only so much to say: past this the
+         * extra control points crowd together without following the model any closer, and each one
+         * costs on every face and block that touches the edge. */
+        static constexpr int MAX_ORDER = 10;
+
         /**
          * @brief Constructor. Loads the geometric model and registers it for display.
          * @param model_path Path to the .msh file to load.
@@ -236,7 +242,9 @@ namespace gecko::biy {
         bool m_show_block_control = false;
         /** @brief Samples per block edge; > 1 traces a curved edge rather than its chord. */
         int m_edge_samples = 8;
-        /** @brief Edge order of the blocking, fixed at construction (see the `order` argument). */
+        /** @brief Edge order the blocking is currently built at. Changeable from the panel — the
+         * degree is carried by the geometry rather than by its C++ type, so raising or lowering it
+         * refits the structure in place instead of needing a new one. */
         int m_order = 3;
         /** @brief Per-dimension snapping tolerances, shared by the "Classify" button and by the
          * snap that runs when a dragged corner is released. Separate values because the scales

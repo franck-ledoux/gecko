@@ -11,10 +11,10 @@ using namespace gecko;
 
 TEST_CASE("coons_surface_from_edges_degree_1_is_bilinear", "[MathTestSuite]") {
     const Point3d p00(0.0, 0.0, 0.0), p10(1.0, 0.0, 0.0), p01(0.0, 1.0, 0.0), p11(1.0, 1.0, 0.0);
-    const BezierCurve<1, Point3d> edge_u0(p00, p10); // v=0
-    const BezierCurve<1, Point3d> edge_u1(p01, p11); // v=1
-    const BezierCurve<1, Point3d> edge_v0(p00, p01); // u=0
-    const BezierCurve<1, Point3d> edge_v1(p10, p11); // u=1
+    const BezierCurve<Point3d> edge_u0(p00, p10); // v=0
+    const BezierCurve<Point3d> edge_u1(p01, p11); // v=1
+    const BezierCurve<Point3d> edge_v0(p00, p01); // u=0
+    const BezierCurve<Point3d> edge_v1(p10, p11); // u=1
 
     const auto surface = coons_surface_from_edges(edge_u0, edge_u1, edge_v0, edge_v1);
 
@@ -32,10 +32,10 @@ TEST_CASE("coons_surface_from_edges_degree_1_is_bilinear", "[MathTestSuite]") {
 TEST_CASE("coons_surface_from_edges_reproduces_a_bulging_boundary", "[MathTestSuite]") {
     const Point3d p00(0.0, 0.0, 0.0), p10(2.0, 0.0, 0.0), p01(0.0, 1.0, 0.0), p11(2.0, 1.0, 0.0);
     // v=0 boundary bulges up in z; the 3 other boundaries stay straight (degree-2 for consistency).
-    const BezierCurve<2, Point3d> edge_u0(p00, Point3d(1.0, 0.0, 3.0), p10);
-    const BezierCurve<2, Point3d> edge_u1(p01, Point3d(1.0, 1.0, 0.0), p11);
-    const BezierCurve<2, Point3d> edge_v0(p00, Point3d(0.0, 0.5, 0.0), p01);
-    const BezierCurve<2, Point3d> edge_v1(p10, Point3d(2.0, 0.5, 0.0), p11);
+    const BezierCurve<Point3d> edge_u0(p00, Point3d(1.0, 0.0, 3.0), p10);
+    const BezierCurve<Point3d> edge_u1(p01, Point3d(1.0, 1.0, 0.0), p11);
+    const BezierCurve<Point3d> edge_v0(p00, Point3d(0.0, 0.5, 0.0), p01);
+    const BezierCurve<Point3d> edge_v1(p10, Point3d(2.0, 0.5, 0.0), p11);
 
     const auto surface = coons_surface_from_edges(edge_u0, edge_u1, edge_v0, edge_v1);
 
@@ -56,12 +56,12 @@ TEST_CASE("tfi_volume_from_faces_degree_1_is_trilinear", "[MathTestSuite]") {
                 c[i][j][k] = Point3d(static_cast<double>(i), static_cast<double>(j), static_cast<double>(k));
 
     // 12 edges, one per (axis, pair of fixed indices on the other 2 axes).
-    const BezierCurve<1, Point3d> ei00(c[0][0][0], c[1][0][0]), ei01(c[0][0][1], c[1][0][1]),
-        ei10(c[0][1][0], c[1][1][0]), ei11(c[0][1][1], c[1][1][1]);
-    const BezierCurve<1, Point3d> ej00(c[0][0][0], c[0][1][0]), ej01(c[0][0][1], c[0][1][1]),
-        ej10(c[1][0][0], c[1][1][0]), ej11(c[1][0][1], c[1][1][1]);
-    const BezierCurve<1, Point3d> ek00(c[0][0][0], c[0][0][1]), ek01(c[0][1][0], c[0][1][1]),
-        ek10(c[1][0][0], c[1][0][1]), ek11(c[1][1][0], c[1][1][1]);
+    const BezierCurve<Point3d> ei00(c[0][0][0], c[1][0][0]), ei01(c[0][0][1], c[1][0][1]), ei10(c[0][1][0], c[1][1][0]),
+        ei11(c[0][1][1], c[1][1][1]);
+    const BezierCurve<Point3d> ej00(c[0][0][0], c[0][1][0]), ej01(c[0][0][1], c[0][1][1]), ej10(c[1][0][0], c[1][1][0]),
+        ej11(c[1][0][1], c[1][1][1]);
+    const BezierCurve<Point3d> ek00(c[0][0][0], c[0][0][1]), ek01(c[0][1][0], c[0][1][1]), ek10(c[1][0][0], c[1][0][1]),
+        ek11(c[1][1][0], c[1][1][1]);
 
     // 6 bounding faces, each a Coons patch of 4 of the 12 edges (grid indexing per CoonsPatch.h's doc).
     const auto face_u0 = coons_surface_from_edges(ej00, ej01, ek00, ek01); // u=0, grid[v][w]
