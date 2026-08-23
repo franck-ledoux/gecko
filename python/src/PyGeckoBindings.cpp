@@ -233,6 +233,18 @@ namespace gecko::python {
                  "Cuts the blocking along the whole sheet through ``edge_index``, at ``param`` along that edge "
                  "(strictly between 0 and 1), splitting every block the sheet crosses in 2 and keeping the geometry "
                  "it cut through exactly. Returns False, changing nothing, if the cut is not possible.")
+            .def("mesh_hex_owners",
+                 &BlockingFacade::mesh_hex_owners,
+                 py::arg("subdivisions") = 1,
+                 "Which block each hex of ``mesh_hexes`` came from, as a position in the block order "
+                 "``block_volumes``/``delete_block`` speak — one entry per hex, so a per-block value can be spread "
+                 "onto every cell subdividing it.")
+            .def("mesh_quad_owners",
+                 &BlockingFacade::mesh_quad_owners,
+                 py::arg("subdivisions") = 1,
+                 "Which block each quad of ``mesh_quads`` came from, counting standalone quad blocks in the order "
+                 "they are emitted. Not an index into ``face_classification_dims``: a hex's own bounding faces "
+                 "generate no mesh quads and are not counted.")
             .def("delete_sheet",
                  &BlockingFacade::delete_sheet,
                  py::arg("edge_index"),

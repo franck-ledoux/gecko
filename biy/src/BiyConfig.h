@@ -82,6 +82,11 @@ namespace gecko::biy {
         /** @copydoc show_geometry_volumes */
         bool show_mesh = false;
 
+        /** @brief Whether the generated mesh starts coloured one hue per block rather than in a
+         * single `mesh_color`. Which block a cell came from is otherwise invisible once the mesh is
+         * fine enough to hide the block edges under it. */
+        bool mesh_color_by_block = false;
+
         /** @brief Whether edges' control points and control polygons are drawn at startup. */
         bool show_edge_control = false;
         /** @brief Whether faces' control points and control nets are drawn at startup. */

@@ -730,3 +730,43 @@ def test_delete_sheet_rejects_an_unknown_edge(geom_model_path):
     blocking.create_hex_block(_UNIT_HEX)
     with pytest.raises(IndexError):
         blocking.delete_sheet(blocking.nb_cells(1), 1e-9)
+
+
+def test_mesh_hex_owners_names_the_block_behind_every_cell(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+    assert blocking.cut_sheet(_edge_along(blocking, 2, 0.0, 1.0), 0.5)
+    assert blocking.nb_cells(3) == 2
+
+    for subdivisions in (1, 2, 3):
+        hexes = blocking.mesh_hexes(subdivisions)
+        owners = blocking.mesh_hex_owners(subdivisions)
+        # One owner per cell, every block accounted for, each contributing its own grid.
+        assert len(owners) == len(hexes)
+        assert sorted(set(owners)) == [0, 1]
+        assert owners.count(0) == subdivisions ** 3
+        assert owners.count(1) == subdivisions ** 3
+        # Block-major, so one block's cells are contiguous.
+        assert owners == sorted(owners)
+
+
+def test_mesh_quad_owners_counts_only_the_blocks_that_emit_quads(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_quad_block([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)])
+    blocking.create_quad_block([(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (1.0, 1.0, 0.0)])
+    blocking.build_connectivity()
+
+    for subdivisions in (1, 2, 3):
+        quads = blocking.mesh_quads(subdivisions)
+        owners = blocking.mesh_quad_owners(subdivisions)
+        assert len(owners) == len(quads)
+        assert sorted(set(owners)) == [0, 1]
+        assert owners.count(0) == subdivisions ** 2
+
+    # A hex's own bounding faces generate no mesh quads, so a 3D blocking has none to own.
+    solid = gecko.Blocking(model, degree=3)
+    solid.create_hex_block(_UNIT_HEX)
+    assert solid.mesh_quads(2) == []
+    assert solid.mesh_quad_owners(2) == []

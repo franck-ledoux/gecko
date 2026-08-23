@@ -87,6 +87,7 @@ namespace gecko::biy {
             read_bool(j, "show_geometry_curves", config.show_geometry_curves);
             read_bool(j, "show_geometry_points", config.show_geometry_points);
             read_bool(j, "show_mesh", config.show_mesh);
+            read_bool(j, "mesh_color_by_block", config.mesh_color_by_block);
             read_bool(j, "show_edge_control", config.show_edge_control);
             read_bool(j, "show_face_control", config.show_face_control);
             read_bool(j, "show_block_control", config.show_block_control);

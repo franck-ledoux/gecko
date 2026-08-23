@@ -153,6 +153,7 @@ namespace gecko::biy {
         m_config = BiyConfig::load("biy_config.json", config_message);
         m_show_block_edges = m_config.show_block_edges;
         m_show_mesh = m_config.show_mesh;
+        m_mesh_coloring = m_config.mesh_color_by_block ? MeshColoring::ByBlock : MeshColoring::Uniform;
         m_show_edge_control = m_config.show_edge_control;
         m_show_face_control = m_config.show_face_control;
         m_show_block_control = m_config.show_block_control;
@@ -360,6 +361,41 @@ namespace gecko::biy {
         refresh_mesh();
     }
 
+    glm::vec3 BiyApp::block_color(int index) {
+        // Hues stepped by the golden ratio rather than picked from a fixed palette: a blocking has
+        // no bound on how many blocks it holds, and a palette of N runs out and starts repeating —
+        // 2 neighbours sharing a colour reads as one block, which is the one thing this must not do.
+        // Stepping by an irrational fraction of the circle keeps consecutive indices far apart and
+        // never lands twice on the same hue, however many there are.
+        constexpr float golden = 0.6180339887498949f;
+        const float hue = std::fmod(static_cast<float>(index) * golden, 1.0f);
+        // Held well below full saturation and brightness so the mesh still reads as a mesh under
+        // Polyscope's shading, and so its edges stay visible against it.
+        constexpr float saturation = 0.55f;
+        constexpr float value = 0.92f;
+
+        const float h = hue * 6.0f;
+        const int sector = static_cast<int>(h) % 6;
+        const float f = h - std::floor(h);
+        const float p = value * (1.0f - saturation);
+        const float q = value * (1.0f - saturation * f);
+        const float t = value * (1.0f - saturation * (1.0f - f));
+        switch (sector) {
+            case 0:
+                return {value, t, p};
+            case 1:
+                return {q, value, p};
+            case 2:
+                return {p, value, t};
+            case 3:
+                return {p, q, value};
+            case 4:
+                return {t, p, value};
+            default:
+                return {value, p, q};
+        }
+    }
+
     void BiyApp::refresh_mesh() {
         // The mesh the blocking generates, at the chosen subdivision — a different object from the
         // block structure above, which is why `subdivisions` drives this and nothing else.
@@ -367,10 +403,27 @@ namespace gecko::biy {
         const auto quads = m_blocking->mesh_quads(m_subdivisions);
         const auto hexes = m_blocking->mesh_hexes(m_subdivisions);
 
+        // One colour per block, spread over every cell that block generated. Built here rather
+        // than left to a Polyscope colormap: the owner indices are block *identities*, not a scale,
+        // and a colormap would shade them as if 0 and 1 were closer than 0 and 9.
+        const bool by_block = m_mesh_coloring == MeshColoring::ByBlock;
+        const auto per_cell = [this](const std::vector<int> &owners) {
+            std::vector<glm::vec3> colors;
+            colors.reserve(owners.size());
+            for (const int owner : owners) {
+                colors.push_back(block_color(owner));
+            }
+            return colors;
+        };
+
         const auto quads_shown = enabled_state(surface_or_null(MESH_QUADS));
         if (!quads.empty()) {
             auto *mesh = polyscope::registerSurfaceMesh(MESH_QUADS, vertices, quads);
             mesh->setSurfaceColor(to_glm(m_config.mesh_color));
+            if (by_block) {
+                mesh->addFaceColorQuantity("block", per_cell(m_blocking->mesh_quad_owners(m_subdivisions)))
+                    ->setEnabled(true);
+            }
             restore_enabled(mesh, quads_shown, m_show_mesh);
         } else if (polyscope::hasSurfaceMesh(MESH_QUADS)) {
             polyscope::removeStructure(polyscope::getSurfaceMesh(MESH_QUADS));
@@ -380,6 +433,10 @@ namespace gecko::biy {
         if (!hexes.empty()) {
             auto *mesh = polyscope::registerHexMesh(MESH_HEXES, vertices, hexes);
             mesh->setColor(to_glm(m_config.mesh_color));
+            if (by_block) {
+                mesh->addCellColorQuantity("block", per_cell(m_blocking->mesh_hex_owners(m_subdivisions)))
+                    ->setEnabled(true);
+            }
             restore_enabled(mesh, hexes_shown, m_show_mesh);
         } else if (polyscope::hasVolumeMesh(MESH_HEXES)) {
             polyscope::removeStructure(polyscope::getVolumeMesh(MESH_HEXES));
@@ -828,6 +885,18 @@ namespace gecko::biy {
                               MAX_SUBDIVISIONS,
                               MAX_SUBDIVISIONS,
                               MAX_SUBDIVISIONS * MAX_SUBDIVISIONS * MAX_SUBDIVISIONS);
+        }
+
+        ImGui::TextUnformatted("Mesh color");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("uniform", m_mesh_coloring == MeshColoring::Uniform)) {
+            m_mesh_coloring = MeshColoring::Uniform;
+            refresh_mesh();
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("per block", m_mesh_coloring == MeshColoring::ByBlock)) {
+            m_mesh_coloring = MeshColoring::ByBlock;
+            refresh_mesh();
         }
 
         ImGui::SetNextItemWidth(120.0f);

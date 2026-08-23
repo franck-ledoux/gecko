@@ -577,4 +577,41 @@ namespace gecko::python {
         return hexes;
     }
 
+    std::vector<int> BlockingFacade::mesh_hex_owners(int subdivisions) {
+        check_subdivisions(subdivisions, "Blocking.mesh_hex_owners");
+        // to_mesh() walks the blocks in their own traversal order and emits exactly one grid of
+        // subdivisions^3 cells per block, so the owner is a matter of counting rather than of asking
+        // the kernel. Stated here, once, so that whoever colours a mesh by block does not have to
+        // know it — and so a change to that emission order fails a test rather than silently
+        // recolouring the picture.
+        const auto per_block = static_cast<std::size_t>(subdivisions) * static_cast<std::size_t>(subdivisions) *
+                               static_cast<std::size_t>(subdivisions);
+        const auto &map = m_impl.blocking.cmap();
+        std::vector<int> owners;
+        int block_index = 0;
+        for (auto it = map.attributes<3>().begin(), itend = map.attributes<3>().end(); it != itend; ++it) {
+            owners.insert(owners.end(), per_block, block_index);
+            ++block_index;
+        }
+        return owners;
+    }
+
+    std::vector<int> BlockingFacade::mesh_quad_owners(int subdivisions) {
+        check_subdivisions(subdivisions, "Blocking.mesh_quad_owners");
+        // Same counting, one dimension down — except that only a face belonging to no block emits
+        // mesh quads at all: a hex's own bounding faces are part of its cells, not quads of their
+        // own. So the faces are walked in the same order and the ones a block owns are skipped,
+        // exactly as to_mesh() skips them.
+        const auto per_face = static_cast<std::size_t>(subdivisions) * static_cast<std::size_t>(subdivisions);
+        const auto &map = m_impl.blocking.cmap();
+        std::vector<int> owners;
+        int quad_block_index = 0;
+        for (auto it = map.attributes<2>().begin(), itend = map.attributes<2>().end(); it != itend; ++it) {
+            if (map.attribute<3>(it->dart()) != nullptr) continue;
+            owners.insert(owners.end(), per_face, quad_block_index);
+            ++quad_block_index;
+        }
+        return owners;
+    }
+
 } // namespace gecko::python

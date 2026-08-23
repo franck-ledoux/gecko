@@ -312,6 +312,25 @@ namespace gecko::python {
          * @return One 8-tuple of mesh_vertices() indices per hex.
          */
         [[nodiscard]] std::vector<std::array<int, 8>> mesh_hexes(int subdivisions);
+        /**
+         * @brief Which block each hex of mesh_hexes() was generated from, so a per-block value can
+         * be spread onto every cell subdividing it — one colour per block, say.
+         * @param subdivisions Number of intervals per parametric axis (>= 1); must match the one
+         *        mesh_hexes() was called with, since it sets how many cells each block contributes.
+         * @return One index into the block order — the one block_volumes()/delete_block() speak —
+         *         per entry of mesh_hexes().
+         */
+        [[nodiscard]] std::vector<int> mesh_hex_owners(int subdivisions);
+        /**
+         * @brief Which block each quad of mesh_quads() was generated from — the 2D counterpart of
+         * mesh_hex_owners().
+         * @param subdivisions Number of intervals per parametric axis (>= 1); must match the one
+         *        mesh_quads() was called with.
+         * @return One index per entry of mesh_quads(), counting standalone quad blocks in the order
+         *         they are emitted in. A hex's own bounding faces generate no mesh quads and are not
+         *         counted, so this is *not* an index into face_classification_dims().
+         */
+        [[nodiscard]] std::vector<int> mesh_quad_owners(int subdivisions);
 
         /**
          * @brief The edges cut_sheet() would split if aimed at @p edge_index — the whole sheet, not

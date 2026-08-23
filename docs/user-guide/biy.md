@@ -90,6 +90,25 @@ fine enough to show curvature whatever the mesh is set to. It is capped at **20*
 blocking's mesh grows cubically with it — 20 is already 8000 hexes per block, and the window bogs
 down before anything else does.
 
+The **Mesh color** radio, next to `subdivisions`, picks between two ways of drawing that mesh:
+
+- **uniform** — the whole mesh in `mesh_color`, as before.
+- **per block** — one hue per block, spread over every cell that block generated.
+
+The second exists because subdividing hides the very thing the mesh was built from: past two or
+three intervals the block edges disappear under the cells, and a uniformly coloured mesh says
+nothing about which block any part of it came from. Colouring by block puts that back without
+needing the block structure drawn on top.
+
+The hues are stepped around the colour circle by the golden ratio rather than taken from a fixed
+palette, since a blocking has no bound on how many blocks it holds and a palette of *N* runs out and
+starts repeating — two neighbours sharing a colour would read as one block, which is the one thing
+this must not do. Consecutive blocks come out far apart; past roughly twenty, some *pair* somewhere
+is necessarily close, because there are only so many distinguishable hues, but they are far apart in
+index and so rarely adjacent.
+
+`mesh_color_by_block` in the config file sets which mode the viewer starts in.
+
 ## Orientation gizmo
 
 A small compass sits bottom-right of the 3D view: 6 dots, one per world axis, projected through the
@@ -414,6 +433,7 @@ is a copy of the defaults:
   "block_control_color": [0.55, 0.85, 0.3],
 
   "mesh_color": [0.6, 0.6, 0.65],
+  "mesh_color_by_block": false,
   "show_mesh": false,
 
   "tol_vertex": 0.1,
@@ -439,6 +459,7 @@ is a copy of the defaults:
 | `geometry_point_color`, `geometry_point_radius`                                                   | Color and sphere radius of the model's points                                            |
 | `show_geometry_volumes`, `show_geometry_surfaces`, `show_geometry_curves`, `show_geometry_points` | Which Geometry rows start visible                                                        |
 | `mesh_color`, `show_mesh`                                                                         | Color of the generated mesh, and whether it starts visible                               |
+| `mesh_color_by_block`                                                                             | Whether the mesh starts coloured one hue per block rather than uniformly                 |
 | `corner_radius`                                                                                   | Size of a block corner at rest                                                           |
 | `corner_highlight_radius`                                                                         | Size of the corner being dragged                                                         |
 | `corner_highlight_color`                                                                          | Color of the corner being dragged, RGB in `[0,1]`                                        |

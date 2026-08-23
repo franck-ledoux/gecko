@@ -34,6 +34,20 @@ namespace gecko::biy {
     };
 
     /**
+     * @enum MeshColoring
+     * @brief How the generated mesh is coloured.
+     *
+     * Subdividing a blocking hides the very thing it was built from: past 2 or 3 intervals the block
+     * edges disappear under the cells, and a uniformly coloured mesh says nothing about which block
+     * any part of it came from. One hue per block puts that back without needing the block structure
+     * drawn on top of it.
+     */
+    enum class MeshColoring {
+        Uniform, ///< One `mesh_color` for the whole mesh.
+        ByBlock  ///< One hue per block, spread over every cell that block generated.
+    };
+
+    /**
      * @class BiyApp
      * @brief Owns biy's whole live state — the geometric model, the blocking being built against
      * it, and the Polyscope structures displaying both — and drives one frame of the UI at a time.
@@ -203,6 +217,10 @@ namespace gecko::biy {
         /** @brief Registers (or removes, when nothing is hovered) the sheet highlight and the markers
          * showing where the cut would land. */
         void refresh_cut_preview();
+        /** @brief A visually distinct colour for each block, from its index alone.
+         * @param index The block's position in the blocking's own block order.
+         * @return Its colour. */
+        static glm::vec3 block_color(int index);
         /** @brief Reprojects screen coordinates onto the camera-facing plane through @p AAnchor. */
         static glm::vec3 screen_to_plane(glm::vec2 screen_coords, const glm::vec3 &anchor);
 
@@ -240,6 +258,8 @@ namespace gecko::biy {
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */
         bool m_show_block_edges = true;
+        /** @brief How the generated mesh is currently coloured. */
+        MeshColoring m_mesh_coloring = MeshColoring::Uniform;
         /** @brief Whether the generated mesh is currently drawn. */
         bool m_show_mesh = false;
         /** @brief Whether each kind of control display is currently drawn. */

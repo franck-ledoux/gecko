@@ -52,6 +52,7 @@
 
   "mesh_color": [0.6, 0.6, 0.65],
   "show_mesh": false,
+  "mesh_color_by_block": false,
 
   "tol_vertex": 0.1,
   "tol_curve": 0.1,

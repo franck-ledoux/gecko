@@ -126,6 +126,12 @@ blocking.delete_sheet(0, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 # planar, converging as it grows otherwise. Negative means that block came out inverted.
 print(blocking.block_volumes(subdivisions=1))
 
+# Which block each generated cell came from, one entry per cell of mesh_hexes()/mesh_quads(). The
+# mesh is emitted block by block, so this is what lets a per-block value — a colour, say — be spread
+# onto every cell subdividing that block.
+print(blocking.mesh_hex_owners(subdivisions=2))   # into the block_volumes()/delete_block() order
+print(blocking.mesh_quad_owners(subdivisions=2))  # standalone quad blocks only; a hex emits no quads
+
 # The halves keep the geometry they were cut out of exactly (De Casteljau subdivision, not a refit),
 # so meshing after a cut traces the same points as before. Note classify() rebuilds faces and blocks
 # from their boundaries and so discards that — cut first, classify after.
