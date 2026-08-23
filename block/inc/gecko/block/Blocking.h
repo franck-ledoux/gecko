@@ -864,14 +864,6 @@ namespace gecko {
             // Ordered by increasing dimension, and each pass finished before the next starts: a
             // face's own frame stops being walkable the moment one of its edges is split, so every
             // frame the cut needs was captured by find_sheet() before any of this ran.
-            // A cut renumbers corner attributes too — CGAL rebuilds whatever orbit its insertions
-            // disturb — so the frames of the cells it is *not* reshaping are noted and put back, the
-            // same way a deletion does it.
-            // Each phase gets its own record-and-restore. One pass around the whole cut is not
-            // enough: a phase legitimately reshapes some cells and stores their geometry in the frame
-            // they have at that moment, and a *later* phase can then renumber a corner under them.
-            // Wrapped phase by phase, every cell is either the one being reshaped — skipped, its
-            // geometry having just been written — or one merely renumbered, and put back.
             std::map<Node, MidNode> mids;
             split_sheet_edges(*sheet, AParam, mids);
             split_sheet_faces(*sheet, AParam, mids);
@@ -879,6 +871,111 @@ namespace gecko {
             // A cut both splits faces in 2 and creates one per block, so which faces belong to a
             // block has changed; re-derived rather than tracked through each of those steps.
             refresh_hex_faces();
+            return true;
+        }
+
+        /**
+         * @brief Deletes the whole sheet through @p AEdge, gluing back what was on either side of it
+         * — the inverse of `cut_sheet()`.
+         *
+         * Every edge of the sheet is contracted, which merges its 2 endpoints into 1. That collapses
+         * each face the sheet crosses onto a single edge and each block it crosses onto a single
+         * face, and the 2 blocks that sat either side of such a block end up sharing that face. A
+         * layer of blocks disappears and the structure closes over the gap.
+         *
+         * **What happens to classification, and why it is a choice.** Merging 2 corners means one of
+         * the 2 classifications has to go, and picking by traversal order would let a corner sitting
+         * on a model curve be swallowed by one merely on a surface — quietly dropping the block
+         * structure off a feature of the model. The rule here is that the *most constrained* side
+         * wins: the merged corner takes the lowest-dimensional entity that contains everything either
+         * side was classified on, so a vertex beats a curve, which beats a surface, which beats a
+         * volume, and the corner is then projected onto it. When neither side's entity contains the
+         * other's — 2 different model curves, say — there is no such entity among them, and the rule
+         * falls back to the lowest common containing one, which is `classify()`'s own "lowest common
+         * containing entity" rule applied to the 2 corners. Edges, faces and blocks are not decided
+         * here at all: they infer from their boundary as they always do, which is exactly what makes
+         * deciding the corners enough.
+         *
+         * Geometry either side of the sheet is refitted around each merged corner, and left alone
+         * everywhere else.
+         *
+         * @param AEdge Any edge of the sheet to delete.
+         * @param ATolVertex Tolerance for snapping onto a vertex, as `classify()` defines it — used
+         *        only where a refitted cell has to fall back on a proximity search.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * @return false, changing nothing at all, when the sheet cannot be collapsed: when
+         *         `find_sheet()` refuses it, when it holds every block there is (nothing either side
+         *         of it to glue, so the blocking would simply empty), when it closes back onto itself
+         *         (some corner is an endpoint of 2 of its edges, so collapsing would pinch a whole
+         *         ring of corners into one), or when a second edge already joins the 2 corners one of
+         *         its edges would merge, which would leave that edge a loop.
+         */
+        bool delete_sheet(Edge AEdge, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
+            const std::optional<Sheet> sheet = find_sheet(AEdge);
+            if (!sheet.has_value()) return false;
+
+            // A sheet holding every last block (or, on a 2D blocking, every face) has nothing either
+            // side of it to glue back together, and collapsing it would leave an empty blocking
+            // rather than a thinner one. Refused rather than obeyed: this is one click in the viewer,
+            // and there is nothing to undo it with.
+            const std::size_t blocks = nb_cells<3>();
+            if (blocks > 0 && sheet->blocks.size() == blocks) return false;
+            if (blocks == 0 && sheet->faces.size() == nb_cells<2>()) return false;
+
+            // Every check runs before the first write: refusing has to leave the blocking untouched.
+            std::vector<std::pair<Node, Node>> merges;
+            std::set<Node> endpoints;
+            merges.reserve(sheet->edges.size());
+            for (const SheetEdge &se : sheet->edges) {
+                const Dart d = se.edge->dart();
+                const Node a = m_cmap.template attribute<0>(d);
+                const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (a == b) return false;
+                if (!endpoints.insert(a).second || !endpoints.insert(b).second) return false;
+                if (edge_joins(a, b, se.edge)) return false;
+                merges.emplace_back(a, b);
+            }
+
+            // Both sides of each merge are given the decided position and classification *before*
+            // contracting, rather than one being written afterwards. Which of the 2 attributes CGAL
+            // keeps is CGAL's business — its merge functor keeps whichever it was handed first — and
+            // making both carry the answer means it does not have to be ours.
+            std::vector<Point3d> merged_at;
+            merged_at.reserve(merges.size());
+            for (const auto &[a, b] : merges) {
+                const auto targets = merged_targets(a->info().geom_targets, b->info().geom_targets);
+                Point3d p = a->info().point + Vector3d(a->info().point, b->info().point) * 0.5;
+                if (!targets.empty()) {
+                    const auto result = nearest_of(targets, p);
+                    if (result.any()) project_onto(result.nearest_dim, result.nearest_tag, p);
+                }
+                a->info().point = p;
+                b->info().point = p;
+                a->info().geom_targets = targets;
+                b->info().geom_targets = targets;
+                merged_at.push_back(p);
+            }
+
+            // By increasing dimension, each pass leaving the next one its degenerate cell to remove:
+            // contracting a face's 2 sheet edges leaves it a 2-gon, contracting that 2-gon merges the
+            // 2 edges it had left, and a block so treated on all 4 sides is left as its 2 opposite
+            // faces back to back — contracting *that* merges them into the single face its 2
+            // neighbours now share.
+            for (const SheetEdge &se : sheet->edges) {
+                m_cmap.template contract_cell<1>(se.edge->dart());
+            }
+            for (const SheetFace &sf : sheet->faces) {
+                m_cmap.template contract_cell<2>(sf.face->dart());
+            }
+            for (const SheetBlock &sb : sheet->blocks) {
+                m_cmap.template contract_cell<3>(sb.block->dart());
+            }
+
+            assign_missing_node_ids();
+            refresh_hex_faces();
+            refit_around(merged_at, tol);
             return true;
         }
 
@@ -1103,8 +1200,9 @@ namespace gecko {
             // Nothing complained for a long time, because almost nothing reads a block's structure
             // back out of its darts — a block's volume is built once from the corners it was created
             // with, and `to_mesh()` reconciles the 2 sides of a face by position. Anything that does
-            // re-derive geometry from the darts, `move_node()` among them, gets a block whose 2
-            // opposite faces disagree about which way `v` and `w` run, and reports a nonsense volume.
+            // re-derive geometry from the darts, `move_node()` and `delete_sheet()` among them, gets
+            // a block whose 2 opposite faces disagree about which way `v` and `w` run, and reports a
+            // nonsense volume for it.
             Dart a = ADartA;
             Dart b = m_cmap.template beta<1>(ADartB);
             for (int s = 0; s < AK; ++s) {
@@ -1787,6 +1885,146 @@ namespace gecko {
             AFace->info().geom_targets = result.targets;
 
             rebuild_face_surface(AFace);
+        }
+
+        /**
+         * @brief Whether some edge other than @p AExcept joins @p AA and @p AB.
+         * @param AA One corner.
+         * @param AB The other.
+         * @param AExcept The edge not to count — the one already known to join them.
+         * @return true if a second edge does.
+         */
+        bool edge_joins(Node AA, Node AB, Edge AExcept) {
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                if (it == AExcept) continue;
+                const Dart d = it->dart();
+                const Node x = m_cmap.template attribute<0>(d);
+                const Node y = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if ((x == AA && y == AB) || (x == AB && y == AA)) return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief What 2 corners being merged into 1 should be classified on: the most constrained
+         * entity the merged corner can legitimately sit on.
+         *
+         * An entity qualifies when it contains everything either corner was classified on — which is
+         * what makes moving the merged corner onto it keep *both* sides' classifications true rather
+         * than trading one away. A corner on a model curve merged with one on the surface that curve
+         * bounds gives the curve: the curve lies in the surface, so the merged corner is still on the
+         * surface, and the feature is not lost. Neither side's entity qualifying — 2 distinct curves,
+         * with the merged corner belonging on neither — falls back to the lowest entity containing
+         * both, `infer_targets()`' rule, which for those 2 curves is the surface they share.
+         *
+         * @param AA One corner's targets.
+         * @param AB The other's.
+         * @return The merged corner's targets, empty when neither side was classified.
+         */
+        std::vector<std::pair<GroupDim, Int>> merged_targets(const std::vector<std::pair<GroupDim, Int>> &AA,
+                                                             const std::vector<std::pair<GroupDim, Int>> &AB) const {
+            std::vector<std::pair<GroupDim, Int>> both(AA);
+            both.insert(both.end(), AB.begin(), AB.end());
+
+            std::vector<std::pair<GroupDim, Int>> best;
+            GroupDim best_dim = GroupDim::Undefined;
+            for (const auto &candidate : both) {
+                const auto containing = containing_set({candidate});
+                const bool qualifies = std::ranges::all_of(
+                    both, [&containing](const auto &ATarget) { return containing.contains(ATarget); });
+                if (!qualifies) continue;
+                if (best_dim == GroupDim::Undefined || candidate.first < best_dim) {
+                    best_dim = candidate.first;
+                    best.clear();
+                }
+                if (candidate.first == best_dim && std::ranges::find(best, candidate) == best.end()) {
+                    best.push_back(candidate);
+                }
+            }
+            if (!best.empty()) return best;
+            if (AA.empty() || AB.empty()) return {};
+            return infer_targets({&AA, &AB}, GroupDim::Dim0);
+        }
+
+        /**
+         * @brief Refits every cell touching one of @p APoints, and nothing else.
+         *
+         * Deliberately local. Sweeping the whole blocking would also rebuild cells nowhere near the
+         * edit, and rebuilding a cell means re-deriving it from its boundary — which throws away the
+         * exact subdivision geometry a `cut_sheet()` was careful to keep, the same trap `classify()`
+         * documents. Corners are left classified as they are: this refits around a decision already
+         * taken, it does not take one.
+         *
+         * @param APoints Where the corners that moved now sit.
+         * @param ATol The per-dimension snapping tolerances, for cells that have to fall back on a
+         *        proximity search.
+         */
+        void refit_around(const std::vector<Point3d> &APoints, const Tolerances &ATol) {
+            const auto moved = [&APoints](Node ANode) {
+                return std::ranges::find(APoints, ANode->info().point) != APoints.end();
+            };
+
+            // Swept exhaustively for the reason `move_node()` documents: a corner's own dart orbit
+            // does not reach every cell that touches it on a still-unsewn block.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                const Dart d = it->dart();
+                if (moved(m_cmap.template attribute<0>(d)) ||
+                    moved(m_cmap.template attribute<0>(m_cmap.template beta<1>(d)))) {
+                    refit_edge(it, ATol);
+                }
+            }
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (face_has_moved_node(it, moved)) classify_and_rebuild_face(it, ATol);
+            }
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                if (block_has_moved_node(it, moved)) classify_and_rebuild_block(it, ATol);
+            }
+        }
+
+        /**
+         * @brief Whether any corner of @p AFace satisfies @p APredicate.
+         * @tparam TPredicate Callable `(Node) -> bool`.
+         * @param AFace The face to inspect.
+         * @param APredicate The test.
+         * @return true if some corner passes it.
+         */
+        template<typename TPredicate>
+        bool face_has_moved_node(Face AFace, TPredicate APredicate) {
+            const Dart fd = AFace->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<0, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                if (APredicate(m_cmap.template attribute<0>(it))) return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief Whether any corner of @p ABlock satisfies @p APredicate.
+         * @tparam TPredicate Callable `(Node) -> bool`.
+         * @param ABlock The block to inspect.
+         * @param APredicate The test.
+         * @return true if some corner passes it.
+         */
+        template<typename TPredicate>
+        bool block_has_moved_node(Block ABlock, TPredicate APredicate) {
+            const Dart bd = ABlock->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                if (APredicate(m_cmap.template attribute<0>(it))) return true;
+            }
+            return false;
         }
 
         /**

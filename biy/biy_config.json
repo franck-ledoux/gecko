@@ -33,6 +33,7 @@
   "block_edge_color": [0.15, 0.15, 0.15],
 
   "sheet_color": [0.98, 0.55, 0.05],
+  "collapse_color": [0.35, 0.75, 0.95],
   "sheet_radius": 0.007,
   "cut_point_color": [1.0, 0.95, 0.2],
   "cut_point_radius": 0.013,

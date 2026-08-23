@@ -553,3 +553,77 @@ TEST_CASE("a_face_classified_on_a_curved_surface_has_its_interior_on_it_too", "[
         }
     }
 }
+
+TEST_CASE("collapsing_a_sheet_keeps_the_more_constrained_of_the_2_corners_it_merges", "[BlockTestSuite]") {
+    // Collapsing a sheet merges 2 corners into 1, and one of the 2 classifications has to go. Here
+    // the 2 sides are as different as they get: one corner sits on a model *vertex*, the other only
+    // on a boundary *curve*. The vertex is the more constrained of the 2 and lies on that curve, so
+    // it is the one that survives — and the merged corner lands exactly on the square's corner
+    // rather than drifting somewhere along its bottom edge.
+    //
+    // Deciding this by traversal order instead — which is what merging attributes does if left to
+    // itself — would pull the block structure off the model's own corner, silently.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_quad_block(
+        {Point3d(0.0, 0.0, 0.0), Point3d(0.5, 0.0, 0.0), Point3d(0.5, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+    blocking.create_quad_block(
+        {Point3d(0.5, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.5, 1.0, 0.0)});
+    blocking.build_connectivity();
+    blocking.classify(1e-6);
+
+    auto &map = blocking.cmap();
+    const auto corner_at = [&](const Point3d &AP) {
+        for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+            if (Vector3d(it->info().point, AP).norm() < 1e-9) return it;
+        }
+        return map.attributes<0>().end();
+    };
+    const auto dim_at = [&](const Point3d &AP) {
+        const auto n = corner_at(AP);
+        REQUIRE(n != map.attributes<0>().end());
+        REQUIRE(!n->info().geom_targets.empty());
+        return n->info().geom_targets.front().first;
+    };
+
+    // The starting point: the square's own corner is on a model vertex, the midpoint of its bottom
+    // edge only on the bottom curve.
+    REQUIRE(dim_at(Point3d(0.0, 0.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(dim_at(Point3d(0.5, 0.0, 0.0)) == GroupDim::Dim1);
+
+    // The sheet through the left quad's bottom edge is that quad's 2 horizontal edges; collapsing it
+    // merges (0,0,0) with (0.5,0,0) and (0,1,0) with (0.5,1,0).
+    const auto target = [&]() {
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto d = it->dart();
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            if (Vector3d(a, Point3d(0.0, 0.0, 0.0)).norm() < 1e-9 &&
+                Vector3d(b, Point3d(0.5, 0.0, 0.0)).norm() < 1e-9) {
+                return it;
+            }
+            if (Vector3d(b, Point3d(0.0, 0.0, 0.0)).norm() < 1e-9 &&
+                Vector3d(a, Point3d(0.5, 0.0, 0.0)).norm() < 1e-9) {
+                return it;
+            }
+        }
+        FAIL("no bottom-left edge");
+        return map.attributes<1>().end();
+    }();
+    REQUIRE(blocking.delete_sheet(target, 1e-6));
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.nb_cells<2>() == 1);
+
+    // The merged corner went to the model vertex, not to the middle of the 2 and not along the
+    // curve: the more constrained side won, and it kept its own classification.
+    REQUIRE(corner_at(Point3d(0.0, 0.0, 0.0)) != map.attributes<0>().end());
+    REQUIRE(corner_at(Point3d(0.0, 1.0, 0.0)) != map.attributes<0>().end());
+    REQUIRE(dim_at(Point3d(0.0, 0.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(dim_at(Point3d(0.0, 1.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(corner_at(Point3d(0.5, 0.0, 0.0)) == map.attributes<0>().end());
+
+    // And the surviving quad is the whole square again, on its 4 model vertices.
+    REQUIRE(blocking.nb_cells<0>() == 4);
+    REQUIRE(dim_at(Point3d(1.0, 0.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(dim_at(Point3d(1.0, 1.0, 0.0)) == GroupDim::Dim0);
+}

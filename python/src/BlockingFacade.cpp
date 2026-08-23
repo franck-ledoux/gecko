@@ -275,6 +275,18 @@ namespace gecko::python {
         return true;
     }
 
+    bool BlockingFacade::delete_sheet(int edge_index, double tol_vertex, double tol_curve, double tol_surface) {
+        if (!m_impl.blocking.delete_sheet(edge_at(m_impl, edge_index), tol_vertex, tol_curve, tol_surface)) {
+            return false;
+        }
+        // Collapsing merges corners pairwise, so ids naming the side that went have to go — and the
+        // survivors can come back as attributes CGAL rebuilt, which no id then names. Prune, then
+        // re-index, for the reason delete_block() spells out.
+        m_impl.forget_stale_nodes();
+        m_impl.index_new_nodes();
+        return true;
+    }
+
     namespace {
         template<typename TImpl>
         auto find_node(TImpl &impl, int node_id) {

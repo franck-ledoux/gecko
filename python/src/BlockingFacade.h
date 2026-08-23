@@ -357,6 +357,26 @@ namespace gecko::python {
          */
         bool cut_sheet(int edge_index, double param);
 
+        /**
+         * @brief Deletes the whole sheet through one edge, gluing back what was either side of it —
+         * the inverse of cut_sheet() (see `Blocking::delete_sheet()`).
+         *
+         * Merging 2 corners into 1 means one of their 2 classifications has to go, and the more
+         * constrained side wins: a corner on a model vertex beats one on a curve, which beats one on
+         * a surface, and the merged corner is projected onto the winner. So a block structure fitted
+         * to a model does not drift off its features when a layer is taken out of it.
+         *
+         * @param edge_index An edge of the sheet, in the same order sheet_edges() uses.
+         * @param tol_vertex Tolerance for snapping onto a vertex, as classify() defines it — used
+         *        only where a refitted cell has to fall back on a proximity search.
+         * @param tol_curve Tolerance for snapping onto a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * @return false, changing nothing, when the sheet cannot be collapsed — see
+         *         `Blocking::delete_sheet()` for the cases.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        bool delete_sheet(int edge_index, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
+
         /** @brief The blocking and the id books kept alongside it; public only so the .cpp's
          * free-function helpers can name it — never part of the class' actual (Python-facing)
          * interface. */

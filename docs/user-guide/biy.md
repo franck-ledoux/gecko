@@ -211,15 +211,16 @@ position only.
 
 ## Moving corners
 
-The left mouse button does one of four things, picked with the **mouse mode** radio buttons at the
+The left mouse button does one of five things, picked with the **mouse mode** radio buttons at the
 top of the panel or with a keypress:
 
-| Mode   | Key | Left button                                                    |
-| ------ | --- | -------------------------------------------------------------- |
-| Camera | `C` | Polyscope's usual navigation: rotate, pan, zoom                |
-| Edit   | `E` | Picks up a block corner and moves it                           |
-| Cut    | `X` | Cuts the sheet under the cursor — click or `Space` (see below) |
-| Delete | `D` | Deletes the block under the cursor — click or `Space`          |
+| Mode     | Key | Left button                                                    |
+| -------- | --- | -------------------------------------------------------------- |
+| Camera   | `C` | Polyscope's usual navigation: rotate, pan, zoom                |
+| Edit     | `E` | Picks up a block corner and moves it                           |
+| Cut      | `X` | Cuts the sheet under the cursor — click or `Space` (see below) |
+| Collapse | `S` | Takes the whole sheet under the cursor out — click or `Space`  |
+| Delete   | `D` | Deletes the block under the cursor — click or `Space`          |
 
 These are genuine modes rather than a modifier like `Ctrl`+drag, because of how Polyscope is
 built: it processes camera navigation at the top of each frame, *before* the per-frame user
@@ -287,6 +288,60 @@ the two agree, and plain to see on a curved one.
 One consequence worth knowing: `classify()` rebuilds every face and block from its boundary — that
 is its documented job — and so discards the exact geometry a cut was careful to keep. **Cut first,
 classify after** is the order that keeps both.
+
+## Collapsing a sheet
+
+**Collapse** mode is Cut's inverse: instead of splitting a layer in two it takes a whole layer out,
+gluing back what was on either side of it. Point at a block edge, exactly as in Cut mode — the same
+sheet lights up, in **blue** rather than orange — then click or press `Space`.
+
+The colour is the only thing distinguishing the two previews, deliberately: they highlight the very
+same set of edges, and what differs is what a click does to it. Collapse has no parameter, so the
+markers showing where a cut would land are not drawn.
+
+Every edge of the sheet is contracted, merging its two ends into one corner. That collapses each
+face the sheet crosses onto a single edge and each block onto a single face, so the two blocks that
+sat either side of one end up sharing that face. A layer of blocks disappears and the structure
+closes over the gap.
+
+### Where the merged corner goes, and what it is classified on
+
+Merging two corners means one of the two classifications has to go, and leaving that to traversal
+order would let a corner sitting on a model curve be swallowed by one merely on a surface — quietly
+dropping the block structure off a feature of the model. So the **more constrained side wins**: the
+merged corner takes the lowest-dimensional entity that contains everything either side was
+classified on — a vertex beats a curve, a curve beats a surface, a surface beats a volume — and is
+then projected onto it.
+
+Two consequences worth expecting:
+
+- Collapsing an **interior** layer leaves the outside of the blocking where it was: the two sides
+  close over the gap and the total volume is unchanged.
+- Collapsing a layer against the **boundary** pulls that side in — unless its outer corners are
+  classified on the model, in which case they win the merge and are projected straight back onto it,
+  so the boundary stays where the model puts it. This is exactly why the rule is worth having.
+
+When neither side's entity contains the other's — two different model curves, say — no entity among
+them qualifies, and the rule falls back to the lowest entity containing both, which is `classify()`'s
+own "lowest common containing entity" rule. Edges, faces and blocks are not decided here at all:
+they infer from their boundary as they always do, which is what makes deciding the corners enough.
+
+### When it refuses
+
+Collapsing is refused, changing nothing, when:
+
+- the sheet is not a coherent one — the same condition Cut reports, a sheet closing back onto itself;
+- the sheet holds **every block there is**, so there is nothing on either side to glue and the
+  blocking would simply empty rather than get thinner;
+- the sheet closes onto itself corner-wise, which would pinch a whole ring of corners into one;
+- a second edge already joins two corners the collapse would merge, which would leave that edge a
+  loop.
+
+The status line and the terminal both say which. As everywhere else here, there is no undo.
+
+Note that collapsing the layer a cut just made does **not** put the block back: the cut adds a layer
+between two existing faces, and collapsing one pulls its two faces together onto the merge. One
+block again, but a shorter one.
 
 ## Deleting blocks
 
@@ -371,6 +426,7 @@ is a copy of the defaults:
 | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `panel_width`                                                                                     | Width of biy's 2 side panels, before UI scaling                                          |
 | `sheet_color`, `sheet_radius`                                                                     | Color and thickness of the highlighted sheet in Cut mode                                 |
+| `collapse_color`                                                                                  | Color of the highlighted sheet in Collapse mode                                          |
 | `cut_point_color`, `cut_point_radius`                                                             | Color and size of the markers showing where a cut would land                             |
 | `cut_snap_tolerance`                                                                              | How close to an edge's middle the cursor snaps the cut to exactly 0.5                    |
 | `delete_highlight_color`                                                                          | Color of the block about to be deleted, in Delete mode                                   |

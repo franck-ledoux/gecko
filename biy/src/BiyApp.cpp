@@ -191,7 +191,7 @@ namespace gecko::biy {
             m_dragged_node.reset();
             show_highlight(std::nullopt);
         }
-        if (mode != MouseMode::Cut) {
+        if (mode != MouseMode::Cut && mode != MouseMode::Collapse) {
             m_hover_edge.reset();
             m_sheet.clear();
             m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
@@ -526,6 +526,7 @@ namespace gecko::biy {
 
         handle_drag();
         handle_cut();
+        handle_collapse();
         handle_delete();
     }
 
@@ -723,6 +724,7 @@ namespace gecko::biy {
             if (ImGui::IsKeyPressed(ImGuiKey_C)) set_mouse_mode(MouseMode::Camera);
             if (ImGui::IsKeyPressed(ImGuiKey_E)) set_mouse_mode(MouseMode::Edit);
             if (ImGui::IsKeyPressed(ImGuiKey_X)) set_mouse_mode(MouseMode::Cut);
+            if (ImGui::IsKeyPressed(ImGuiKey_S)) set_mouse_mode(MouseMode::Collapse);
             if (ImGui::IsKeyPressed(ImGuiKey_D)) set_mouse_mode(MouseMode::Delete);
         }
 
@@ -732,6 +734,8 @@ namespace gecko::biy {
         if (ImGui::RadioButton("Edit (E)", m_mode == MouseMode::Edit)) set_mouse_mode(MouseMode::Edit);
         ImGui::SameLine();
         if (ImGui::RadioButton("Cut (X)", m_mode == MouseMode::Cut)) set_mouse_mode(MouseMode::Cut);
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Collapse (S)", m_mode == MouseMode::Collapse)) set_mouse_mode(MouseMode::Collapse);
         ImGui::SameLine();
         if (ImGui::RadioButton("Delete (D)", m_mode == MouseMode::Delete)) set_mouse_mode(MouseMode::Delete);
         switch (m_mode) {
@@ -743,16 +747,31 @@ namespace gecko::biy {
                                    "markers show where. Click, or press Space, to cut it. Camera navigation "
                                    "is off.");
                 break;
+            case MouseMode::Collapse:
+                ImGui::TextWrapped("Point at a block edge: the whole sheet lights up, in orange. Click, or press "
+                                   "Space, to take that whole layer out and glue back what was either side of "
+                                   "it. Where 2 corners merge, the one on the more constrained bit of the model "
+                                   "wins. Camera navigation is off.");
+                break;
             case MouseMode::Delete:
                 ImGui::TextWrapped("Point at a block: it lights up. Click, or press Space, to delete it — along "
                                    "with everything that existed only because of it. Camera navigation is off.");
                 break;
             default:
-                ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split blocks, "
-                                   "Delete to remove one.");
+                ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split "
+                                   "blocks, Collapse to take a whole layer out, Delete to remove one block.");
                 break;
         }
 
+        if (m_mode == MouseMode::Collapse) {
+            if (m_hover_edge && !m_sheet.empty()) {
+                ImGui::Text("Sheet: %zu edges", m_sheet.size());
+            } else if (m_hover_edge) {
+                ImGui::TextWrapped("This sheet closes back onto itself — it cannot be collapsed.");
+            } else {
+                ImGui::TextUnformatted("Sheet: none under the cursor");
+            }
+        }
         if (m_mode == MouseMode::Cut) {
             // The cursor drives this every time it moves; typing in it is the way to land a cut on
             // an exact value, which pointing cannot do.
@@ -968,7 +987,8 @@ namespace gecko::biy {
     }
 
     void BiyApp::refresh_cut_preview() {
-        const bool show = m_mode == MouseMode::Cut && m_hover_edge.has_value() && !m_sheet.empty();
+        const bool cutting = m_mode == MouseMode::Cut;
+        const bool show = (cutting || m_mode == MouseMode::Collapse) && m_hover_edge.has_value() && !m_sheet.empty();
         if (!show) {
             if (polyscope::hasCurveNetwork(SHEET_EDGES)) {
                 polyscope::removeStructure(polyscope::getCurveNetwork(SHEET_EDGES));
@@ -996,9 +1016,19 @@ namespace gecko::biy {
             }
         }
 
+        const auto &color = cutting ? m_config.sheet_color : m_config.collapse_color;
         auto *net = polyscope::registerCurveNetwork(SHEET_EDGES, sheet_points, sheet_segments);
-        net->setColor(glm::vec3(m_config.sheet_color[0], m_config.sheet_color[1], m_config.sheet_color[2]));
+        net->setColor(glm::vec3(color[0], color[1], color[2]));
         net->setRadius(static_cast<float>(m_config.sheet_radius));
+
+        // Collapsing has no parameter, so it has nothing to mark: the markers say "the cut lands
+        // here", and there is no here.
+        if (!cutting) {
+            if (polyscope::hasPointCloud(CUT_POINTS)) {
+                polyscope::removeStructure(polyscope::getPointCloud(CUT_POINTS));
+            }
+            return;
+        }
 
         const auto cut_points = m_blocking->sheet_cut_points(*m_hover_edge, m_cut_param);
         auto *cloud = polyscope::registerPointCloud(CUT_POINTS, cut_points);
@@ -1084,6 +1114,70 @@ namespace gecko::biy {
                    (after > before ? " — blocks " + std::to_string(before) + " to " + std::to_string(after) : "");
         report("cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) + ", blocks " +
                std::to_string(before) + " -> " + std::to_string(after) + "." + bend_report(*m_blocking));
+    }
+
+    void BiyApp::handle_collapse() {
+        if (!m_blocking || m_mode != MouseMode::Collapse) return;
+        ImGuiIO &io = ImGui::GetIO();
+
+        // Space as well as a click, and the sheet under the cursor read only when the cursor moves —
+        // both for the reasons `handle_cut()` spells out.
+        const bool by_key = !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_Space);
+        const bool by_click = !io.WantCaptureMouse && io.MouseClicked[0];
+
+        if (by_click || by_key) {
+            perform_collapse(by_key ? "space" : "click");
+            return;
+        }
+        if (io.WantCaptureMouse) return;
+
+        const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
+        if (mouse != m_last_cut_mouse) {
+            m_last_cut_mouse = mouse;
+            update_cut_hover(mouse);
+            refresh_cut_preview();
+        }
+    }
+
+    void BiyApp::perform_collapse(const char *trigger) {
+        const auto report = [trigger](const std::string &message) {
+            std::cout << "biy [collapse by " << trigger << "]: " << message << std::endl;
+        };
+
+        if (!m_hover_edge) {
+            m_status = "Nothing under the cursor to collapse";
+            report("no block edge under the cursor. Point at one — the sheet lights up when you are "
+                   "on it — then click or press space.");
+            return;
+        }
+        if (m_sheet.empty()) {
+            m_status = "That sheet cannot be collapsed";
+            report("that sheet closes back onto itself, so it has no coherent 2 sides to glue "
+                   "together. Refused rather than collapsed into something arbitrary.");
+            return;
+        }
+
+        const std::size_t sheet_edges = m_sheet.size();
+        const std::size_t before = m_blocking->nb_cells(3);
+        if (!m_blocking->delete_sheet(*m_hover_edge, m_tol_vertex, m_tol_curve, m_tol_surface)) {
+            m_status = "Collapse refused";
+            report("the kernel refused to collapse the sheet through edge " + std::to_string(*m_hover_edge) +
+                   ". Most often that is a sheet holding every block there is, which would leave the "
+                   "blocking empty rather than thinner; it can also be a sheet that closes onto itself.");
+            return;
+        }
+        const std::size_t after = m_blocking->nb_cells(3);
+
+        m_hover_edge.reset();
+        m_sheet.clear();
+        m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
+        refresh_cut_preview();
+        refresh_view();
+
+        m_status = "Collapsed a sheet of " + std::to_string(sheet_edges) + " edges — blocks " + std::to_string(before) +
+                   " to " + std::to_string(after);
+        report("collapsed a sheet of " + std::to_string(sheet_edges) + " edges, blocks " + std::to_string(before) +
+               " -> " + std::to_string(after) + "." + bend_report(*m_blocking));
     }
 
     void BiyApp::update_delete_hover(glm::vec2 screen_coords) {

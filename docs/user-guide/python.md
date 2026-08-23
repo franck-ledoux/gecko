@@ -115,6 +115,13 @@ sheet = blocking.sheet_edges(0)                 # [] if the sheet cannot be cut 
 preview = blocking.sheet_cut_points(0, 0.5)     # one point per edge of `sheet`, in the same order
 blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if the cut is impossible
 
+# The inverse: take a whole layer out and glue back what was either side of it. Where 2 corners
+# merge, the more constrained classification wins — a model vertex over a curve, a curve over a
+# surface — and the merged corner is projected onto it, so a blocking fitted to a model does not
+# drift off its features. Returns False, changing nothing, when the sheet cannot be collapsed —
+# in particular when it is the whole blocking.
+blocking.delete_sheet(0, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
 # What each block encloses, from its own stored geometry — exact at 1 subdivision when its faces are
 # planar, converging as it grows otherwise. Negative means that block came out inverted.
 print(blocking.block_volumes(subdivisions=1))

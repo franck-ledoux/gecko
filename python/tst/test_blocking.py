@@ -673,3 +673,60 @@ def test_cutting_after_a_deletion_still_cuts_every_edge_from_the_same_end(geom_m
         assert blocking.is_valid_topology()
         # A box cut by axis-aligned sheets has none but straight edges, at every step.
         assert max(blocking.edge_bends()) < 1e-12
+
+
+def _edge_along(blocking, axis, low, high):
+    """The edge running along `axis` whose 2 endpoints sit at `low` and `high` on it."""
+    n = blocking.degree() + 1
+    cps = blocking.edge_control_points()
+    for e in range(blocking.nb_cells(1)):
+        a = cps[e * n]
+        b = cps[e * n + n - 1]
+        others = [k for k in range(3) if k != axis]
+        if any(abs(a[k] - b[k]) > 1e-9 for k in others):
+            continue
+        ends = sorted((a[axis], b[axis]))
+        if abs(ends[0] - low) < 1e-6 and abs(ends[1] - high) < 1e-6:
+            return e
+    raise AssertionError("no edge along axis %d from %g to %g" % (axis, low, high))
+
+
+def test_delete_sheet_collapses_a_layer_and_glues_both_sides(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    # 3 slabs along z: cut at 1/3, then cut what is above it in half.
+    assert blocking.cut_sheet(_edge_along(blocking, 2, 0.0, 1.0), 1.0 / 3.0)
+    assert blocking.cut_sheet(_edge_along(blocking, 2, 1.0 / 3.0, 1.0), 0.5)
+    assert blocking.nb_cells(3) == 3
+
+    # The middle slab, whose corners at z=1/3 and z=2/3 merge at z=0.5.
+    middle = _edge_along(blocking, 2, 1.0 / 3.0, 2.0 / 3.0)
+    assert blocking.delete_sheet(middle, 1e-9)
+
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 2
+    assert max(blocking.edge_bends()) < 1e-12
+    # An interior layer: what was either side closes over the gap, so the whole is unchanged.
+    assert sum(blocking.block_volumes(2)) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_delete_sheet_refuses_a_sheet_that_is_the_whole_blocking(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    # Every block is in this sheet, so there is nothing either side of it to glue.
+    assert not blocking.delete_sheet(0, 1e-9)
+    assert blocking.nb_cells(3) == 1
+    assert blocking.nb_cells(0) == 8
+    assert blocking.block_volumes(2)[0] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_delete_sheet_rejects_an_unknown_edge(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+    with pytest.raises(IndexError):
+        blocking.delete_sheet(blocking.nb_cells(1), 1e-9)

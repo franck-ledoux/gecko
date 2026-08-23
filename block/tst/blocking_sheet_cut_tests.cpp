@@ -853,3 +853,133 @@ TEST_CASE("cutting_a_holed_grid_leaves_every_edge_straight", "[BlockTestSuite]")
     cut_along(1, Point3d(0.0, 0.2, 0.0), 0.36);
     cut_along(2, Point3d(0.0, 0.0, 0.3), 0.62);
 }
+
+TEST_CASE("deleting_a_sheet_glues_back_what_was_either_side_of_it", "[BlockTestSuite]") {
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+
+    // 3 slabs along z, then the middle one taken out.
+    REQUIRE(blocking.cut_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 1.0 / 3.0));
+    REQUIRE(blocking.cut_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.66)), 0.5));
+    REQUIRE(blocking.template nb_cells<3>() == 3);
+
+    const auto middle = edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5));
+    REQUIRE(blocking.delete_sheet(middle, 1e-9));
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 2);
+    REQUIRE(worst_edge_bend(blocking) < 1e-12);
+
+    // The 2 survivors still fill the box they started as.
+    double total = 0.0;
+    for (const double v : blocking.block_volumes(2)) {
+        REQUIRE(v > 0.0);
+        total += v;
+    }
+    REQUIRE(total == Approx(1.0).margin(1e-12));
+}
+
+TEST_CASE("deleting_a_boundary_sheet_pulls_that_side_of_the_blocking_in", "[BlockTestSuite]") {
+    // A sheet with blocks on only one side of it: collapsing it has nothing to glue on the far side,
+    // so that face of the blocking simply moves in to where the merged corners land.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+    REQUIRE(blocking.cut_sheet(edge_running_near(blocking, 0, Point3d(0.5, 0.0, 0.0)), 0.5));
+    REQUIRE(blocking.cut_sheet(edge_running_near(blocking, 1, Point3d(0.0, 0.5, 0.0)), 0.5));
+    REQUIRE(blocking.cut_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 0.5));
+    REQUIRE(blocking.template nb_cells<3>() == 8);
+
+    // The bottom layer, whose corners at z=0 and z=0.5 merge at z=0.25.
+    REQUIRE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.25)), 1e-9));
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 4);
+    REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    double total = 0.0;
+    for (const double v : blocking.block_volumes(2)) {
+        REQUIRE(v > 0.0);
+        total += v;
+    }
+    // What is left spans z in [0.25, 1].
+    REQUIRE(total == Approx(0.75).margin(1e-12));
+}
+
+TEST_CASE("deleting_a_sheet_contracts_the_blocking_rather_than_undoing_the_cut", "[BlockTestSuite]") {
+    // Worth being explicit about, because it is the first thing one expects and it is not what
+    // happens: collapsing the layer a cut just created does *not* put the block back. The cut adds a
+    // layer between 2 existing faces; collapsing one pulls its 2 faces together onto the merge, so a
+    // box cut at 0.4 of its height and then collapsed on the lower layer keeps only what is above
+    // the merged corners. 1 block again, but a shorter one.
+    //
+    // On a classified blocking the merge lands differently: a corner on the model wins over an
+    // interior one and is projected back onto it, so a boundary stays where the model puts it (see
+    // the classification tests). Here nothing is classified, so the merge is simply the midpoint.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(tall_box());
+    REQUIRE(blocking.cut_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 1.0)), 0.4));
+    REQUIRE(blocking.template nb_cells<3>() == 2);
+
+    REQUIRE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.4)), 1e-9));
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+    REQUIRE(blocking.template nb_cells<2>() == 6);
+    REQUIRE(blocking.template nb_cells<1>() == 12);
+    REQUIRE(blocking.template nb_cells<0>() == 8);
+    REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    // z=0 and z=0.8 merged at z=0.4, leaving the box from there to its top at z=2.
+    REQUIRE(blocking.block_volumes(2)[0] == Approx(1.6).margin(1e-12));
+    double lowest = 1e30;
+    auto &map = blocking.cmap();
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        lowest = std::min(lowest, it->info().point.z());
+    }
+    REQUIRE(lowest == Approx(0.4).margin(1e-12));
+}
+
+TEST_CASE("deleting_a_sheet_leaves_the_blocks_it_ran_between_sharing_a_face", "[BlockTestSuite]") {
+    // The gluing, seen on 2 blocks that were sewn along the collapsed layer's far side: after it
+    // goes, they are 1 block, and the boundary it used to sit against has moved onto the merge.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+    blocking.create_hex_block(box(1.0, 2.0));
+    blocking.build_connectivity();
+    REQUIRE(blocking.template nb_cells<3>() == 2);
+
+    // The sheet through an x-running edge of the first block is that block's own 4: it does not
+    // reach the second, whose x-edges are separated from them by the face the 2 share.
+    REQUIRE(blocking.delete_sheet(edge_running_near(blocking, 0, Point3d(0.5, 0.0, 0.0)), 1e-9));
+
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+    REQUIRE(blocking.template nb_cells<0>() == 8);
+    REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    // The survivor now runs from the merged corners at x=0.5 to x=2.
+    REQUIRE(blocking.block_volumes(2)[0] == Approx(1.5).margin(1e-12));
+}
+
+TEST_CASE("delete_sheet_refuses_a_sheet_that_is_the_whole_blocking", "[BlockTestSuite]") {
+    // Nothing either side to glue: collapsing would empty the blocking rather than thin it, so it is
+    // refused and nothing moves.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+
+    REQUIRE_FALSE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 1e-9));
+
+    REQUIRE(blocking.template nb_cells<3>() == 1);
+    REQUIRE(blocking.template nb_cells<2>() == 6);
+    REQUIRE(blocking.template nb_cells<1>() == 12);
+    REQUIRE(blocking.template nb_cells<0>() == 8);
+    REQUIRE(blocking.block_volumes(2)[0] == Approx(1.0).margin(1e-12));
+
+    // And on 2 blocks the sheet crosses both, which is again all of them.
+    blocking.create_hex_block(box(1.0, 2.0));
+    blocking.build_connectivity();
+    REQUIRE_FALSE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 1e-9));
+    REQUIRE(blocking.template nb_cells<3>() == 2);
+}

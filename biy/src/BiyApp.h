@@ -26,10 +26,11 @@ namespace gecko::biy {
      * a per-event decision.
      */
     enum class MouseMode {
-        Camera, ///< Polyscope's usual navigation: rotate/pan/zoom the view.
-        Edit,   ///< Navigation off; dragging picks up and moves a block corner.
-        Cut,    ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
-        Delete  ///< Navigation off; hovering a block highlights it, clicking deletes it.
+        Camera,   ///< Polyscope's usual navigation: rotate/pan/zoom the view.
+        Edit,     ///< Navigation off; dragging picks up and moves a block corner.
+        Cut,      ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
+        Collapse, ///< Navigation off; hovering an edge lights its sheet, clicking collapses it away.
+        Delete    ///< Navigation off; hovering a block highlights it, clicking deletes it.
     };
 
     /**
@@ -176,6 +177,13 @@ namespace gecko::biy {
          * the status line and on the terminal.
          * @param trigger How the cut was asked for, for the terminal line ("click" or "space"). */
         void perform_cut(const char *trigger);
+        /** @brief Tracks what the cursor is over in Collapse mode, lighting the sheet it would take
+         * out, and collapses it on a click or on space. */
+        void handle_collapse();
+        /** @brief Collapses the sheet the preview is currently showing, reporting what happened both
+         * in the status line and on the terminal.
+         * @param trigger How the collapse was asked for, for the terminal line. */
+        void perform_collapse(const char *trigger);
         /** @brief Tracks which block the cursor is over in Delete mode, highlighting it, and deletes
          * it on a click or on space. */
         void handle_delete();

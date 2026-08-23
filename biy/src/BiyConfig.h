@@ -117,6 +117,11 @@ namespace gecko::biy {
 
         /** @brief Color the sheet under the cursor is highlighted in, in Cut mode. */
         std::array<float, 3> sheet_color{0.98f, 0.55f, 0.05f};
+
+        /** @brief Color the sheet is highlighted in, in Collapse mode — deliberately not Cut's. The
+         * 2 modes light up the very same thing, so the colour is the only thing that says whether a
+         * click splits that sheet or takes it away. */
+        std::array<float, 3> collapse_color{0.35f, 0.75f, 0.95f};
         /** @brief Thickness of that highlight; wants to be thicker than `block_edge_radius` so the
          * sheet reads clearly on top of the edges it covers. */
         double sheet_radius = 0.007;

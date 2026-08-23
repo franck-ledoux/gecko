@@ -232,7 +232,18 @@ namespace gecko::python {
                  py::arg("param"),
                  "Cuts the blocking along the whole sheet through ``edge_index``, at ``param`` along that edge "
                  "(strictly between 0 and 1), splitting every block the sheet crosses in 2 and keeping the geometry "
-                 "it cut through exactly. Returns False, changing nothing, if the cut is not possible.");
+                 "it cut through exactly. Returns False, changing nothing, if the cut is not possible.")
+            .def("delete_sheet",
+                 &BlockingFacade::delete_sheet,
+                 py::arg("edge_index"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Deletes the whole sheet through ``edge_index``, collapsing every block it crosses and gluing back "
+                 "what was either side of it — the inverse of ``cut_sheet``. Where 2 corners merge, the more "
+                 "constrained classification wins (a model vertex over a curve, a curve over a surface) and the "
+                 "merged corner is projected onto it. Returns False, changing nothing, if the sheet cannot be "
+                 "collapsed — in particular when it is the whole blocking, leaving nothing either side to glue.");
     }
 
 } // namespace gecko::python
