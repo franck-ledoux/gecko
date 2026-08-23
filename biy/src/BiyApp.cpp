@@ -805,10 +805,10 @@ namespace gecko::biy {
                                    "is off.");
                 break;
             case MouseMode::Collapse:
-                ImGui::TextWrapped("Point at a block edge: the whole sheet lights up, in orange. Click, or press "
-                                   "Space, to take that whole layer out and glue back what was either side of "
-                                   "it. Where 2 corners merge, the one on the more constrained bit of the model "
-                                   "wins. Camera navigation is off.");
+                ImGui::TextWrapped("Point at a block edge: the whole sheet lights up. Click, or press Space, to "
+                                   "take that whole layer out and glue back what was either side of it. Where 2 "
+                                   "corners merge, the one on the more constrained bit of the model wins. Taking "
+                                   "the last layer out empties the blocking. Camera navigation is off.");
                 break;
             case MouseMode::Delete:
                 ImGui::TextWrapped("Point at a block: it lights up. Click, or press Space, to delete it — along "
@@ -1231,8 +1231,8 @@ namespace gecko::biy {
         if (!m_blocking->delete_sheet(*m_hover_edge, m_tol_vertex, m_tol_curve, m_tol_surface)) {
             m_status = "Collapse refused";
             report("the kernel refused to collapse the sheet through edge " + std::to_string(*m_hover_edge) +
-                   ". Most often that is a sheet holding every block there is, which would leave the "
-                   "blocking empty rather than thinner; it can also be a sheet that closes onto itself.");
+                   ". That is a sheet closing back onto itself, or one that would leave an edge joining a "
+                   "corner to itself — neither has 2 coherent sides to glue together.");
             return;
         }
         const std::size_t after = m_blocking->nb_cells(3);

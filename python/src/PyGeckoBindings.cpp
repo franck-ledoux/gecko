@@ -254,8 +254,10 @@ namespace gecko::python {
                  "Deletes the whole sheet through ``edge_index``, collapsing every block it crosses and gluing back "
                  "what was either side of it — the inverse of ``cut_sheet``. Where 2 corners merge, the more "
                  "constrained classification wins (a model vertex over a curve, a curve over a surface) and the "
-                 "merged corner is projected onto it. Returns False, changing nothing, if the sheet cannot be "
-                 "collapsed — in particular when it is the whole blocking, leaving nothing either side to glue.");
+                 "merged corner is projected onto it. A sheet holding every block there is collapses too, leaving "
+                 "the blocking empty — so an unclassified grid can be taken apart one sheet at a time. Returns "
+                 "False, changing nothing, when the sheet cannot be collapsed at all: one closing back onto itself, "
+                 "or one that would leave an edge as a loop.");
     }
 
 } // namespace gecko::python

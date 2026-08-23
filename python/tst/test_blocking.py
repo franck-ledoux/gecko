@@ -712,16 +712,47 @@ def test_delete_sheet_collapses_a_layer_and_glues_both_sides(geom_model_path):
     assert sum(blocking.block_volumes(2)) == pytest.approx(1.0, abs=1e-12)
 
 
-def test_delete_sheet_refuses_a_sheet_that_is_the_whole_blocking(geom_model_path):
+def test_delete_sheet_empties_the_blocking_when_the_sheet_is_all_of_it(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model, degree=3)
     blocking.create_hex_block(_UNIT_HEX)
 
-    # Every block is in this sheet, so there is nothing either side of it to glue.
-    assert not blocking.delete_sheet(0, 1e-9)
+    # Nothing either side to glue, so what is left is nothing — a state to be in, not a failure.
+    assert blocking.delete_sheet(0, 1e-9)
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 0
+    assert blocking.nb_cells(0) == 0
+    assert blocking.node_ids() == []
+
+    # And it still takes a new block.
+    blocking.create_hex_block(_UNIT_HEX)
     assert blocking.nb_cells(3) == 1
-    assert blocking.nb_cells(0) == 8
+    assert len(blocking.node_ids()) == 8
     assert blocking.block_volumes(2)[0] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_an_unclassified_grid_comes_apart_one_sheet_at_a_time(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    for axis in (0, 1, 2):
+        assert blocking.cut_sheet(_edge_along(blocking, axis, 0.0, 1.0), 1.0 / 3.0)
+        assert blocking.cut_sheet(_edge_along(blocking, axis, 1.0 / 3.0, 1.0), 0.5)
+    assert blocking.nb_cells(3) == 27
+
+    steps = 0
+    while blocking.nb_cells(1) > 0:
+        steps += 1
+        assert steps < 40
+        assert any(blocking.delete_sheet(e, 1e-9) for e in range(blocking.nb_cells(1)))
+        assert blocking.is_valid_topology()
+        bends = blocking.edge_bends()
+        assert max(bends, default=0.0) < 1e-12
+
+    assert blocking.nb_cells(3) == 0
+    assert blocking.nb_cells(0) == 0
+
 
 
 def test_delete_sheet_rejects_an_unknown_edge(geom_model_path):

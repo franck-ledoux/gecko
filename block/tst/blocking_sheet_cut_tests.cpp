@@ -43,6 +43,15 @@ namespace {
         return geom;
     }
 
+    /** @brief The point on @p AAxis at @p AValue, zero on the other 2 — a way to aim
+     * `edge_running_near()` at one end of an axis without spelling out 3 coordinates.
+     * @param AAxis 0/1/2 for x/y/z.
+     * @param AValue Where along it.
+     * @return That point. */
+    Point3d axis_point(int AAxis, double AValue) {
+        return {AAxis == 0 ? AValue : 0.0, AAxis == 1 ? AValue : 0.0, AAxis == 2 ? AValue : 0.0};
+    }
+
     /** @brief The edge of @p ABlocking that runs along @p AAxis and whose midpoint is nearest
      * @p APoint. Positions are only ever compared for *nearness* here, never for equality: a cut
      * places its node by evaluating a curve, so the node it leaves at parameter 0.37 of a unit edge
@@ -962,24 +971,65 @@ TEST_CASE("deleting_a_sheet_leaves_the_blocks_it_ran_between_sharing_a_face", "[
     REQUIRE(blocking.block_volumes(2)[0] == Approx(1.5).margin(1e-12));
 }
 
-TEST_CASE("delete_sheet_refuses_a_sheet_that_is_the_whole_blocking", "[BlockTestSuite]") {
-    // Nothing either side to glue: collapsing would empty the blocking rather than thin it, so it is
-    // refused and nothing moves.
+TEST_CASE("collapsing_the_last_sheet_leaves_the_blocking_empty", "[BlockTestSuite]") {
+    // A sheet holding every block there is collapses like any other. There is nothing either side of
+    // it to glue, so what is left is nothing — which is a state to be in rather than a broken one:
+    // the blocking still meshes, and still takes a new block. Refusing here would make the count of
+    // blocks a rule of its own, and the only thing that should ever stand in the way of a collapse is
+    // the geometry.
     const FacetedGeometry geom = make_far_geom_model();
     Blocking<FacetedGeometry> blocking(geom, 3);
     blocking.create_hex_block(box(0.0, 1.0));
 
-    REQUIRE_FALSE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 1e-9));
+    REQUIRE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 1e-9));
 
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.template nb_cells<3>() == 0);
+    REQUIRE(blocking.template nb_cells<2>() == 0);
+    REQUIRE(blocking.template nb_cells<1>() == 0);
+    REQUIRE(blocking.template nb_cells<0>() == 0);
+
+    // And it is still a blocking, not a wreck.
+    blocking.create_hex_block(box(0.0, 1.0));
     REQUIRE(blocking.template nb_cells<3>() == 1);
-    REQUIRE(blocking.template nb_cells<2>() == 6);
-    REQUIRE(blocking.template nb_cells<1>() == 12);
-    REQUIRE(blocking.template nb_cells<0>() == 8);
     REQUIRE(blocking.block_volumes(2)[0] == Approx(1.0).margin(1e-12));
+    REQUIRE(blocking.to_mesh(2).nb_nodes() > 0);
+}
 
-    // And on 2 blocks the sheet crosses both, which is again all of them.
-    blocking.create_hex_block(box(1.0, 2.0));
-    blocking.build_connectivity();
-    REQUIRE_FALSE(blocking.delete_sheet(edge_running_near(blocking, 2, Point3d(0.0, 0.0, 0.5)), 1e-9));
-    REQUIRE(blocking.template nb_cells<3>() == 2);
+TEST_CASE("an_unclassified_grid_can_be_taken_apart_one_sheet_at_a_time", "[BlockTestSuite]") {
+    // The whole point of not counting blocks: a grid with nothing holding it to a model comes apart
+    // sheet by sheet, down to nothing, and every state along the way is a sound blocking with
+    // straight edges.
+    const FacetedGeometry geom = make_far_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block(box(0.0, 1.0));
+
+    // 3 x 3 x 3, cut at the thirds.
+    for (int axis = 0; axis < 3; ++axis) {
+        Point3d near(0.0, 0.0, 0.0);
+        REQUIRE(blocking.cut_sheet(edge_running_near(blocking, axis, near), 1.0 / 3.0));
+        REQUIRE(blocking.cut_sheet(edge_running_near(blocking, axis, axis_point(axis, 0.7)), 0.5));
+    }
+    REQUIRE(blocking.template nb_cells<3>() == 27);
+    REQUIRE(worst_edge_bend(blocking) < 1e-12);
+
+    int steps = 0;
+    while (blocking.template nb_cells<1>() > 0) {
+        ++steps;
+        REQUIRE(steps < 40);
+        bool collapsed = false;
+        for (auto it = blocking.cmap().attributes<1>().begin(), end = blocking.cmap().attributes<1>().end(); it != end;
+             ++it) {
+            if (blocking.delete_sheet(it, 1e-9)) {
+                collapsed = true;
+                break;
+            }
+        }
+        REQUIRE(collapsed);
+        REQUIRE(blocking.is_valid_topology());
+        REQUIRE(worst_edge_bend(blocking) < 1e-12);
+    }
+
+    REQUIRE(blocking.template nb_cells<3>() == 0);
+    REQUIRE(blocking.template nb_cells<0>() == 0);
 }

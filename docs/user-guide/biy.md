@@ -345,13 +345,22 @@ them qualifies, and the rule falls back to the lowest entity containing both, wh
 own "lowest common containing entity" rule. Edges, faces and blocks are not decided here at all:
 they infer from their boundary as they always do, which is what makes deciding the corners enough.
 
+### Taking a blocking apart
+
+A sheet holding every block there is collapses like any other, and leaves the blocking **empty**.
+That is a state to be in rather than a broken one — it still meshes, and still takes a new block —
+and it is what taking the last layer out means. So an unclassified grid can be dismantled one sheet
+at a time down to nothing: a 3×3×3 grid goes 27 → 18 → 12 → 8 → 4 → 0 in five collapses.
+
+Only the geometry ever stands in the way, never the count of blocks. On a blocking fitted to a model
+the merge rule above decides *where* each corner lands, and that is what constrains the result — not
+how much is left.
+
 ### When it refuses
 
 Collapsing is refused, changing nothing, when:
 
 - the sheet is not a coherent one — the same condition Cut reports, a sheet closing back onto itself;
-- the sheet holds **every block there is**, so there is nothing on either side to glue and the
-  blocking would simply empty rather than get thinner;
 - the sheet closes onto itself corner-wise, which would pinch a whole ring of corners into one;
 - a second edge already joins two corners the collapse would merge, which would leave that edge a
   loop.
@@ -361,6 +370,12 @@ The status line and the terminal both say which. As everywhere else here, there 
 Note that collapsing the layer a cut just made does **not** put the block back: the cut adds a layer
 between two existing faces, and collapsing one pulls its two faces together onto the merge. One
 block again, but a shorter one.
+
+Nothing a collapse touches is classified by proximity. Corners keep the classification the merge rule
+decided, and every cell around them takes what its own boundary agrees on or nothing at all. A
+blocking nobody classified therefore stays unclassified as it comes apart — without that, the
+proximity fallback would classify its edges onto whatever geometry the merged plane had drifted onto
+and bend them there.
 
 ## Deleting blocks
 

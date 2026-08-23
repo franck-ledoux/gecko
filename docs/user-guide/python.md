@@ -118,8 +118,9 @@ blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if th
 # The inverse: take a whole layer out and glue back what was either side of it. Where 2 corners
 # merge, the more constrained classification wins — a model vertex over a curve, a curve over a
 # surface — and the merged corner is projected onto it, so a blocking fitted to a model does not
-# drift off its features. Returns False, changing nothing, when the sheet cannot be collapsed —
-# in particular when it is the whole blocking.
+# drift off its features. A sheet holding every block collapses too, leaving the blocking empty, so
+# an unclassified grid can be taken apart one sheet at a time. Returns False, changing nothing, only
+# when the sheet cannot be collapsed at all — one closing back onto itself.
 blocking.delete_sheet(0, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
 # What each block encloses, from its own stored geometry — exact at 1 subdivision when its faces are

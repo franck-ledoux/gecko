@@ -390,6 +390,10 @@ namespace gecko::python {
          *        only where a refitted cell has to fall back on a proximity search.
          * @param tol_curve Tolerance for snapping onto a curve. Defaults to @p tol_vertex.
          * @param tol_surface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * A sheet holding every block there is collapses like any other and leaves the blocking
+         * empty — a state to be in rather than a broken one, and what taking the last layer out
+         * means. Only the geometry ever stands in the way, never the count.
+         *
          * @return false, changing nothing, when the sheet cannot be collapsed — see
          *         `Blocking::delete_sheet()` for the cases.
          * @throw std::out_of_range if @p edge_index is not an edge of this blocking.

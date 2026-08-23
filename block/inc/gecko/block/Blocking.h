@@ -904,25 +904,22 @@ namespace gecko {
          *        only where a refitted cell has to fall back on a proximity search.
          * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
          * @param ATolSurface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * A sheet holding every block there is collapses like any other, and leaves the blocking
+         * empty. That is a state to be in rather than a broken one — it still meshes, and still takes
+         * a new block — and it is what taking the last layer out *means*: an unclassified grid can be
+         * dismantled one sheet at a time down to nothing. Only the geometry ever stands in the way,
+         * never the count.
+         *
          * @return false, changing nothing at all, when the sheet cannot be collapsed: when
-         *         `find_sheet()` refuses it, when it holds every block there is (nothing either side
-         *         of it to glue, so the blocking would simply empty), when it closes back onto itself
-         *         (some corner is an endpoint of 2 of its edges, so collapsing would pinch a whole
-         *         ring of corners into one), or when a second edge already joins the 2 corners one of
-         *         its edges would merge, which would leave that edge a loop.
+         *         `find_sheet()` refuses it, when it closes back onto itself (some corner is an
+         *         endpoint of 2 of its edges, so collapsing would pinch a whole ring of corners into
+         *         one), or when a second edge already joins the 2 corners one of its edges would
+         *         merge, which would leave that edge a loop.
          */
         bool delete_sheet(Edge AEdge, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
             const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
             const std::optional<Sheet> sheet = find_sheet(AEdge);
             if (!sheet.has_value()) return false;
-
-            // A sheet holding every last block (or, on a 2D blocking, every face) has nothing either
-            // side of it to glue back together, and collapsing it would leave an empty blocking
-            // rather than a thinner one. Refused rather than obeyed: this is one click in the viewer,
-            // and there is nothing to undo it with.
-            const std::size_t blocks = nb_cells<3>();
-            if (blocks > 0 && sheet->blocks.size() == blocks) return false;
-            if (blocks == 0 && sheet->faces.size() == nb_cells<2>()) return false;
 
             // Every check runs before the first write: refusing has to leave the blocking untouched.
             std::vector<std::pair<Node, Node>> merges;
@@ -1480,8 +1477,12 @@ namespace gecko {
          *
          * @param AEdge The edge to classify and refit.
          * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
+         * @param AInferOnly Skips that fallback: the edge takes what its 2 corners agree on, or
+         *        nothing at all. For callers restoring consistency after an edit rather than
+         *        classifying — a proximity search there would classify a blocking nobody ever asked
+         *        to classify, and then bend its edges onto whatever they happen to have drifted near.
          */
-        void refit_edge(Edge AEdge, const Tolerances &ATol) {
+        void refit_edge(Edge AEdge, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart d = AEdge->dart();
             const Node n0 = m_cmap.template attribute<0>(d);
             const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
@@ -1491,7 +1492,8 @@ namespace gecko {
             const Point3d midpoint = AEdge->info().curve.value(0.5);
             const auto inferred = infer_targets({&n0->info().geom_targets, &n1->info().geom_targets}, GroupDim::Dim1);
             const auto result =
-                inferred.empty() ? classify_position(GroupDim::Dim1, midpoint, ATol) : nearest_of(inferred, midpoint);
+                inferred.empty() ? (AInferOnly ? ClassifyResult{} : classify_position(GroupDim::Dim1, midpoint, ATol))
+                                 : nearest_of(inferred, midpoint);
             AEdge->info().geom_targets = result.targets;
 
             const std::size_t n = m_degree + 1;
@@ -1855,8 +1857,9 @@ namespace gecko {
          *
          * @param AFace The face to classify and rebuild.
          * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
+         * @param AInferOnly Skips that fallback — see `refit_edge()`'s parameter of the same name.
          */
-        void classify_and_rebuild_face(Face AFace, const Tolerances &ATol) {
+        void classify_and_rebuild_face(Face AFace, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart fd = AFace->dart();
             std::array<Node, 4> local_nodes{};
             Dart walk = fd;
@@ -1880,8 +1883,9 @@ namespace gecko {
             }
 
             const auto inferred = infer_targets(boundary, GroupDim::Dim2);
-            const auto result =
-                inferred.empty() ? classify_position(GroupDim::Dim2, center, ATol) : nearest_of(inferred, center);
+            const auto result = inferred.empty()
+                                    ? (AInferOnly ? ClassifyResult{} : classify_position(GroupDim::Dim2, center, ATol))
+                                    : nearest_of(inferred, center);
             AFace->info().geom_targets = result.targets;
 
             rebuild_face_surface(AFace);
@@ -1954,8 +1958,14 @@ namespace gecko {
          * Deliberately local. Sweeping the whole blocking would also rebuild cells nowhere near the
          * edit, and rebuilding a cell means re-deriving it from its boundary — which throws away the
          * exact subdivision geometry a `cut_sheet()` was careful to keep, the same trap `classify()`
-         * documents. Corners are left classified as they are: this refits around a decision already
-         * taken, it does not take one.
+         * documents.
+         *
+         * Nothing here classifies anything by proximity. Corners keep the classification the caller
+         * decided for them, and every cell around them takes what its own boundary agrees on or
+         * nothing at all — never what it happens to be near. A blocking nobody classified stays
+         * unclassified, which is the whole reason an unclassified grid can be taken apart sheet by
+         * sheet: the fallback search would classify its edges onto whatever geometry the merged plane
+         * had drifted onto, and then bend them there.
          *
          * @param APoints Where the corners that moved now sit.
          * @param ATol The per-dimension snapping tolerances, for cells that have to fall back on a
@@ -1972,20 +1982,29 @@ namespace gecko {
                  it != itend;
                  ++it) {
                 const Dart d = it->dart();
-                if (moved(m_cmap.template attribute<0>(d)) ||
-                    moved(m_cmap.template attribute<0>(m_cmap.template beta<1>(d)))) {
-                    refit_edge(it, ATol);
-                }
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (!moved(n0) && !moved(n1)) continue;
+                // Straightened before being refitted, the same 2 steps in the same order
+                // `move_node()` and `snap_node()` use between them — and for the same reason. A
+                // corner that moves leaves every curve through it describing where that corner *was*,
+                // and `refit_edge()` falls back on the stored curve's own midpoint to decide what the
+                // edge is classified on. Fed a stale curve it can classify the edge onto whatever
+                // that curve used to pass through and then project its interior there: collapsing a
+                // grid whose merged plane used to sit on a model surface bent one edge a quarter of
+                // its own length, pulled back onto a face it no longer touches.
+                store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
+                refit_edge(it, ATol, true);
             }
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                if (face_has_moved_node(it, moved)) classify_and_rebuild_face(it, ATol);
+                if (face_has_moved_node(it, moved)) classify_and_rebuild_face(it, ATol, true);
             }
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                if (block_has_moved_node(it, moved)) classify_and_rebuild_block(it, ATol);
+                if (block_has_moved_node(it, moved)) classify_and_rebuild_block(it, ATol, true);
             }
         }
 
@@ -2203,8 +2222,12 @@ namespace gecko {
          *
          * @param ABlock The block to classify and rebuild.
          * @param ATol The per-dimension snapping tolerances.
+         * @param AInferOnly Leaves the block's own classification alone — see `refit_edge()`'s
+         *        parameter of the same name. A block has nothing to infer from (its only possible
+         *        targets are volumes, which its 6 faces could only ever point back at), so there is
+         *        no inference to fall back *to*: it simply keeps what it had.
          */
-        void classify_and_rebuild_block(Block ABlock, const Tolerances &ATol) {
+        void classify_and_rebuild_block(Block ABlock, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart bd = ABlock->dart();
             std::array<Node, 8> local_nodes{};
             local_nodes[0] = m_cmap.template attribute<0>(bd);
@@ -2221,8 +2244,9 @@ namespace gecko {
                 acc += Vector3d(local_nodes[0]->info().point, node->info().point);
             }
             const Point3d center = local_nodes[0]->info().point + acc * (1.0 / 8.0);
-            const auto result = classify_position(GroupDim::Dim3, center, ATol);
-            ABlock->info().geom_targets = result.targets;
+            if (!AInferOnly) {
+                ABlock->info().geom_targets = classify_position(GroupDim::Dim3, center, ATol).targets;
+            }
 
             rebuild_block_volume(ABlock);
         }
