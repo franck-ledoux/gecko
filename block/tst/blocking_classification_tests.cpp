@@ -627,3 +627,131 @@ TEST_CASE("collapsing_a_sheet_keeps_the_more_constrained_of_the_2_corners_it_mer
     REQUIRE(dim_at(Point3d(1.0, 0.0, 0.0)) == GroupDim::Dim0);
     REQUIRE(dim_at(Point3d(1.0, 1.0, 0.0)) == GroupDim::Dim0);
 }
+
+TEST_CASE("collapsing_is_refused_when_it_would_merge_2_different_model_vertices", "[BlockTestSuite]") {
+    // The one thing a collapse cannot do. The square's bottom edge joins 2 corners sitting on 2
+    // *different* model vertices, and merging them would leave one of those vertices with no corner
+    // of the block structure on it — nothing else in the blocking records where it was, and no later
+    // classify() puts one back. Refused, and nothing moves.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_quad_block(
+        {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+    blocking.build_connectivity();
+    blocking.classify(1e-6);
+
+    auto &map = blocking.cmap();
+    // All 4 corners are on the square's own vertices, so every edge of it joins 2 different ones.
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        REQUIRE(!it->info().geom_targets.empty());
+        REQUIRE(it->info().geom_targets.front().first == GroupDim::Dim0);
+    }
+
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        REQUIRE_FALSE(blocking.delete_sheet(it, 1e-6));
+    }
+
+    // Untouched: not a corner moved, not a cell gone.
+    REQUIRE(blocking.nb_cells<2>() == 1);
+    REQUIRE(blocking.nb_cells<1>() == 4);
+    REQUIRE(blocking.nb_cells<0>() == 4);
+    for (const Point3d &corner :
+         {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)}) {
+        bool found = false;
+        for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+            if (Vector3d(it->info().point, corner).norm() < 1e-12) found = true;
+        }
+        REQUIRE(found);
+    }
+
+    // Cut it in 2 and the *inner* sheet becomes collapsible again: its edges join a corner on a
+    // vertex to one merely on a curve, and the vertex survives that. Only the vertex-to-vertex
+    // pairing is the problem, not classification as such.
+    const auto vertical = [&]() {
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto d = it->dart();
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            if (std::abs(a.x() - b.x()) < 1e-12) return it;
+        }
+        FAIL("no vertical edge");
+        return map.attributes<1>().end();
+    }();
+    (void)vertical;
+    const auto horizontal = [&]() {
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto d = it->dart();
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            if (std::abs(a.y() - b.y()) < 1e-12) return it;
+        }
+        FAIL("no horizontal edge");
+        return map.attributes<1>().end();
+    }();
+    REQUIRE(blocking.cut_sheet(horizontal, 0.5));
+    REQUIRE(blocking.nb_cells<2>() == 2);
+
+    bool collapsed = false;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        if (blocking.delete_sheet(it, 1e-6)) {
+            collapsed = true;
+            break;
+        }
+    }
+    REQUIRE(collapsed);
+    REQUIRE(blocking.nb_cells<2>() == 1);
+    REQUIRE(blocking.is_valid_topology());
+}
+
+TEST_CASE("cutting_a_standalone_quad_block_splits_it_whichever_way_its_sheet_runs", "[BlockTestSuite]") {
+    // A boundary edge of a standalone quad block has exactly one dart — nothing is 2-sewn to it — so
+    // only one of its 2 endpoints is the source of any dart of it at all. The cut used to ask for a
+    // dart starting at the end its sheet measures from, and on a 2D block that ask has no answer
+    // half the time: whether it aborted came down to which endpoint the sheet happened to start at.
+    //
+    // A hex hides this completely. Its edges carry darts in several faces, in both directions, so
+    // the ask always succeeds — which is why every cut test until now passed.
+    const FacetedGeometry geom = make_square_geom_model();
+
+    for (const double param : {0.5, 0.25, 0.75}) {
+        Blocking<FacetedGeometry> blocking(geom, 3);
+        blocking.create_quad_block(
+            {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+        blocking.build_connectivity();
+        blocking.classify(1e-6);
+
+        // Every edge in turn, so neither orientation of a sheet goes untried.
+        auto &map = blocking.cmap();
+        int cuts = 0;
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            Blocking<FacetedGeometry> one(geom, 3);
+            one.create_quad_block(
+                {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+            one.build_connectivity();
+            one.classify(1e-6);
+
+            auto &m = one.cmap();
+            auto target = m.attributes<1>().begin();
+            std::advance(target, cuts);
+            REQUIRE(one.cut_sheet(target, param));
+            REQUIRE(one.is_valid_topology());
+            REQUIRE(one.nb_cells<2>() == 2);
+            REQUIRE(one.nb_cells<1>() == 7);
+            REQUIRE(one.nb_cells<0>() == 6);
+
+            // The cut lands where it was asked to, on the right side of the edge it was aimed at.
+            const auto mesh = one.to_mesh(1);
+            double lo = 1e30;
+            double hi = -1e30;
+            for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+                const Point3d &q = mesh.node(NodeId{i});
+                lo = std::min({lo, q.x(), q.y()});
+                hi = std::max({hi, q.x(), q.y()});
+            }
+            REQUIRE(lo == Approx(0.0).margin(1e-12));
+            REQUIRE(hi == Approx(1.0).margin(1e-12));
+            ++cuts;
+        }
+        REQUIRE(cuts == 4);
+    }
+}

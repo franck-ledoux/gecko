@@ -256,8 +256,9 @@ namespace gecko::python {
                  "constrained classification wins (a model vertex over a curve, a curve over a surface) and the "
                  "merged corner is projected onto it. A sheet holding every block there is collapses too, leaving "
                  "the blocking empty — so an unclassified grid can be taken apart one sheet at a time. Returns "
-                 "False, changing nothing, when the sheet cannot be collapsed at all: one closing back onto itself, "
-                 "or one that would leave an edge as a loop.");
+                 "False, changing nothing, when one of the sheet's edges joins 2 corners on 2 *different* model "
+                 "vertices (merging them would leave one of those vertices with no corner on it), or when the sheet "
+                 "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.");
     }
 
 } // namespace gecko::python

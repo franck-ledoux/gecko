@@ -392,7 +392,11 @@ namespace gecko::python {
          * @param tol_surface Tolerance for snapping onto a surface. Defaults to the curve one.
          * A sheet holding every block there is collapses like any other and leaves the blocking
          * empty — a state to be in rather than a broken one, and what taking the last layer out
-         * means. Only the geometry ever stands in the way, never the count.
+         * means. The count of blocks is never a reason to refuse; the geometry is the only thing that
+         * ever stands in the way, and it does so in exactly one case: an edge of the sheet joining 2
+         * corners classified on 2 *different* model vertices. Merging those would leave one of the 2
+         * vertices with no corner of the block structure on it, and nothing else records where it
+         * was.
          *
          * @return false, changing nothing, when the sheet cannot be collapsed — see
          *         `Blocking::delete_sheet()` for the cases.

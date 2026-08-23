@@ -352,13 +352,24 @@ That is a state to be in rather than a broken one — it still meshes, and still
 and it is what taking the last layer out means. So an unclassified grid can be dismantled one sheet
 at a time down to nothing: a 3×3×3 grid goes 27 → 18 → 12 → 8 → 4 → 0 in five collapses.
 
-Only the geometry ever stands in the way, never the count of blocks. On a blocking fitted to a model
-the merge rule above decides *where* each corner lands, and that is what constrains the result — not
-how much is left.
+Only the geometry ever stands in the way, never the count of blocks — see below for the one case
+where it does.
 
 ### When it refuses
 
-Collapsing is refused, changing nothing, when:
+One refusal comes from the model, and it is the one you will meet: an edge of the sheet joining two
+corners that sit on **two different model vertices**. Merging those would leave one of the two
+vertices with no corner of the block structure on it — and nothing else in the blocking records where
+it was, since no later `classify()` puts a corner back on a vertex that has none. Every other pairing
+loses nothing and is allowed: a corner on a vertex merged with one merely on a curve keeps the
+vertex, because the vertex lies on that curve, and two corners on two curves still land on the
+surface they share.
+
+So a single quad fitted to a square cannot be collapsed at all — each of its four edges joins two of
+the square's corners — while cutting it in two makes the inner sheet collapsible again, its edges
+joining a vertex to a mere curve point.
+
+The rest are topological impossibilities rather than choices:
 
 - the sheet is not a coherent one — the same condition Cut reports, a sheet closing back onto itself;
 - the sheet closes onto itself corner-wise, which would pinch a whole ring of corners into one;

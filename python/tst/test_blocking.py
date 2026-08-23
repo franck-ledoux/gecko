@@ -801,3 +801,28 @@ def test_mesh_quad_owners_counts_only_the_blocks_that_emit_quads(geom_model_path
     solid.create_hex_block(_UNIT_HEX)
     assert solid.mesh_quads(2) == []
     assert solid.mesh_quad_owners(2) == []
+
+
+def test_delete_sheet_refuses_to_merge_2_different_model_vertices(square_model_path):
+    model = gecko.GeomModel(square_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_quad_block([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)])
+    blocking.build_connectivity()
+    blocking.classify(1e-6)
+
+    # All 4 corners are on the square's own vertices, so every edge joins 2 different ones. Merging
+    # any pair would leave a model vertex with no corner of the blocking on it.
+    assert blocking.node_classification_dims() == [0, 0, 0, 0]
+    for e in range(blocking.nb_cells(1)):
+        assert not blocking.delete_sheet(e, 1e-6)
+    assert blocking.nb_cells(2) == 1
+    assert blocking.nb_cells(0) == 4
+
+    # Cut it, and the inner sheet becomes collapsible: its edges join a vertex to a mere curve point,
+    # and the vertex survives that. It is the vertex-to-vertex pairing that is refused, not
+    # classification as such.
+    assert blocking.cut_sheet(0, 0.5)
+    assert blocking.nb_cells(2) == 2
+    assert any(blocking.delete_sheet(e, 1e-6) for e in range(blocking.nb_cells(1)))
+    assert blocking.nb_cells(2) == 1
+    assert blocking.is_valid_topology()

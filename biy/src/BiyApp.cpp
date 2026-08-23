@@ -807,8 +807,9 @@ namespace gecko::biy {
             case MouseMode::Collapse:
                 ImGui::TextWrapped("Point at a block edge: the whole sheet lights up. Click, or press Space, to "
                                    "take that whole layer out and glue back what was either side of it. Where 2 "
-                                   "corners merge, the one on the more constrained bit of the model wins. Taking "
-                                   "the last layer out empties the blocking. Camera navigation is off.");
+                                   "corners merge, the one on the more constrained bit of the model wins — and "
+                                   "it is refused outright when that would merge 2 different model vertices. "
+                                   "Taking the last layer out empties the blocking. Camera navigation is off.");
                 break;
             case MouseMode::Delete:
                 ImGui::TextWrapped("Point at a block: it lights up. Click, or press Space, to delete it — along "
@@ -1231,8 +1232,11 @@ namespace gecko::biy {
         if (!m_blocking->delete_sheet(*m_hover_edge, m_tol_vertex, m_tol_curve, m_tol_surface)) {
             m_status = "Collapse refused";
             report("the kernel refused to collapse the sheet through edge " + std::to_string(*m_hover_edge) +
-                   ". That is a sheet closing back onto itself, or one that would leave an edge joining a "
-                   "corner to itself — neither has 2 coherent sides to glue together.");
+                   ". On a classified blocking that is almost always one edge of the sheet joining 2 corners "
+                   "that sit on 2 different vertices of the model: merging them would leave one of those "
+                   "vertices with no corner of the block structure on it, and nothing else records where it "
+                   "was. Otherwise it is a sheet closing back onto itself, or one that would leave an edge "
+                   "joining a corner to itself.");
             return;
         }
         const std::size_t after = m_blocking->nb_cells(3);

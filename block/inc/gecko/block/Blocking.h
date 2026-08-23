@@ -907,14 +907,20 @@ namespace gecko {
          * A sheet holding every block there is collapses like any other, and leaves the blocking
          * empty. That is a state to be in rather than a broken one — it still meshes, and still takes
          * a new block — and it is what taking the last layer out *means*: an unclassified grid can be
-         * dismantled one sheet at a time down to nothing. Only the geometry ever stands in the way,
-         * never the count.
+         * dismantled one sheet at a time down to nothing. The count of blocks is never a reason to
+         * refuse; the geometry is the only thing that ever stands in the way.
+         *
+         * And it does, in exactly one case: an edge of the sheet joining 2 corners classified on 2
+         * *different* model vertices. Collapsing it would leave one of those vertices with no corner
+         * of the block structure on it, and nothing else in the blocking records where it was — see
+         * `on_different_vertices()`.
          *
          * @return false, changing nothing at all, when the sheet cannot be collapsed: when
-         *         `find_sheet()` refuses it, when it closes back onto itself (some corner is an
-         *         endpoint of 2 of its edges, so collapsing would pinch a whole ring of corners into
-         *         one), or when a second edge already joins the 2 corners one of its edges would
-         *         merge, which would leave that edge a loop.
+         *         `find_sheet()` refuses it, when one of its edges joins 2 corners on 2 different
+         *         model vertices, when it closes back onto itself (some corner is an endpoint of 2 of
+         *         its edges, so collapsing would pinch a whole ring of corners into one), or when a
+         *         second edge already joins the 2 corners one of its edges would merge, which would
+         *         leave that edge a loop.
          */
         bool delete_sheet(Edge AEdge, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
             const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
@@ -932,6 +938,7 @@ namespace gecko {
                 if (a == b) return false;
                 if (!endpoints.insert(a).second || !endpoints.insert(b).second) return false;
                 if (edge_joins(a, b, se.edge)) return false;
+                if (on_different_vertices(a, b)) return false;
                 merges.emplace_back(a, b);
             }
 
@@ -1889,6 +1896,38 @@ namespace gecko {
             AFace->info().geom_targets = result.targets;
 
             rebuild_face_surface(AFace);
+        }
+
+        /**
+         * @brief Whether 2 corners sit on 2 *different* vertices of the model.
+         *
+         * The one classification conflict a collapse cannot resolve. Merging these 2 corners would
+         * leave one of the 2 model vertices with no corner of the block structure on it at all, and a
+         * vertex is a feature the structure exists to capture: nothing else in the blocking records
+         * where it was, and no later `classify()` puts a corner back on it. Every other pairing loses
+         * nothing — a corner on a vertex merged with one merely on a curve keeps the vertex, since
+         * the vertex lies on that curve, and 2 corners on 2 curves still land on the surface they
+         * share.
+         *
+         * Being classified on several entities at once is a real state (see `CellInfo::geom_targets`:
+         * a corner near an untagged junction lands on the *group* of curves meeting there), so this
+         * compares the 2 sets of vertex tags rather than a single tag. Same set, nothing is lost.
+         *
+         * @param AA One corner.
+         * @param AB The other.
+         * @return true if both are on vertices and those vertices differ.
+         */
+        static bool on_different_vertices(Node AA, Node AB) {
+            const auto vertices_of = [](const std::vector<std::pair<GroupDim, Int>> &ATargets) {
+                std::set<Int> tags;
+                for (const auto &[dim, tag] : ATargets) {
+                    if (dim == GroupDim::Dim0) tags.insert(tag);
+                }
+                return tags;
+            };
+            const std::set<Int> a = vertices_of(AA->info().geom_targets);
+            const std::set<Int> b = vertices_of(AB->info().geom_targets);
+            return !a.empty() && !b.empty() && a != b;
         }
 
         /**
@@ -3306,22 +3345,6 @@ namespace gecko {
             return -1;
         }
 
-        /** @brief A dart of @p AEdge whose source node is @p AFrom.
-         * @param AEdge The edge to look in.
-         * @param AFrom The node the dart must start at.
-         * @return Such a dart.
-         * @pre @p AFrom must be one of @p AEdge's 2 endpoints. */
-        Dart dart_of_edge_from(Edge AEdge, Node AFrom) {
-            for (auto it = m_cmap.template darts_of_cell<1>(AEdge->dart()).begin(),
-                      itend = m_cmap.template darts_of_cell<1>(AEdge->dart()).end();
-                 it != itend;
-                 ++it) {
-                if (m_cmap.template attribute<0>(it) == AFrom) return it;
-            }
-            assert(false && "Blocking::dart_of_edge_from: node is not an endpoint of the edge");
-            return AEdge->dart();
-        }
-
         /**
          * @brief Moves a curve's 2 end control points exactly onto the 2 nodes it is meant to join.
          *
@@ -3442,7 +3465,6 @@ namespace gecko {
          */
         void split_one_sheet_edge(const SheetEdge &se, double AParam, std::map<Node, MidNode> &AMids) {
             {
-                const bool curve_starts_at_from = (curve_start_node(se.edge) == se.from);
                 const double s = cut_parameter(se, AParam);
                 const TEdgeCurve parent = se.edge->info().curve;
                 const auto [low, high] = parent.split(s);
@@ -3451,25 +3473,36 @@ namespace gecko {
                 // A node born on an edge lies on whatever that edge lies on.
                 mid->info().geom_targets = se.edge->info().geom_targets;
 
-                const Dart d = dart_of_edge_from(se.edge, se.from);
-                const Node other = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                // Whichever dart the edge happens to name, rather than one starting at `se.from`.
+                // A boundary edge of a standalone quad block has exactly *one* dart — nothing is
+                // 2-sewn to it — so only one of its 2 endpoints is the source of any dart of it at
+                // all, and asking for the other one has no answer. A hex's edges hide this: they
+                // carry darts in several faces, in both directions, so the ask always succeeds.
+                const Dart d = se.edge->dart();
+                const Node src = m_cmap.template attribute<0>(d);
+                const Node dst = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                const Node other = (src == se.from) ? dst : src;
+                const Node curve_start = curve_start_node(se.edge);
+
                 const Dart nd = m_cmap.insert_cell_0_in_cell_1(d, mid);
                 // Before anything reads a frame: the insertion can have rebuilt corner attributes,
                 // and a node still carrying id -1 sorts ahead of every real one — so a frame worked
                 // out now would not be the frame this cell has a moment later.
                 assign_missing_node_ids();
 
-                // insert_cell_0_in_cell_1 leaves `d` on the [from, mid] half and returns beta<1>(d),
-                // which carries the [mid, other] one; both inherit the parent's classification
-                // through CellData.h's SplitFunctor, and only the geometry needs setting. Which half
-                // is which follows from where the parent's curve started, a node identity read before
-                // the split — never from where the halves happen to land.
+                // `d` now spans [src, mid] and `nd` the [mid, dst] half; both inherit the parent's
+                // classification through CellData.h's SplitFunctor, and only the geometry needs
+                // setting. Which half goes where follows from where the parent's *curve* started —
+                // `low` runs from there to the cut, `high` from the cut to the far end — matched
+                // against which end of the edge `d` happens to start at. Both are node identities
+                // read before the split, never where the halves happen to land.
+                const bool d_from_curve_start = (src == curve_start);
                 store_curve(m_cmap.template attribute<1>(d),
-                            curve_starts_at_from ? low : high,
-                            curve_starts_at_from ? se.from : mid);
+                            d_from_curve_start ? low : high,
+                            d_from_curve_start ? curve_start : mid);
                 store_curve(m_cmap.template attribute<1>(nd),
-                            curve_starts_at_from ? high : low,
-                            curve_starts_at_from ? mid : other);
+                            d_from_curve_start ? high : low,
+                            d_from_curve_start ? mid : curve_start);
 
                 AMids.emplace(mid, MidNode{se.from, other});
             }
