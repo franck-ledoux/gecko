@@ -87,6 +87,7 @@ namespace gecko::biy {
             read_bool(j, "show_geometry_curves", config.show_geometry_curves);
             read_bool(j, "show_geometry_points", config.show_geometry_points);
             read_bool(j, "show_mesh", config.show_mesh);
+            read_bool(j, "mesh_color_by_block", config.mesh_color_by_block);
             read_bool(j, "show_edge_control", config.show_edge_control);
             read_bool(j, "show_face_control", config.show_face_control);
             read_bool(j, "show_block_control", config.show_block_control);
@@ -101,6 +102,14 @@ namespace gecko::biy {
             read_bool(j, "show_block_edges", config.show_block_edges);
             read_double(j, "block_edge_radius", config.block_edge_radius);
             read_color(j, "block_edge_color", config.block_edge_color);
+            read_color(j, "sheet_color", config.sheet_color);
+            read_color(j, "collapse_color", config.collapse_color);
+            read_double(j, "sheet_radius", config.sheet_radius);
+            read_color(j, "cut_point_color", config.cut_point_color);
+            read_double(j, "cut_point_radius", config.cut_point_radius);
+            read_double(j, "cut_snap_tolerance", config.cut_snap_tolerance);
+            read_color(j, "delete_highlight_color", config.delete_highlight_color);
+            read_double(j, "delete_highlight_scale", config.delete_highlight_scale);
             message = "Loaded " + path;
         } catch (const nlohmann::json::exception &e) {
             // A broken config shouldn't stop biy from starting: say so and carry on with defaults.

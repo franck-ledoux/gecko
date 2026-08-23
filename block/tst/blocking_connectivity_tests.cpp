@@ -1,4 +1,5 @@
 #include <array>
+#include <cmath>
 #include <filesystem>
 
 #include <gecko/block/Blocking.h>
@@ -143,4 +144,68 @@ TEST_CASE("non_adjacent_blocks_stay_unsewn", "[BlockTestSuite]") {
     REQUIRE(blocking.nb_cells<1>() == 24);
     REQUIRE(blocking.nb_cells<2>() == 12);
     REQUIRE(blocking.nb_cells<3>() == 2);
+}
+
+TEST_CASE("sewing_glues_2_blocks_corner_to_corner_rather_than_a_quarter_turn_out", "[BlockTestSuite]") {
+    // Sewing links darts, and the 2 it links are opposite halves of one edge — so the dart matching
+    // a given one is the dart whose own start is that one's *end*. Testing the alignment against the
+    // dart's start instead is one step out of phase, and because the search then rotates its
+    // candidate until something matches, it does not fail: it succeeds on the neighbouring rotation
+    // and glues every shared face a quarter turn twisted.
+    //
+    // Nothing noticed for a long time. A block's volume is built once from the corners it was created
+    // with, and to_mesh() reconciles the 2 sides of a face by position, so almost nothing reads a
+    // block's structure back out of its darts. Anything that does — move_node(), delete_sheet() —
+    // gets a block whose opposite faces disagree about which way v and w run.
+    //
+    // Stated here as the property that catches it whatever the cause: on an axis-aligned blocking,
+    // the 2 corners of every edge differ in exactly 1 coordinate.
+    const FacetedGeometry geom = make_minimal_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_hex_block({Point3d(0, 0, 0),
+                               Point3d(1, 0, 0),
+                               Point3d(1, 1, 0),
+                               Point3d(0, 1, 0),
+                               Point3d(0, 0, 1),
+                               Point3d(1, 0, 1),
+                               Point3d(1, 1, 1),
+                               Point3d(0, 1, 1)});
+    blocking.create_hex_block({Point3d(1, 0, 0),
+                               Point3d(2, 0, 0),
+                               Point3d(2, 1, 0),
+                               Point3d(1, 1, 0),
+                               Point3d(1, 0, 1),
+                               Point3d(2, 0, 1),
+                               Point3d(2, 1, 1),
+                               Point3d(1, 1, 1)});
+
+    auto &map = blocking.cmap();
+    const auto skew_darts = [&map]() {
+        int skew = 0;
+        for (auto d = map.darts().begin(), end = map.darts().end(); d != end; ++d) {
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            int differing = 0;
+            if (std::abs(a.x() - b.x()) > 1e-9) ++differing;
+            if (std::abs(a.y() - b.y()) > 1e-9) ++differing;
+            if (std::abs(a.z() - b.z()) > 1e-9) ++differing;
+            if (differing != 1) ++skew;
+        }
+        return skew;
+    };
+
+    REQUIRE(skew_darts() == 0);
+    blocking.build_connectivity();
+    REQUIRE(skew_darts() == 0);
+    REQUIRE(blocking.is_valid_topology());
+
+    // And the consequence the property is there to protect: a block rebuilt from its own darts still
+    // measures what it looks like. move_node() to where the corner already is rebuilds every cell
+    // touching it without moving anything.
+    const auto corner = map.attributes<0>().begin();
+    blocking.move_node(corner, corner->info().point);
+    for (const double v : blocking.block_volumes(2)) {
+        REQUIRE(v > 0.99);
+        REQUIRE(v < 1.01);
+    }
 }

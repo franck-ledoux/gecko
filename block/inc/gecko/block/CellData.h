@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -34,6 +35,18 @@ namespace gecko {
     struct NodeInfo : CellInfo {
         /** @brief Spatial location of the node. */
         Point3d point;
+        /**
+         * @brief A number identifying this node for as long as it exists, handed out by
+         * `Blocking::create_node()` and never reused.
+         *
+         * There to give the class a *stable* total order on nodes, which the canonical local frames
+         * of faces and blocks are built from (see `Blocking::face_local_nodes()`). Attribute handles
+         * cannot serve: CGAL discards and rebuilds an attribute whenever the orbit behind it is
+         * disturbed — which deleting a neighbouring block does — and a frame ordered by handles then
+         * silently rotates underneath the surface stored in it. An id copied by `SplitFunctor`
+         * survives exactly those rebuilds.
+         */
+        Int id = -1;
     };
 
     /**
@@ -56,6 +69,18 @@ namespace gecko {
     struct FaceInfo : CellInfo {
         /** @brief The face's own surface, built via Coons construction from its 4 boundary edges. */
         TFaceSurface surface;
+        /**
+         * @brief The `NodeInfo::id` of each of the 4 corners `surface` is parameterized against, at
+         * `(u,v)` = (0,0), (1,0), (1,1), (0,1); all -1 until the face has a surface.
+         *
+         * Recorded rather than re-derived, and that is the whole point. A local frame worked out
+         * from the face on demand — from its dart, from an ordering of its corners — rests on
+         * something CGAL is free to change underneath it, and when it changes the surface stored in
+         * that frame quietly reads back rotated or mirrored. Writing the frame down alongside the
+         * surface it belongs to removes the question: whoever reads it later matches these ids
+         * against the face's corners and gets the frame the surface was actually written in.
+         */
+        std::array<Int, 4> frame{-1, -1, -1, -1};
     };
 
     /**
@@ -67,6 +92,10 @@ namespace gecko {
     struct BlockInfo : CellInfo {
         /** @brief The block's own volume, built via TFI construction from its 6 bounding faces. */
         TBlockVolume volume;
+        /** @brief The `NodeInfo::id` of each of the 8 corners `volume` is parameterized against, in
+         * `HEX_CORNER_UVW` order; all -1 until the block has a volume.
+         * @see FaceInfo::frame for why the frame is recorded and not re-derived. */
+        std::array<Int, 8> frame{-1, -1, -1, -1, -1, -1, -1, -1};
     };
 
     /**
@@ -95,6 +124,32 @@ namespace gecko {
      * Not exercised by any operation this module currently implements (no sheet-cut/pillow-style
      * topology edits), but CGAL's `Cell_attribute` requires a valid functor type regardless.
      */
+    /**
+     * @struct NodeSplitFunctor
+     * @brief `Cell_attribute` on-split functor for node attributes: copies the original's data,
+     * id included.
+     *
+     * CGAL splits a node attribute whenever the vertex orbit behind it comes apart — which deleting
+     * a neighbouring block does — and the copy is still, geometrically and to every cell that has
+     * one as a corner, the same corner. Keeping the id is what lets a cell find its own recorded
+     * frame again afterwards (see `FaceInfo::frame`): the ids in a frame are matched against one
+     * cell's own corners, where 2 copies of a single original node never appear together, so they
+     * need only be unique within a cell and not across the map.
+     */
+    struct NodeSplitFunctor {
+        /**
+         * @brief Splits a node attribute, copying its data onto the new one but leaving that one's
+         * id unset.
+         * @tparam TCellAttribute A `CGAL::Cell_attribute` instantiation over `NodeInfo`.
+         * @param ACA1 The original attribute, whose data is copied.
+         * @param ACA2 The newly-created attribute.
+         */
+        template<class TCellAttribute>
+        void operator()(TCellAttribute &ACA1, TCellAttribute &ACA2) const {
+            ACA2.info() = ACA1.info();
+        }
+    };
+
     struct SplitFunctor {
         /**
          * @brief Splits a cell attribute by copying its data onto the newly-created second one.
@@ -127,7 +182,7 @@ namespace gecko {
         template<class TCMap>
         struct Dart_wrapper {
             /** @brief Node (0-cell) attribute type. */
-            using Node_attr = CGAL::Cell_attribute<TCMap, NodeInfo, CGAL::Tag_true, MergeFunctor, SplitFunctor>;
+            using Node_attr = CGAL::Cell_attribute<TCMap, NodeInfo, CGAL::Tag_true, MergeFunctor, NodeSplitFunctor>;
             /** @brief Edge (1-cell) attribute type. */
             using Edge_attr =
                 CGAL::Cell_attribute<TCMap, EdgeInfo<TEdgeCurve>, CGAL::Tag_true, MergeFunctor, SplitFunctor>;

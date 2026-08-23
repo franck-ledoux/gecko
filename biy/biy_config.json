@@ -32,6 +32,15 @@
   "block_edge_radius": 0.003,
   "block_edge_color": [0.15, 0.15, 0.15],
 
+  "sheet_color": [0.98, 0.55, 0.05],
+  "collapse_color": [0.35, 0.75, 0.95],
+  "sheet_radius": 0.007,
+  "cut_point_color": [1.0, 0.95, 0.2],
+  "cut_point_radius": 0.013,
+  "cut_snap_tolerance": 0.04,
+  "delete_highlight_color": [0.9, 0.15, 0.2],
+  "delete_highlight_scale": 1.02,
+
   "show_edge_control": false,
   "show_face_control": false,
   "show_block_control": false,
@@ -43,6 +52,7 @@
 
   "mesh_color": [0.6, 0.6, 0.65],
   "show_mesh": false,
+  "mesh_color_by_block": false,
 
   "tol_vertex": 0.1,
   "tol_curve": 0.1,

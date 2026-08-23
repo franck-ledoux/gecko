@@ -111,17 +111,17 @@ namespace gecko {
     template<typename T>
     concept EdgeCurveConcept =
         std::default_initializable<T> && requires(T curve, const T const_curve, double t, std::size_t i) {
-            { T::Degree } -> std::convertible_to<std::size_t>;
-            { T::NumControlPoints } -> std::convertible_to<std::size_t>;
+            // Degree is asked of the *object*, not of the type: a block structure has to be able to
+            // change order while it is being edited, which a degree fixed in the type cannot do.
+            { const_curve.degree() } -> std::convertible_to<std::size_t>;
+            { const_curve.nb_control_points() } -> std::convertible_to<std::size_t>;
+            { T(i) };
             { const_curve.value(t) } -> std::same_as<Point3d>;
             { const_curve.control_points() } -> std::ranges::range;
             { const_curve[i] } -> std::same_as<const Point3d &>;
             { curve[i] } -> std::same_as<Point3d &>;
             typename CurveSurfaceTraits<T>::Surface;
         };
-    static_assert(EdgeCurveConcept<BezierCurve<1, Point3d>>,
-                  "BezierCurve<1,Point3d> (linear) must satisfy EdgeCurveConcept");
-    static_assert(EdgeCurveConcept<BezierCurve<3, Point3d>>,
-                  "BezierCurve<3,Point3d> (cubic) must satisfy EdgeCurveConcept");
+    static_assert(EdgeCurveConcept<BezierCurve<Point3d>>, "BezierCurve<Point3d> must satisfy EdgeCurveConcept");
 
 } // namespace gecko

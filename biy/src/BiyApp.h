@@ -26,8 +26,25 @@ namespace gecko::biy {
      * a per-event decision.
      */
     enum class MouseMode {
-        Camera, ///< Polyscope's usual navigation: rotate/pan/zoom the view.
-        Edit    ///< Navigation off; dragging picks up and moves a block corner.
+        Camera,   ///< Polyscope's usual navigation: rotate/pan/zoom the view.
+        Edit,     ///< Navigation off; dragging picks up and moves a block corner.
+        Cut,      ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
+        Collapse, ///< Navigation off; hovering an edge lights its sheet, clicking collapses it away.
+        Delete    ///< Navigation off; hovering a block highlights it, clicking deletes it.
+    };
+
+    /**
+     * @enum MeshColoring
+     * @brief How the generated mesh is coloured.
+     *
+     * Subdividing a blocking hides the very thing it was built from: past 2 or 3 intervals the block
+     * edges disappear under the cells, and a uniformly coloured mesh says nothing about which block
+     * any part of it came from. One hue per block puts that back without needing the block structure
+     * drawn on top of it.
+     */
+    enum class MeshColoring {
+        Uniform, ///< One `mesh_color` for the whole mesh.
+        ByBlock  ///< One hue per block, spread over every cell that block generated.
     };
 
     /**
@@ -46,6 +63,12 @@ namespace gecko::biy {
          * grows cubically with it — 20 is already 8000 hexes per block — and the window becomes
          * unusable well before anything else complains. */
         static constexpr int MAX_SUBDIVISIONS = 20;
+
+        /** @brief Highest edge order the panel offers. Nothing in the kernel caps the degree — it is
+         * a plain number carried by each curve — but a fit has only so much to say: past this the
+         * extra control points crowd together without following the model any closer, and each one
+         * costs on every face and block that touches the edge. */
+        static constexpr int MAX_ORDER = 10;
 
         /**
          * @brief Constructor. Loads the geometric model and registers it for display.
@@ -161,6 +184,43 @@ namespace gecko::biy {
         void draw_panel();
         /** @brief Starts/continues/ends a corner drag from the current mouse state. */
         void handle_drag();
+        /** @brief Tracks what the cursor is over in Cut mode, previewing the sheet it would cut, and
+         * performs the cut on a click or on space. */
+        void handle_cut();
+        /** @brief Cuts the sheet the preview is currently showing, reporting what happened both in
+         * the status line and on the terminal.
+         * @param trigger How the cut was asked for, for the terminal line ("click" or "space"). */
+        void perform_cut(const char *trigger);
+        /** @brief Tracks what the cursor is over in Collapse mode, lighting the sheet it would take
+         * out, and collapses it on a click or on space. */
+        void handle_collapse();
+        /** @brief Collapses the sheet the preview is currently showing, reporting what happened both
+         * in the status line and on the terminal.
+         * @param trigger How the collapse was asked for, for the terminal line. */
+        void perform_collapse(const char *trigger);
+        /** @brief Tracks which block the cursor is over in Delete mode, highlighting it, and deletes
+         * it on a click or on space. */
+        void handle_delete();
+        /** @brief Re-reads which block the cursor is over.
+         * @param screen_coords Current mouse position. */
+        void update_delete_hover(glm::vec2 screen_coords);
+        /** @brief Registers (or removes, when nothing is hovered) the highlight on the block about to
+         * be deleted. */
+        void refresh_delete_preview();
+        /** @brief Deletes the block the highlight is currently showing, reporting what happened both
+         * in the status line and on the terminal.
+         * @param trigger How the deletion was asked for, for the terminal line. */
+        void perform_delete(const char *trigger);
+        /** @brief Re-reads which edge the cursor is over and rebuilds the cut preview from it.
+         * @param screen_coords Current mouse position. */
+        void update_cut_hover(glm::vec2 screen_coords);
+        /** @brief Registers (or removes, when nothing is hovered) the sheet highlight and the markers
+         * showing where the cut would land. */
+        void refresh_cut_preview();
+        /** @brief A visually distinct colour for each block, from its index alone.
+         * @param index The block's position in the blocking's own block order.
+         * @return Its colour. */
+        static glm::vec3 block_color(int index);
         /** @brief Reprojects screen coordinates onto the camera-facing plane through @p AAnchor. */
         static glm::vec3 screen_to_plane(glm::vec2 screen_coords, const glm::vec3 &anchor);
 
@@ -177,10 +237,29 @@ namespace gecko::biy {
         MouseMode m_mode = MouseMode::Camera;
         /** @brief Node id of the corner currently being dragged, if any. */
         std::optional<int> m_dragged_node;
+        /** @brief Edge the cursor is currently over in Cut mode, as a position in the order
+         * `BlockingFacade::sheet_edges()` speaks, or unset when the cursor is over no edge. */
+        std::optional<int> m_hover_edge;
+        /** @brief The sheet that edge belongs to, as those same positions — empty when it cannot be
+         * cut homogeneously, which is itself worth showing rather than hiding. */
+        std::vector<int> m_sheet;
+        /** @brief Where along the hovered edge the cut would fall. Driven by the cursor, and editable
+         * as a number in the panel for a cut that has to land on an exact value. */
+        float m_cut_param = 0.5f;
+        /** @brief Last position the cut hover was computed for, so a still cursor costs nothing:
+         * each hover test is a full Polyscope pick, which is a render pass. */
+        glm::vec2 m_last_cut_mouse{-1.0f, -1.0f};
+        /** @brief Block the cursor is currently over in Delete mode, as a position in the order
+         * `BlockingFacade::delete_block()` speaks, or unset when the cursor is over none. */
+        std::optional<int> m_hover_block;
+        /** @copydoc m_last_cut_mouse */
+        glm::vec2 m_last_delete_mouse{-1.0f, -1.0f};
         /** @brief Subdivisions used when displaying the blocking (1 = raw block structure). */
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */
         bool m_show_block_edges = true;
+        /** @brief How the generated mesh is currently coloured. */
+        MeshColoring m_mesh_coloring = MeshColoring::Uniform;
         /** @brief Whether the generated mesh is currently drawn. */
         bool m_show_mesh = false;
         /** @brief Whether each kind of control display is currently drawn. */
@@ -191,7 +270,9 @@ namespace gecko::biy {
         bool m_show_block_control = false;
         /** @brief Samples per block edge; > 1 traces a curved edge rather than its chord. */
         int m_edge_samples = 8;
-        /** @brief Edge order of the blocking, fixed at construction (see the `order` argument). */
+        /** @brief Edge order the blocking is currently built at. Changeable from the panel — the
+         * degree is carried by the geometry rather than by its C++ type, so raising or lowering it
+         * refits the structure in place instead of needing a new one. */
         int m_order = 3;
         /** @brief Per-dimension snapping tolerances, shared by the "Classify" button and by the
          * snap that runs when a dragged corner is released. Separate values because the scales

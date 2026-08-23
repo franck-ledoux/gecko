@@ -69,7 +69,8 @@ namespace gecko::python {
                  py::arg("degree") = 1,
                  py::keep_alive<1, 2>(),
                  "Builds an empty blocking against model (degree=1: straight edges, degree=3: cubic Bezier edges). "
-                 "model must be kept alive for as long as this Blocking is used.")
+                 "The degree can be changed later with set_degree(). model must be kept alive for as long as this "
+                 "Blocking is used.")
             .def("create_quad_block",
                  &BlockingFacade::create_quad_block,
                  py::arg("corners"),
@@ -78,11 +79,21 @@ namespace gecko::python {
             .def("create_hex_block",
                  &BlockingFacade::create_hex_block,
                  py::arg("corners"),
-                 "Creates a standalone hex block from its 8 (x,y,z) corners (HEX8 ordering). Returns the new block id.")
+                 "Creates a standalone hex block from its 8 (x,y,z) corners (HEX8 ordering). Returns where it sits in "
+                 "the block traversal — a position, not a lasting id: cutting or deleting renumbers what follows.")
             .def("build_connectivity",
                  &BlockingFacade::build_connectivity,
                  "Auto-detects and sews coincident blocks created so far. Not incremental.")
-            .def("degree", &BlockingFacade::degree, "Edge curve degree this blocking was built with.")
+            .def("degree", &BlockingFacade::degree, "Edge curve degree this blocking currently uses.")
+            .def("set_degree",
+                 &BlockingFacade::set_degree,
+                 py::arg("degree"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Rebuilds every edge, face and block at a new degree and refits them onto the model. Topology and "
+                 "classification are untouched; raising the order lets an edge that lies on a curved model curve "
+                 "actually follow it instead of cutting across as a chord.")
             .def("classify",
                  &BlockingFacade::classify,
                  py::arg("tol_vertex"),
@@ -188,7 +199,66 @@ namespace gecko::python {
                  py::arg("subdivisions"),
                  py::arg("path"),
                  "Generates a mesh reproducing the blocking (subdivided ``subdivisions`` times per axis) and writes "
-                 "it as a VTK legacy ASCII file.");
+                 "it as a VTK legacy ASCII file.")
+            .def("block_volumes",
+                 &BlockingFacade::block_volumes,
+                 py::arg("subdivisions") = 1,
+                 "Signed volume of every block, from its own stored geometry. Exact at 1 subdivision for a block "
+                 "with planar faces; converges as it grows for a curved one. A negative value means that block's "
+                 "frame is inverted.")
+            .def("edge_bends",
+                 &BlockingFacade::edge_bends,
+                 "How far each edge departs from a straight line — the largest distance from one of its interior "
+                 "control points to its own chord. A straight blocking reads as zero here whatever is done to it.")
+            .def("delete_block",
+                 &BlockingFacade::delete_block,
+                 py::arg("block_index"),
+                 "Deletes one block, along with every face, edge and corner that existed only because of it. "
+                 "What it shared with a neighbouring block stays, as that neighbour's boundary.")
+            .def("sheet_edges",
+                 &BlockingFacade::sheet_edges,
+                 py::arg("edge_index"),
+                 "Every edge ``cut_sheet`` would split if aimed at ``edge_index`` — the whole sheet, as positions in "
+                 "the same order ``edge_vertices``/``edge_segments`` use. Empty when the sheet cannot be cut.")
+            .def("sheet_cut_points",
+                 &BlockingFacade::sheet_cut_points,
+                 py::arg("edge_index"),
+                 py::arg("param"),
+                 "Where a cut would land: one point per sheet edge, in the same order ``sheet_edges`` reports, each "
+                 "on the side the whole sheet agrees on. Empty when the sheet cannot be cut.")
+            .def("cut_sheet",
+                 &BlockingFacade::cut_sheet,
+                 py::arg("edge_index"),
+                 py::arg("param"),
+                 "Cuts the blocking along the whole sheet through ``edge_index``, at ``param`` along that edge "
+                 "(strictly between 0 and 1), splitting every block the sheet crosses in 2 and keeping the geometry "
+                 "it cut through exactly. Returns False, changing nothing, if the cut is not possible.")
+            .def("mesh_hex_owners",
+                 &BlockingFacade::mesh_hex_owners,
+                 py::arg("subdivisions") = 1,
+                 "Which block each hex of ``mesh_hexes`` came from, as a position in the block order "
+                 "``block_volumes``/``delete_block`` speak — one entry per hex, so a per-block value can be spread "
+                 "onto every cell subdividing it.")
+            .def("mesh_quad_owners",
+                 &BlockingFacade::mesh_quad_owners,
+                 py::arg("subdivisions") = 1,
+                 "Which block each quad of ``mesh_quads`` came from, counting standalone quad blocks in the order "
+                 "they are emitted. Not an index into ``face_classification_dims``: a hex's own bounding faces "
+                 "generate no mesh quads and are not counted.")
+            .def("delete_sheet",
+                 &BlockingFacade::delete_sheet,
+                 py::arg("edge_index"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Deletes the whole sheet through ``edge_index``, collapsing every block it crosses and gluing back "
+                 "what was either side of it — the inverse of ``cut_sheet``. Where 2 corners merge, the more "
+                 "constrained classification wins (a model vertex over a curve, a curve over a surface) and the "
+                 "merged corner is projected onto it. A sheet holding every block there is collapses too, leaving "
+                 "the blocking empty — so an unclassified grid can be taken apart one sheet at a time. Returns "
+                 "False, changing nothing, when one of the sheet's edges joins 2 corners on 2 *different* model "
+                 "vertices (merging them would leave one of those vertices with no corner on it), or when the sheet "
+                 "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.");
     }
 
 } // namespace gecko::python

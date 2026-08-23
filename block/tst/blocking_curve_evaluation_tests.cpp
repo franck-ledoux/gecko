@@ -36,13 +36,13 @@ namespace {
 } // namespace
 
 TEST_CASE("cubic_hex_block_straight_edges_evaluate_identically_to_linear", "[BlockTestSuite]") {
-    // Blocking<..., BezierCurve<3,Point3d>> — degree N=3 ("curved" instantiation) — but every edge
+    // Blocking<..., BezierCurve<Point3d>> — degree N=3 ("curved" instantiation) — but every edge
     // is still built straight (evenly-spaced colinear control points), so it must evaluate exactly
     // like the N=1 case at every parameter, not just at the corners: this is what "N=1 collapses
     // exactly to linear blocking through the same construction" (see CoonsPatch.h) actually means
     // in practice for a real Blocking instantiation, not just the math functions in isolation.
     const FacetedGeometry geom = make_minimal_geom_model();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
 
     const std::array<Point3d, 8> corners = {
         Point3d(0.0, 0.0, 0.0),
@@ -84,9 +84,9 @@ TEST_CASE("cubic_hex_block_straight_edges_evaluate_identically_to_linear", "[Blo
          ++it) {
         const auto &curve = it->info().curve;
         const Point3d a = curve.control_points()[0];
-        const Point3d b = curve.control_points()[curve.NumControlPoints - 1];
-        for (std::size_t i = 0; i < curve.NumControlPoints; ++i) {
-            const double t = static_cast<double>(i) / static_cast<double>(curve.NumControlPoints - 1);
+        const Point3d b = curve.control_points()[curve.nb_control_points() - 1];
+        for (std::size_t i = 0; i < curve.nb_control_points(); ++i) {
+            const double t = static_cast<double>(i) / static_cast<double>(curve.nb_control_points() - 1);
             const Point3d expected = a + Vector3d(a, b) * t;
             const Point3d actual = curve.control_points()[i];
             REQUIRE(actual.x() == Approx(expected.x()).margin(1e-9));
@@ -98,7 +98,7 @@ TEST_CASE("cubic_hex_block_straight_edges_evaluate_identically_to_linear", "[Blo
 
 TEST_CASE("cubic_quad_block_straight_surface_evaluates_identically_to_linear", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_minimal_geom_model();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
 
     const std::array<Point3d, 4> corners = {
         Point3d(0.0, 0.0, 0.0), Point3d(2.0, 0.0, 0.0), Point3d(2.0, 2.0, 0.0), Point3d(0.0, 2.0, 0.0)};

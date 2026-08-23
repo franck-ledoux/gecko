@@ -82,6 +82,11 @@ namespace gecko::biy {
         /** @copydoc show_geometry_volumes */
         bool show_mesh = false;
 
+        /** @brief Whether the generated mesh starts coloured one hue per block rather than in a
+         * single `mesh_color`. Which block a cell came from is otherwise invisible once the mesh is
+         * fine enough to hide the block edges under it. */
+        bool mesh_color_by_block = false;
+
         /** @brief Whether edges' control points and control polygons are drawn at startup. */
         bool show_edge_control = false;
         /** @brief Whether faces' control points and control nets are drawn at startup. */
@@ -114,6 +119,31 @@ namespace gecko::biy {
         double block_edge_radius = 0.003;
         /** @brief Color of those edges. */
         std::array<float, 3> block_edge_color{0.15f, 0.15f, 0.15f};
+
+        /** @brief Color the sheet under the cursor is highlighted in, in Cut mode. */
+        std::array<float, 3> sheet_color{0.98f, 0.55f, 0.05f};
+
+        /** @brief Color the sheet is highlighted in, in Collapse mode — deliberately not Cut's. The
+         * 2 modes light up the very same thing, so the colour is the only thing that says whether a
+         * click splits that sheet or takes it away. */
+        std::array<float, 3> collapse_color{0.35f, 0.75f, 0.95f};
+        /** @brief Thickness of that highlight; wants to be thicker than `block_edge_radius` so the
+         * sheet reads clearly on top of the edges it covers. */
+        double sheet_radius = 0.007;
+        /** @brief Color of the markers showing where a cut would land on each sheet edge. */
+        std::array<float, 3> cut_point_color{1.0f, 0.95f, 0.2f};
+        /** @brief Size of those markers. */
+        double cut_point_radius = 0.013;
+        /** @brief How close to the middle of an edge the cursor has to get before the cut parameter
+         * snaps to exactly 0.5 — cutting in half being by far the common case. */
+        double cut_snap_tolerance = 0.04;
+
+        /** @brief Color the block under the cursor is drawn in, in Delete mode. */
+        std::array<float, 3> delete_highlight_color{0.9f, 0.15f, 0.2f};
+        /** @brief How much larger than the block itself its Delete-mode highlight is drawn, about the
+         * block's own centre. Must be greater than 1: drawn at the same size it would sit exactly on
+         * the block's faces and z-fight with them, which reads as nothing at all. */
+        double delete_highlight_scale = 1.02;
 
         /**
          * @brief Picks the color a corner should be drawn in.

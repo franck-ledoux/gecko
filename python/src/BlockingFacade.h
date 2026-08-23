@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <set>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 #include <gecko/block/Blocking.h>
@@ -23,30 +23,44 @@ namespace gecko::python {
      * plain int ids assigned by this façade, never a gecko::Point3d or CGAL dart/attribute handle
      * — see docs/user-guide/python.md.
      *
-     * TEdgeCurve's degree (1 = straight, 2/3/4 = Bezier of that order) is chosen at construction
-     * time via a plain int, instead of being a compile-time Python-visible axis: internally this
-     * holds one of a std::variant of degree-specific implementations. The degree cannot be changed
-     * afterwards — it is baked into the C++ type — so build a new Blocking to work at another order.
+     * The edge curve degree (1 = straight, higher = Bezier of that order) is a plain int, given at
+     * construction and changeable afterwards through set_degree(). It used to be neither: the degree
+     * was a C++ template parameter, so this façade held a std::variant of one implementation per
+     * degree, could offer only the degrees it had instantiated, and could not change one without
+     * building a whole new Blocking.
      */
     class BlockingFacade {
     public:
-        /** @brief Lowest edge curve degree this facade can instantiate. */
+        /** @brief Lowest usable edge curve degree. 1 is a straight edge. */
         static constexpr int MIN_DEGREE = 1;
-        /** @brief Highest edge curve degree this facade can instantiate. */
-        static constexpr int MAX_DEGREE = 4;
 
         /**
          * @brief Constructor.
          * @param model The geometric model to build against; must outlive this Blocking (enforced
          *        on the Python side via py::keep_alive).
-         * @param degree Edge curve degree: 1 for straight edges, 2/3/4 for Bezier curves of that
-         *        order.
-         * @throw std::invalid_argument if @p degree is outside [MIN_DEGREE, MAX_DEGREE].
+         * @param degree Edge curve degree: 1 for straight edges, higher for Bezier curves of that
+         *        order. Changeable afterwards through set_degree().
+         * @throw std::invalid_argument if @p degree is below MIN_DEGREE.
          */
         explicit BlockingFacade(const GeomModelFacade &model, int degree = 1);
 
-        /** @brief Gets the edge curve degree this blocking was built with. @return The degree. */
+        /** @brief Gets the edge curve degree this blocking currently uses. @return The degree. */
         [[nodiscard]] int degree() const;
+
+        /**
+         * @brief Rebuilds every edge, face and block at a new degree, refitting them onto the model.
+         *
+         * Topology and classification are untouched; only the representation changes. Raising the
+         * order does not merely add control points, it uses them: an edge lying on a curved model
+         * curve, which at degree 1 could only be its chord, comes back following it.
+         * @param degree The new degree, at least MIN_DEGREE.
+         * @param tol_vertex Tolerance for snapping onto a vertex, as classify() takes it.
+         * @param tol_curve Tolerance for snapping onto a curve; defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface; defaults to the resolved curve
+         *        tolerance.
+         * @throw std::invalid_argument if @p degree is below MIN_DEGREE.
+         */
+        void set_degree(int degree, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
 
         /**
          * @brief Creates a new, unsewn quad block.
@@ -60,10 +74,35 @@ namespace gecko::python {
          * @brief Creates a new, unsewn hex block.
          * @param corners The 8 corner positions, each an (x,y,z) triple — see
          *        gecko::Blocking::create_hex_block for the expected HEX8 ordering.
-         * @return The id assigned to the newly created block.
+         * @return Where the new block sits in the block traversal — the order mesh_hexes() emits its
+         *         cells in, and the one delete_block()/block_volumes() speak. A position, not a
+         *         lasting id: cutting or deleting renumbers what follows.
          * @throw std::invalid_argument if @p corners doesn't have exactly 8 entries.
          */
         int create_hex_block(const std::vector<std::array<double, 3>> &corners);
+
+        /**
+         * @brief How far each edge departs from a straight line: the largest distance from one of its
+         * interior control points to the chord joining its 2 endpoints, per edge.
+         *
+         * A diagnostic rather than a modelling quantity. A straight blocking must read as zero here
+         * whatever has been done to it — cutting a straight edge gives straight halves, and deleting
+         * moves nothing — so a non-zero entry with nothing classified to justify it means the
+         * geometry has been corrupted, and a zero one while the screen shows curves means the
+         * drawing has.
+         *
+         * @return One deviation per edge, in the order edge_vertices()/edge_classification_dims()
+         *         use. Always 0 at degree 1, whose edges cannot bend.
+         */
+        [[nodiscard]] std::vector<double> edge_bends() const;
+
+        /**
+         * @brief Deletes one block, along with every face, edge and corner that existed only because
+         * of it — what it shared with a neighbouring block stays, as that neighbour's boundary.
+         * @param block_index A block, as its position in the order mesh_hexes()/block_volumes() use.
+         * @throw std::out_of_range if @p block_index is not a block of this blocking.
+         */
+        void delete_block(int block_index);
 
         /** @brief Auto-detects and sews coincident blocks created so far. Not incremental. */
         void build_connectivity();
@@ -273,14 +312,103 @@ namespace gecko::python {
          * @return One 8-tuple of mesh_vertices() indices per hex.
          */
         [[nodiscard]] std::vector<std::array<int, 8>> mesh_hexes(int subdivisions);
+        /**
+         * @brief Which block each hex of mesh_hexes() was generated from, so a per-block value can
+         * be spread onto every cell subdividing it — one colour per block, say.
+         * @param subdivisions Number of intervals per parametric axis (>= 1); must match the one
+         *        mesh_hexes() was called with, since it sets how many cells each block contributes.
+         * @return One index into the block order — the one block_volumes()/delete_block() speak —
+         *         per entry of mesh_hexes().
+         */
+        [[nodiscard]] std::vector<int> mesh_hex_owners(int subdivisions);
+        /**
+         * @brief Which block each quad of mesh_quads() was generated from — the 2D counterpart of
+         * mesh_hex_owners().
+         * @param subdivisions Number of intervals per parametric axis (>= 1); must match the one
+         *        mesh_quads() was called with.
+         * @return One index per entry of mesh_quads(), counting standalone quad blocks in the order
+         *         they are emitted in. A hex's own bounding faces generate no mesh quads and are not
+         *         counted, so this is *not* an index into face_classification_dims().
+         */
+        [[nodiscard]] std::vector<int> mesh_quad_owners(int subdivisions);
 
-        /** @brief Per-degree state; public only so the .cpp's free-function helpers can name it —
-         * never part of the class' actual (Python-facing) interface. */
-        template<std::size_t N>
+        /**
+         * @brief The edges cut_sheet() would split if aimed at @p edge_index — the whole sheet, not
+         * just the one edge — so a caller can show what a cut is about to do before doing it.
+         * @param edge_index An edge, as its position in the order edge_vertices()/edge_segments()/
+         *        edge_classification_dims() all use.
+         * @return Those same positions, for every edge of the sheet (@p edge_index included), or an
+         *         empty list when the sheet cannot be cut homogeneously.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        /**
+         * @brief Measures every block of the blocking, from its own stored geometry.
+         * @param subdivisions Intervals per parametric axis (>= 1). Exact at 1 for a block whose
+         *        faces are planar; converges as it grows for a curved or warped one.
+         * @return One signed volume per block, in the order nb_cells(3) counts them. A negative
+         *         value means that block's frame is inverted.
+         */
+        [[nodiscard]] std::vector<double> block_volumes(int subdivisions);
+
+        [[nodiscard]] std::vector<int> sheet_edges(int edge_index);
+
+        /**
+         * @brief Where a cut would actually land: one point per sheet edge, each on the side the
+         * sheet agrees on, so the whole cut locus can be shown before committing to it.
+         * @param edge_index An edge, in the same order sheet_edges() uses.
+         * @param param Where along that edge to cut, strictly inside (0, 1).
+         * @return One point per edge of the sheet, in sheet_edges() order, or an empty list when the
+         *         sheet cannot be cut homogeneously.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        [[nodiscard]] std::vector<std::array<double, 3>> sheet_cut_points(int edge_index, double param);
+
+        /**
+         * @brief Cuts the blocking along the whole sheet through one edge, splitting every block the
+         * sheet crosses in 2 and keeping the geometry it cut through exactly (see
+         * `Blocking::cut_sheet()`).
+         * @param edge_index An edge, in the same order sheet_edges() uses.
+         * @param param Where along that edge to cut, measured along its own curve exactly as
+         *        edge_vertices() samples it, strictly inside (0, 1).
+         * @return false, changing nothing, if @p param is out of range or the sheet cannot be cut
+         *         homogeneously.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        bool cut_sheet(int edge_index, double param);
+
+        /**
+         * @brief Deletes the whole sheet through one edge, gluing back what was either side of it —
+         * the inverse of cut_sheet() (see `Blocking::delete_sheet()`).
+         *
+         * Merging 2 corners into 1 means one of their 2 classifications has to go, and the more
+         * constrained side wins: a corner on a model vertex beats one on a curve, which beats one on
+         * a surface, and the merged corner is projected onto the winner. So a block structure fitted
+         * to a model does not drift off its features when a layer is taken out of it.
+         *
+         * @param edge_index An edge of the sheet, in the same order sheet_edges() uses.
+         * @param tol_vertex Tolerance for snapping onto a vertex, as classify() defines it — used
+         *        only where a refitted cell has to fall back on a proximity search.
+         * @param tol_curve Tolerance for snapping onto a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * A sheet holding every block there is collapses like any other and leaves the blocking
+         * empty — a state to be in rather than a broken one, and what taking the last layer out
+         * means. The count of blocks is never a reason to refuse; the geometry is the only thing that
+         * ever stands in the way, and it does so in exactly one case: an edge of the sheet joining 2
+         * corners classified on 2 *different* model vertices. Merging those would leave one of the 2
+         * vertices with no corner of the block structure on it, and nothing else records where it
+         * was.
+         *
+         * @return false, changing nothing, when the sheet cannot be collapsed — see
+         *         `Blocking::delete_sheet()` for the cases.
+         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         */
+        bool delete_sheet(int edge_index, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
+
+        /** @brief The blocking and the id books kept alongside it; public only so the .cpp's
+         * free-function helpers can name it — never part of the class' actual (Python-facing)
+         * interface. */
         struct Impl {
-            using BlockingT = Blocking<FacetedGeometry, BezierCurve<N, Point3d>>;
-            /** @brief The edge curve degree this alternative was instantiated for. */
-            static constexpr int DEGREE = static_cast<int>(N);
+            using BlockingT = Blocking<FacetedGeometry>;
 
             BlockingT blocking;
             std::unordered_map<int, typename BlockingT::Face> faces_by_id;
@@ -289,7 +417,29 @@ namespace gecko::python {
             int next_block_id = 0;
             int next_node_id = 0;
 
-            explicit Impl(const FacetedGeometry &geom) : blocking(geom) {}
+            explicit Impl(const FacetedGeometry &geom, int degree) : blocking(geom, static_cast<std::size_t>(degree)) {}
+
+            /**
+             * @brief Drops every id whose node attribute no longer exists.
+             *
+             * Deleting a block garbage-collects the corners it alone owned, and sewing merges pairs
+             * of coincident ones — either way the id map is left holding handles to attributes that
+             * are gone, and node_position()/node_classification_dims() would read freed memory
+             * through them. Membership is decided by comparing handles against the live ones, which
+             * never dereferences a stale one.
+             */
+            void forget_stale_nodes() {
+                auto &map = blocking.cmap();
+                std::set<typename BlockingT::Node> live;
+                for (auto it = map.template attributes<0>().begin(), itend = map.template attributes<0>().end();
+                     it != itend;
+                     ++it) {
+                    live.insert(it);
+                }
+                for (auto it = nodes_by_id.begin(); it != nodes_by_id.end();) {
+                    it = (live.count(it->second) == 0) ? nodes_by_id.erase(it) : std::next(it);
+                }
+            }
 
             /** @brief Registers every not-yet-known corner node of the structure, so a freshly
              * created block's corners become addressable by id. Cheap and idempotent: nodes already
@@ -308,7 +458,7 @@ namespace gecko::python {
         };
 
     private:
-        std::variant<Impl<1>, Impl<2>, Impl<3>, Impl<4>> m_impl;
+        Impl m_impl;
     };
 
 } // namespace gecko::python

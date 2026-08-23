@@ -8,14 +8,18 @@
 using namespace gecko;
 
 namespace {
-    template<std::size_t N>
-    using TestCMap = CMap<BezierCurve<N, Point3d>, BezierSurface<N, Point3d>, BezierVolume<N, Point3d>>;
+    using TestCMap = CMap<BezierCurve<Point3d>, BezierSurface<Point3d>, BezierVolume<Point3d>>;
 } // namespace
 
-TEST_CASE("cell_data_cmap_instantiates_for_linear_and_curved_order", "[BlockTestSuite]") {
-    TestCMap<1> map_linear;
-    TestCMap<3> map_cubic;
+TEST_CASE("cell_data_cmap_carries_geometry_of_any_degree", "[BlockTestSuite]") {
+    // One map type serves every order now: the degree travels in the attributes rather than in the
+    // type, which is what lets a structure change order without becoming a different C++ type.
+    TestCMap map;
+    REQUIRE(map.is_empty());
 
-    REQUIRE(map_linear.is_empty());
-    REQUIRE(map_cubic.is_empty());
+    const auto edge = map.create_attribute<1>();
+    edge->info().curve = BezierCurve<Point3d>(3);
+    REQUIRE(edge->info().curve.degree() == 3);
+    edge->info().curve = BezierCurve<Point3d>(1);
+    REQUIRE(edge->info().curve.degree() == 1);
 }

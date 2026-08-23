@@ -60,7 +60,8 @@ for group_id in model.group_ids():
 `Blocking` builds a structured quad/hex blocking against a `GeomModel`. Block corners are passed
 as lists of `(x, y, z)` tuples; created faces/blocks are identified by the `int` id `Blocking`
 hands back. `degree=1` (the default) gives straight edges; `degree=3` gives cubic-Bezier edges that
-`classify()` can bend onto curved geometry. Degrees 1 through 4 are available.
+`classify()` can bend onto curved geometry. Any degree of 1 or more works, and `set_degree()` changes
+it on an existing blocking.
 
 ```python
 import gecko
@@ -72,7 +73,17 @@ face_a = blocking.create_quad_block([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
 face_b = blocking.create_quad_block([(1, 0, 0), (2, 0, 0), (2, 1, 0), (1, 1, 0)])
 blocking.build_connectivity()  # sews the shared edge between face_a and face_b
 
-blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)  # snap onto the model
+# Snap onto the model. Corners are projected onto it, and every edge, face and block is then
+# fitted to what it landed on — including the *inside* of each face, which is pulled onto its model
+# surface rather than left as a blend of the 4 boundary curves.
+blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
+# The degree is carried by the geometry, not by its C++ type, so it can be raised or lowered on a
+# blocking that already exists. Topology and classification are kept; only the representation
+# changes — and raising the order does not just add control points, it uses them: an edge that could
+# only be a chord at degree 1 comes back following the model curve it lies on.
+blocking.set_degree(3, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+print(blocking.degree())
 
 # What each cell ended up on: -1 free, 0 vertex, 1 curve, 2 surface, 3 volume. Edges and faces are
 # inferred from their own boundary, not from proximity — see the biy guide.
@@ -86,6 +97,46 @@ print(blocking.nb_cells(2), blocking.is_valid_topology())
 
 if blocking.can_delete_face(face_a):
     blocking.delete_face(face_a)
+
+# How far each edge departs from a straight line: the largest distance from one of its interior
+# control points to its own chord. A straight blocking reads as zero here whatever is done to it, so
+# a non-zero entry says the geometry is at fault and a zero one says the drawing is.
+print(max(blocking.edge_bends()))
+
+# Deleting a block takes with it every face, edge and corner that existed only because of it;
+# whatever it shared with a neighbour stays, as that neighbour's boundary. The index is a position
+# in the block traversal — the same order mesh_hexes() and block_volumes() use.
+blocking.delete_block(0)
+
+# Cutting: pick an edge (by its position in edge_vertices()/edge_segments() order) and a parameter
+# along it. The cut runs through every edge parallel to that one, across every block they touch —
+# sheet_edges() reports which, and sheet_cut_points() where, before anything is modified.
+sheet = blocking.sheet_edges(0)                 # [] if the sheet cannot be cut evenly
+preview = blocking.sheet_cut_points(0, 0.5)     # one point per edge of `sheet`, in the same order
+blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if the cut is impossible
+
+# The inverse: take a whole layer out and glue back what was either side of it. Where 2 corners
+# merge, the more constrained classification wins — a model vertex over a curve, a curve over a
+# surface — and the merged corner is projected onto it, so a blocking fitted to a model does not
+# drift off its features. A sheet holding every block collapses too, leaving the blocking empty, so
+# an unclassified grid can be taken apart one sheet at a time. Returns False, changing nothing, when
+# one of the sheet's edges joins 2 corners on 2 *different* model vertices — merging them would leave
+# one of those vertices with no corner on it — or when the sheet cannot be collapsed at all.
+blocking.delete_sheet(0, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
+# What each block encloses, from its own stored geometry — exact at 1 subdivision when its faces are
+# planar, converging as it grows otherwise. Negative means that block came out inverted.
+print(blocking.block_volumes(subdivisions=1))
+
+# Which block each generated cell came from, one entry per cell of mesh_hexes()/mesh_quads(). The
+# mesh is emitted block by block, so this is what lets a per-block value — a colour, say — be spread
+# onto every cell subdividing that block.
+print(blocking.mesh_hex_owners(subdivisions=2))   # into the block_volumes()/delete_block() order
+print(blocking.mesh_quad_owners(subdivisions=2))  # standalone quad blocks only; a hex emits no quads
+
+# The halves keep the geometry they were cut out of exactly (De Casteljau subdivision, not a refit),
+# so meshing after a cut traces the same points as before. Note classify() rebuilds faces and blocks
+# from their boundaries and so discards that — cut first, classify after.
 
 # The exported mesh's nodes also carry 2 POINT_DATA scalars, "classification_dim"/"classification_tag"
 # (-1/-1 when unclassified) — the same dim/tag pair node_classification_dims() reports, for every

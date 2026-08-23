@@ -1,5 +1,8 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <map>
+#include <string>
 #include <filesystem>
 #include <vector>
 
@@ -16,6 +19,81 @@ using Catch::Approx;
 using namespace gecko;
 
 namespace {
+    /**
+     * @brief A faceted unit sphere centred on the origin: one tagged surface (tag 1) of 2048
+     * triangles, obtained by subdividing an octahedron 4 times and pushing every node out to radius
+     * 1. No tagged vertices or curves — nothing here should ever classify below dimension 2.
+     *
+     * Doubly curved on purpose. A cylinder is developable along its axis, so a Coons patch spanning
+     * one already follows it closely and cannot tell a face that was fitted to the geometry from one
+     * that merely interpolates its 4 boundary curves. A sphere separates the 2 by a factor of 4.
+     */
+    FacetedGeometry make_sphere_geom_model() {
+        std::array<Point3d, 6> axis = {Point3d(1, 0, 0),
+                                       Point3d(-1, 0, 0),
+                                       Point3d(0, 1, 0),
+                                       Point3d(0, -1, 0),
+                                       Point3d(0, 0, 1),
+                                       Point3d(0, 0, -1)};
+        std::vector<std::array<Point3d, 3>> tris;
+        for (int a = 0; a < 2; ++a) {
+            for (int b = 2; b < 4; ++b) {
+                for (int c = 4; c < 6; ++c) {
+                    tris.push_back({axis[static_cast<std::size_t>(a)],
+                                    axis[static_cast<std::size_t>(b)],
+                                    axis[static_cast<std::size_t>(c)]});
+                }
+            }
+        }
+        const auto on_sphere = [](const Point3d &AP) {
+            const double n = std::sqrt(AP.x() * AP.x() + AP.y() * AP.y() + AP.z() * AP.z());
+            return Point3d(AP.x() / n, AP.y() / n, AP.z() / n);
+        };
+        for (int pass = 0; pass < 4; ++pass) {
+            std::vector<std::array<Point3d, 3>> finer;
+            finer.reserve(tris.size() * 4);
+            for (const auto &t : tris) {
+                const Point3d m01 = on_sphere(t[0] + Vector3d(t[0], t[1]) * 0.5);
+                const Point3d m12 = on_sphere(t[1] + Vector3d(t[1], t[2]) * 0.5);
+                const Point3d m20 = on_sphere(t[2] + Vector3d(t[2], t[0]) * 0.5);
+                finer.push_back({t[0], m01, m20});
+                finer.push_back({m01, t[1], m12});
+                finer.push_back({m20, m12, t[2]});
+                finer.push_back({m01, m12, m20});
+            }
+            tris.swap(finer);
+        }
+
+        SimplicialMesh mesh;
+        GroupRegistry groups;
+        auto surf_group = groups.add_group("Sphere", GroupDim::Dim2);
+        auto &face_group = mesh.add_variable<GroupId, CellType::Face>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+        auto &face_entity = mesh.add_variable<Int, CellType::Face>(std::string(io::ENTITY_TAG_VARIABLE));
+        std::map<std::array<long, 3>, NodeId> seen;
+        const auto node_of = [&](const Point3d &AP) {
+            // Keyed on rounded coordinates so the 3 triangles meeting at a node share it: the
+            // subdivision recomputes each midpoint once per incident triangle.
+            const std::array<long, 3> key{
+                std::lround(AP.x() * 1e9), std::lround(AP.y() * 1e9), std::lround(AP.z() * 1e9)};
+            const auto it = seen.find(key);
+            if (it != seen.end()) return it->second;
+            const NodeId id = mesh.add_node(AP.x(), AP.y(), AP.z());
+            seen.emplace(key, id);
+            return id;
+        };
+        for (const auto &t : tris) {
+            const auto f = mesh.add_face(node_of(t[0]), node_of(t[1]), node_of(t[2]));
+            face_group[f.value] = surf_group;
+            face_entity[f.value] = 1;
+        }
+
+        const auto path = (std::filesystem::temp_directory_path() / "gecko_sphere_test.msh").string();
+        io::SimplicialMeshWriter::write(path, mesh, groups);
+        FacetedGeometry geom(path);
+        std::filesystem::remove(path);
+        return geom;
+    }
+
     /**
      * @brief A unit-square boundary-rep fixture: 4 tagged vertices (1-4), 4 tagged straight
      * boundary curves (10-13, one edge each) and 1 tagged surface (20, 2 triangles), all in the
@@ -228,7 +306,7 @@ TEST_CASE("quad_block_classification_snaps_corners_edges_and_face_onto_geom_mode
 
 TEST_CASE("cubic_quad_block_edge_classified_onto_bent_curve_bulges_and_propagates_to_face", "[BlockTestSuite]") {
     const FacetedGeometry geom = make_square_geom_model_with_bent_bottom();
-    Blocking<FacetedGeometry, BezierCurve<3, Point3d>> blocking(geom);
+    Blocking<FacetedGeometry> blocking(geom, 3);
 
     const std::array<Point3d, 4> corners = {
         Point3d(0.01, 0.0, 0.0), Point3d(0.99, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)};
@@ -241,7 +319,7 @@ TEST_CASE("cubic_quad_block_edge_classified_onto_bent_curve_bulges_and_propagate
     blocking.classify(0.05, 0.35);
 
     // Find the edge classified onto the bent bottom curve (tag 10).
-    using Edge = Blocking<FacetedGeometry, BezierCurve<3, Point3d>>::Edge;
+    using Edge = Blocking<FacetedGeometry>::Edge;
     Edge bottom_edge{};
     bool found = false;
     for (auto it = blocking.cmap().attributes<1>().begin(), itend = blocking.cmap().attributes<1>().end(); it != itend;
@@ -388,4 +466,292 @@ TEST_CASE("hex_block_classification_against_real_multi_volume_gmsh_file", "[Bloc
 
     auto mesh = blocking.to_mesh(10);
     REQUIRE(mesh.nb_cells() == 1000);
+}
+
+TEST_CASE("a_face_classified_on_a_curved_surface_has_its_interior_on_it_too", "[BlockTestSuite]") {
+    // A face's surface is a Coons patch of its 4 boundary curves, and a Coons patch of 4 curves that
+    // lie on a sphere does not lie on the sphere — it interpolates the boundary and then blends
+    // straight across the middle. So classifying a face onto a surface has to *pull* its interior
+    // onto that surface, the way classifying an edge onto a curve pulls its interior onto the curve.
+    // Without that the edges of a block sit on the model while the middle of every face hangs a
+    // fifth of the radius inside it, and raising the order does not help, because nothing in the
+    // construction refers to the model at all.
+    const FacetedGeometry geom = make_sphere_geom_model();
+
+    const double h = 1.0 / std::sqrt(3.0); // the cube inscribed in the unit sphere
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(-h, -h, -h),
+                               Point3d(h, -h, -h),
+                               Point3d(h, h, -h),
+                               Point3d(-h, h, -h),
+                               Point3d(-h, -h, h),
+                               Point3d(h, -h, h),
+                               Point3d(h, h, h),
+                               Point3d(-h, h, h)});
+    // Nothing is tagged below dimension 2, so only the surface tolerance matters; it is opened wide
+    // enough to reach the sphere from the inscribed cube's corners.
+    blocking.classify(1e-9, 1e-9, 2.0);
+
+    // How far a point is from the sphere. Measured against the analytic radius rather than the
+    // faceted projection, so the fixture's own faceting shows up as a small constant on every row
+    // instead of being silently absorbed.
+    const auto off_sphere = [](const Point3d &AP) {
+        return std::abs(std::sqrt(AP.x() * AP.x() + AP.y() * AP.y() + AP.z() * AP.z()) - 1.0);
+    };
+
+    auto &map = blocking.cmap();
+    double worst_corner = 0.0;
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        worst_corner = std::max(worst_corner, off_sphere(it->info().point));
+    }
+    double worst_edge = 0.0;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        for (int i = 1; i < 8; ++i) {
+            worst_edge = std::max(worst_edge, off_sphere(it->info().curve.value(i / 8.0)));
+        }
+    }
+    int checked = 0;
+    double worst_face = 0.0;
+    for (auto it = map.attributes<2>().begin(), end = map.attributes<2>().end(); it != end; ++it) {
+        const auto &targets = it->info().geom_targets;
+        REQUIRE(!targets.empty());
+        REQUIRE(targets.front().first == GroupDim::Dim2);
+        ++checked;
+        for (int i = 1; i < 8; ++i) {
+            for (int j = 1; j < 8; ++j) {
+                worst_face = std::max(worst_face, off_sphere(it->info().surface.value(i / 8.0, j / 8.0)));
+            }
+        }
+    }
+    REQUIRE(checked == 6);
+
+    // The corners are projected onto the geometry outright, so they are off the analytic sphere by
+    // the fixture's faceting alone. The edges are fitted through points taken on it and carry, on
+    // top of that, the error of a cubic through 4 points of a 70-degree arc — which a cube's edge on
+    // a sphere is.
+    REQUIRE(worst_corner < 5e-3);
+    REQUIRE(worst_edge < 2e-2);
+
+    // The interior lands within about twice the edges' own error. A plain Coons patch of the very
+    // same 4 boundary curves misses by 0.18 here — more than a sixth of the radius — so this bound
+    // sits between the 2, wide enough not to be brittle and tight enough that dropping the refit
+    // fails it.
+    REQUIRE(worst_face < 9e-2);
+
+    // And the block's own volume follows its faces rather than re-deriving a Coons patch of its
+    // edges, which would put its boundary where its faces are not.
+    for (auto it = map.attributes<3>().begin(), end = map.attributes<3>().end(); it != end; ++it) {
+        for (int i = 0; i <= 4; ++i) {
+            for (int j = 0; j <= 4; ++j) {
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, j / 4.0, 0.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, j / 4.0, 1.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, 0.0, j / 4.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(i / 4.0, 1.0, j / 4.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(0.0, i / 4.0, j / 4.0)) < 9e-2);
+                REQUIRE(off_sphere(it->info().volume.value(1.0, i / 4.0, j / 4.0)) < 9e-2);
+            }
+        }
+    }
+}
+
+TEST_CASE("collapsing_a_sheet_keeps_the_more_constrained_of_the_2_corners_it_merges", "[BlockTestSuite]") {
+    // Collapsing a sheet merges 2 corners into 1, and one of the 2 classifications has to go. Here
+    // the 2 sides are as different as they get: one corner sits on a model *vertex*, the other only
+    // on a boundary *curve*. The vertex is the more constrained of the 2 and lies on that curve, so
+    // it is the one that survives — and the merged corner lands exactly on the square's corner
+    // rather than drifting somewhere along its bottom edge.
+    //
+    // Deciding this by traversal order instead — which is what merging attributes does if left to
+    // itself — would pull the block structure off the model's own corner, silently.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_quad_block(
+        {Point3d(0.0, 0.0, 0.0), Point3d(0.5, 0.0, 0.0), Point3d(0.5, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+    blocking.create_quad_block(
+        {Point3d(0.5, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.5, 1.0, 0.0)});
+    blocking.build_connectivity();
+    blocking.classify(1e-6);
+
+    auto &map = blocking.cmap();
+    const auto corner_at = [&](const Point3d &AP) {
+        for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+            if (Vector3d(it->info().point, AP).norm() < 1e-9) return it;
+        }
+        return map.attributes<0>().end();
+    };
+    const auto dim_at = [&](const Point3d &AP) {
+        const auto n = corner_at(AP);
+        REQUIRE(n != map.attributes<0>().end());
+        REQUIRE(!n->info().geom_targets.empty());
+        return n->info().geom_targets.front().first;
+    };
+
+    // The starting point: the square's own corner is on a model vertex, the midpoint of its bottom
+    // edge only on the bottom curve.
+    REQUIRE(dim_at(Point3d(0.0, 0.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(dim_at(Point3d(0.5, 0.0, 0.0)) == GroupDim::Dim1);
+
+    // The sheet through the left quad's bottom edge is that quad's 2 horizontal edges; collapsing it
+    // merges (0,0,0) with (0.5,0,0) and (0,1,0) with (0.5,1,0).
+    const auto target = [&]() {
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto d = it->dart();
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            if (Vector3d(a, Point3d(0.0, 0.0, 0.0)).norm() < 1e-9 &&
+                Vector3d(b, Point3d(0.5, 0.0, 0.0)).norm() < 1e-9) {
+                return it;
+            }
+            if (Vector3d(b, Point3d(0.0, 0.0, 0.0)).norm() < 1e-9 &&
+                Vector3d(a, Point3d(0.5, 0.0, 0.0)).norm() < 1e-9) {
+                return it;
+            }
+        }
+        FAIL("no bottom-left edge");
+        return map.attributes<1>().end();
+    }();
+    REQUIRE(blocking.delete_sheet(target, 1e-6));
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.nb_cells<2>() == 1);
+
+    // The merged corner went to the model vertex, not to the middle of the 2 and not along the
+    // curve: the more constrained side won, and it kept its own classification.
+    REQUIRE(corner_at(Point3d(0.0, 0.0, 0.0)) != map.attributes<0>().end());
+    REQUIRE(corner_at(Point3d(0.0, 1.0, 0.0)) != map.attributes<0>().end());
+    REQUIRE(dim_at(Point3d(0.0, 0.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(dim_at(Point3d(0.0, 1.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(corner_at(Point3d(0.5, 0.0, 0.0)) == map.attributes<0>().end());
+
+    // And the surviving quad is the whole square again, on its 4 model vertices.
+    REQUIRE(blocking.nb_cells<0>() == 4);
+    REQUIRE(dim_at(Point3d(1.0, 0.0, 0.0)) == GroupDim::Dim0);
+    REQUIRE(dim_at(Point3d(1.0, 1.0, 0.0)) == GroupDim::Dim0);
+}
+
+TEST_CASE("collapsing_is_refused_when_it_would_merge_2_different_model_vertices", "[BlockTestSuite]") {
+    // The one thing a collapse cannot do. The square's bottom edge joins 2 corners sitting on 2
+    // *different* model vertices, and merging them would leave one of those vertices with no corner
+    // of the block structure on it — nothing else in the blocking records where it was, and no later
+    // classify() puts one back. Refused, and nothing moves.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_quad_block(
+        {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+    blocking.build_connectivity();
+    blocking.classify(1e-6);
+
+    auto &map = blocking.cmap();
+    // All 4 corners are on the square's own vertices, so every edge of it joins 2 different ones.
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        REQUIRE(!it->info().geom_targets.empty());
+        REQUIRE(it->info().geom_targets.front().first == GroupDim::Dim0);
+    }
+
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        REQUIRE_FALSE(blocking.delete_sheet(it, 1e-6));
+    }
+
+    // Untouched: not a corner moved, not a cell gone.
+    REQUIRE(blocking.nb_cells<2>() == 1);
+    REQUIRE(blocking.nb_cells<1>() == 4);
+    REQUIRE(blocking.nb_cells<0>() == 4);
+    for (const Point3d &corner :
+         {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)}) {
+        bool found = false;
+        for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+            if (Vector3d(it->info().point, corner).norm() < 1e-12) found = true;
+        }
+        REQUIRE(found);
+    }
+
+    // Cut it in 2 and the *inner* sheet becomes collapsible again: its edges join a corner on a
+    // vertex to one merely on a curve, and the vertex survives that. Only the vertex-to-vertex
+    // pairing is the problem, not classification as such.
+    const auto vertical = [&]() {
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto d = it->dart();
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            if (std::abs(a.x() - b.x()) < 1e-12) return it;
+        }
+        FAIL("no vertical edge");
+        return map.attributes<1>().end();
+    }();
+    (void)vertical;
+    const auto horizontal = [&]() {
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto d = it->dart();
+            const Point3d a = map.attribute<0>(d)->info().point;
+            const Point3d b = map.attribute<0>(map.beta<1>(d))->info().point;
+            if (std::abs(a.y() - b.y()) < 1e-12) return it;
+        }
+        FAIL("no horizontal edge");
+        return map.attributes<1>().end();
+    }();
+    REQUIRE(blocking.cut_sheet(horizontal, 0.5));
+    REQUIRE(blocking.nb_cells<2>() == 2);
+
+    bool collapsed = false;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        if (blocking.delete_sheet(it, 1e-6)) {
+            collapsed = true;
+            break;
+        }
+    }
+    REQUIRE(collapsed);
+    REQUIRE(blocking.nb_cells<2>() == 1);
+    REQUIRE(blocking.is_valid_topology());
+}
+
+TEST_CASE("cutting_a_standalone_quad_block_splits_it_whichever_way_its_sheet_runs", "[BlockTestSuite]") {
+    // A boundary edge of a standalone quad block has exactly one dart — nothing is 2-sewn to it — so
+    // only one of its 2 endpoints is the source of any dart of it at all. The cut used to ask for a
+    // dart starting at the end its sheet measures from, and on a 2D block that ask has no answer
+    // half the time: whether it aborted came down to which endpoint the sheet happened to start at.
+    //
+    // A hex hides this completely. Its edges carry darts in several faces, in both directions, so
+    // the ask always succeeds — which is why every cut test until now passed.
+    const FacetedGeometry geom = make_square_geom_model();
+
+    for (const double param : {0.5, 0.25, 0.75}) {
+        Blocking<FacetedGeometry> blocking(geom, 3);
+        blocking.create_quad_block(
+            {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+        blocking.build_connectivity();
+        blocking.classify(1e-6);
+
+        // Every edge in turn, so neither orientation of a sheet goes untried.
+        auto &map = blocking.cmap();
+        int cuts = 0;
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            Blocking<FacetedGeometry> one(geom, 3);
+            one.create_quad_block(
+                {Point3d(0.0, 0.0, 0.0), Point3d(1.0, 0.0, 0.0), Point3d(1.0, 1.0, 0.0), Point3d(0.0, 1.0, 0.0)});
+            one.build_connectivity();
+            one.classify(1e-6);
+
+            auto &m = one.cmap();
+            auto target = m.attributes<1>().begin();
+            std::advance(target, cuts);
+            REQUIRE(one.cut_sheet(target, param));
+            REQUIRE(one.is_valid_topology());
+            REQUIRE(one.nb_cells<2>() == 2);
+            REQUIRE(one.nb_cells<1>() == 7);
+            REQUIRE(one.nb_cells<0>() == 6);
+
+            // The cut lands where it was asked to, on the right side of the edge it was aimed at.
+            const auto mesh = one.to_mesh(1);
+            double lo = 1e30;
+            double hi = -1e30;
+            for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
+                const Point3d &q = mesh.node(NodeId{i});
+                lo = std::min({lo, q.x(), q.y()});
+                hi = std::max({hi, q.x(), q.y()});
+            }
+            REQUIRE(lo == Approx(0.0).margin(1e-12));
+            REQUIRE(hi == Approx(1.0).margin(1e-12));
+            ++cuts;
+        }
+        REQUIRE(cuts == 4);
+    }
 }
