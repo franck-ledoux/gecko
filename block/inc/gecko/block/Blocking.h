@@ -1032,7 +1032,7 @@ namespace gecko {
          * opposite directions — the correct 2-sewability condition: `dA`'s start matches `dB`'s
          * end, and `dA`'s end matches `dB`'s start.
          *
-         * Deliberately *not* `positions_match_reversed()`: that helper (correct for `sew_matching`'s
+         * Deliberately *not* `positions_match_reversed()`: that helper (for `sew_matching()`'s
          * `AK=4` hex-face case, which searches all `AK` rotations of `dB` around its own face until
          * one aligns) compares `dA`'s start against `dB`'s *own* start, then `dA`'s end against the
          * start of the dart *before* `dB` in `dB`'s face — a check whose 2 comparisons only land on
@@ -1092,8 +1092,21 @@ namespace gecko {
          * @return true if all `AK` corner positions match in this reversed correspondence.
          */
         bool positions_match_reversed(Dart ADartA, Dart ADartB, int AK) {
+            // `b` starts one dart *along* its own face, not at @p ADartB itself. Sewing 2 cells
+            // together makes the darts it links opposite halves of one edge, so the dart matching
+            // `ADartA` is the one whose own start is `ADartB`'s end — and comparing `ADartA` against
+            // `ADartB` directly instead tests an alignment one step out of phase. Since the loop
+            // below is exactly what `sew_matching()` rotates its candidate through, being out of
+            // phase does not make the test fail: it makes it succeed on the *neighbouring* rotation,
+            // and every face in the blocking gets glued to its neighbour a quarter turn twisted.
+            //
+            // Nothing complained for a long time, because almost nothing reads a block's structure
+            // back out of its darts — a block's volume is built once from the corners it was created
+            // with, and `to_mesh()` reconciles the 2 sides of a face by position. Anything that does
+            // re-derive geometry from the darts, `move_node()` among them, gets a block whose 2
+            // opposite faces disagree about which way `v` and `w` run, and reports a nonsense volume.
             Dart a = ADartA;
-            Dart b = ADartB;
+            Dart b = m_cmap.template beta<1>(ADartB);
             for (int s = 0; s < AK; ++s) {
                 if (!(m_cmap.template attribute<0>(a)->info().point == m_cmap.template attribute<0>(b)->info().point)) {
                     return false;
