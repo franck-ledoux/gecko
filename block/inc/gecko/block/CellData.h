@@ -38,9 +38,11 @@ namespace gecko {
          * ordinary editing operations do all the time. Nor can a position in a traversal, which
          * every insertion and removal renumbers underneath whoever wrote it down.
          *
-         * Unique among cells of the same dimension, because `SplitFunctor` clears it: a cell that
-         * comes out of a split is a new cell with a new id, not a second claimant to an old one.
-         * Nodes are the deliberate exception — see `NodeSplitFunctor`.
+         * Unique among cells of the same dimension, at every dimension, because `SplitFunctor`
+         * clears it: a cell that comes out of a split is a new cell with a new id, not a second
+         * claimant to an old one. That uniqueness is the whole value of it, so nothing is exempt —
+         * what a node additionally needs, which is an identity that survives CGAL rebuilding its
+         * attribute, is a separate thing under a separate name (`NodeInfo::corner_key`).
          */
         Int id = -1;
     };
@@ -49,6 +51,27 @@ namespace gecko {
     struct NodeInfo : CellInfo {
         /** @brief Spatial location of the node. */
         Point3d point;
+        /**
+         * @brief Which *corner* this node is, as against which node it is (`CellInfo::id`). Handed
+         * out by `Blocking::create_node()`, and carried onto the copy when CGAL splits the attribute.
+         *
+         * The 2 are different questions and only one field each can answer. CGAL splits a node
+         * attribute when the vertex orbit behind it comes apart, which deleting a neighbouring block
+         * does: what was one attribute becomes 2, and every cell that had that corner keeps one of
+         * them. Nothing was cut in two — geometrically and to those cells it is still the same
+         * corner — so the key is copied across, and the cells go on recognising it.
+         *
+         * That is what faces and blocks record their local frame in (see `FaceInfo::frame`), what
+         * orders an edge's 2 ends so its stored curve keeps meaning the same thing
+         * (`Blocking::curve_start_node()`), and what gives the class a run-to-run stable order to
+         * settle a canonical frame by. An id cannot serve any of them: it is cleared on exactly the
+         * split this survives.
+         *
+         * The price is the mirror image of the id's: a key is unique only *within a cell*, 2 copies
+         * of one original node never being 2 corners of the same cell. Which is all any of the above
+         * asks of it.
+         */
+        Int corner_key = -1;
     };
 
     /**
@@ -72,8 +95,8 @@ namespace gecko {
         /** @brief The face's own surface, built via Coons construction from its 4 boundary edges. */
         TFaceSurface surface;
         /**
-         * @brief The `NodeInfo::id` of each of the 4 corners `surface` is parameterized against, at
-         * `(u,v)` = (0,0), (1,0), (1,1), (0,1); all -1 until the face has a surface.
+         * @brief The `NodeInfo::corner_key` of each of the 4 corners `surface` is parameterized
+         * against, at `(u,v)` = (0,0), (1,0), (1,1), (0,1); all -1 until the face has a surface.
          *
          * Recorded rather than re-derived, and that is the whole point. A local frame worked out
          * from the face on demand — from its dart, from an ordering of its corners — rests on
@@ -94,8 +117,8 @@ namespace gecko {
     struct BlockInfo : CellInfo {
         /** @brief The block's own volume, built via TFI construction from its 6 bounding faces. */
         TBlockVolume volume;
-        /** @brief The `NodeInfo::id` of each of the 8 corners `volume` is parameterized against, in
-         * `HEX_CORNER_UVW` order; all -1 until the block has a volume.
+        /** @brief The `NodeInfo::corner_key` of each of the 8 corners `volume` is parameterized
+         * against, in `HEX_CORNER_UVW` order; all -1 until the block has a volume.
          * @see FaceInfo::frame for why the frame is recorded and not re-derived. */
         std::array<Int, 8> frame{-1, -1, -1, -1, -1, -1, -1, -1};
     };
@@ -120,13 +143,18 @@ namespace gecko {
 
     /**
      * @struct SplitFunctor
-     * @brief `Cell_attribute` on-split functor for edge/face/block attributes: copies the original's
+     * @brief `Cell_attribute` on-split functor for every kind of cell: copies the original's
      * data onto the new one, its id excepted.
      *
      * Splitting an edge, a face or a block makes 2 cells where there was 1, and both are new in the
      * sense that matters to a caller: whatever it had a hold of is no longer the whole of what it
      * had a hold of. Leaving the copy's id unset — for `Blocking::assign_missing_ids()` to fill in —
      * is what keeps ids unique per dimension, and so usable as names.
+     *
+     * Nodes go through here too, and a node split is not a cell being cut in two but a vertex orbit
+     * coming apart. The new id says "a second node exists now", which is true and is what a caller
+     * needs; `NodeInfo::corner_key`, copied like everything else, says "it is still that corner",
+     * which is what the geometry needs.
      */
     struct SplitFunctor {
         /**
@@ -140,36 +168,6 @@ namespace gecko {
         void operator()(TCellAttribute &ACA1, TCellAttribute &ACA2) const {
             ACA2.info() = ACA1.info();
             ACA2.info().id = -1;
-        }
-    };
-
-    /**
-     * @struct NodeSplitFunctor
-     * @brief `Cell_attribute` on-split functor for node attributes: copies the original's data, id
-     * included — deliberately unlike `SplitFunctor`.
-     *
-     * A node attribute is split when the vertex orbit behind it comes apart, which deleting a
-     * neighbouring block does. Nothing was cut in two: the copy is the *same corner*, geometrically
-     * and to every cell that has it as one. Cells record their local frame as the ids of their own
-     * corners (see `FaceInfo::frame`), and carrying the id across is what lets them find that frame
-     * again after CGAL has rebuilt the attribute underneath it. Giving the copy a fresh id instead
-     * makes every cell touching that corner re-derive its frame — while its geometry stays written
-     * in the old one, which reads back rotated or mirrored.
-     *
-     * The price is that a node's id is unique only *within a cell*, which is all a frame needs: 2
-     * copies of one original node are never 2 corners of the same cell. It is why nodes are still
-     * addressed through the façade's own numbering rather than by this id.
-     */
-    struct NodeSplitFunctor {
-        /**
-         * @brief Splits a node attribute by copying all of its data, id included.
-         * @tparam TCellAttribute A `CGAL::Cell_attribute` instantiation over `NodeInfo`.
-         * @param ACA1 The original attribute, whose data is copied.
-         * @param ACA2 The newly-created attribute.
-         */
-        template<class TCellAttribute>
-        void operator()(TCellAttribute &ACA1, TCellAttribute &ACA2) const {
-            ACA2.info() = ACA1.info();
         }
     };
 
@@ -192,7 +190,7 @@ namespace gecko {
         template<class TCMap>
         struct Dart_wrapper {
             /** @brief Node (0-cell) attribute type. */
-            using Node_attr = CGAL::Cell_attribute<TCMap, NodeInfo, CGAL::Tag_true, MergeFunctor, NodeSplitFunctor>;
+            using Node_attr = CGAL::Cell_attribute<TCMap, NodeInfo, CGAL::Tag_true, MergeFunctor, SplitFunctor>;
             /** @brief Edge (1-cell) attribute type. */
             using Edge_attr =
                 CGAL::Cell_attribute<TCMap, EdgeInfo<TEdgeCurve>, CGAL::Tag_true, MergeFunctor, SplitFunctor>;

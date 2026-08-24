@@ -320,8 +320,6 @@ namespace gecko {
          * `UnstructuredMesh::build_connectivity()`'s "create raw entities, then link them" pattern.
          */
         void build_connectivity() {
-            // Sewing merges attributes, which discards one of each pair — it never creates any, so
-            // there is nothing new to name afterwards.
             std::vector<Face> block_faces;
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
@@ -330,6 +328,7 @@ namespace gecko {
             }
             sew_matching<3>(block_faces, 4);
             sew_free_quad_edges();
+            assign_missing_ids();
         }
 
         /**
@@ -559,6 +558,7 @@ namespace gecko {
             assert(can_delete_face(AFace) &&
                    "Blocking::delete_face: precondition violated (blocking must be purely 2D)");
             m_cmap.template remove_cell<2>(AFace->dart());
+            assign_missing_ids();
         }
 
         /**
@@ -582,7 +582,10 @@ namespace gecko {
          *
          * @param ABlock The block to delete.
          */
-        void delete_block(Block ABlock) { m_cmap.template remove_cell<3>(ABlock->dart()); }
+        void delete_block(Block ABlock) {
+            m_cmap.template remove_cell<3>(ABlock->dart());
+            assign_missing_ids();
+        }
 
         // ---------------------------------------------------------------------
         // Sheet cut
@@ -1064,6 +1067,18 @@ namespace gecko {
          */
         template<unsigned int TDim>
         typename Map::template Attribute_descriptor<TDim>::type cell_by_id(Int AId) {
+            if (AId < 0) return nullptr;
+            for (auto it = m_cmap.template attributes<TDim>().begin(), itend = m_cmap.template attributes<TDim>().end();
+                 it != itend;
+                 ++it) {
+                if (it->info().id == AId) return it;
+            }
+            return nullptr;
+        }
+
+        /** @copydoc cell_by_id */
+        template<unsigned int TDim>
+        typename Map::template Attribute_const_descriptor<TDim>::type cell_by_id(Int AId) const {
             if (AId < 0) return nullptr;
             for (auto it = m_cmap.template attributes<TDim>().begin(), itend = m_cmap.template attributes<TDim>().end();
                  it != itend;
@@ -1852,14 +1867,15 @@ namespace gecko {
             // Which dart is asked decides only *which pair* comes back, never its order — every dart
             // of an edge spans the same 2 nodes.
             //
-            // Ordered by id, never by handle. A handle is an address, and CGAL hands out a fresh
-            // attribute whenever it rebuilds a vertex — which splitting an edge next door or
-            // deleting a block does — so the 2 addresses can come back in the opposite order later
-            // on. The stored curve does not move with them, so the edge then names the end it does
+            // Ordered by corner key, never by handle and never by id. A handle is an address, and
+            // CGAL hands out a fresh attribute whenever it rebuilds a vertex — which splitting an
+            // edge next door or deleting a block does — so the 2 addresses can come back in the
+            // opposite order later on, and the id is cleared by exactly that rebuild. The key is
+            // what survives it. The stored curve does not move with them, so the edge then names the end it does
             // not start at, and everything that reads the curve reads it backwards: a sheet cut
             // lands at `1 - t` on that one edge while its parallels land at `t`, leaving a node
             // out of line and the edges through it bent.
-            return (a->info().id < b->info().id) ? a : b;
+            return (a->info().corner_key < b->info().corner_key) ? a : b;
         }
 
         /**
@@ -2779,6 +2795,7 @@ namespace gecko {
         Node create_node(const Point3d &APoint) {
             Node n = m_cmap.template create_attribute<0>();
             n->info().point = APoint;
+            n->info().corner_key = m_next_corner_key++;
             n->info().id = m_next_node_id++;
             return n;
         }
@@ -2960,7 +2977,8 @@ namespace gecko {
         // ---------------------------------------------------------------------
 
         /**
-         * @brief The key an edge is ordered by, as the ids of the 2 nodes it joins, smaller first.
+         * @brief The key an edge is ordered by, as the corner keys of the 2 nodes it joins, smaller
+         * first.
          *
          * Gives the class a run-to-run stable order on edges, which it does not otherwise have —
          * edges carry no id of their own, and ordering them by attribute handle is ordering them by
@@ -2971,8 +2989,8 @@ namespace gecko {
          */
         std::pair<Int, Int> edge_order(Edge AEdge) {
             const Dart d = AEdge->dart();
-            const Int a = m_cmap.template attribute<0>(d)->info().id;
-            const Int b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d))->info().id;
+            const Int a = m_cmap.template attribute<0>(d)->info().corner_key;
+            const Int b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d))->info().corner_key;
             return {std::min(a, b), std::max(a, b)};
         }
 
@@ -2993,25 +3011,37 @@ namespace gecko {
         /**
          * @brief Gives an id to every cell that has none, at all 4 dimensions.
          *
-         * A cell arrives without one whenever CGAL builds a fresh attribute — which every insertion
-         * this class is built on does, and which `SplitFunctor` arranges for deliberately so that a
-         * cell coming out of a split is named as the new cell it is.
+         * A cell arrives without one whenever CGAL builds a fresh attribute, and `SplitFunctor`
+         * arranges for exactly that so a cell coming out of a split is named as the new cell it is.
          *
-         * Run at the end of every operation that changes the map, and, for nodes, straight after each
-         * individual insertion as well: a node still at -1 sorts ahead of every real one, and a frame
-         * worked out before the sweep would not be the frame the cell has after it.
+         * Run at the end of **every** operation that changes the map, with no case analysis about
+         * which ones can leave something unnamed. Removals look like they cannot and do: erasing a
+         * block's darts disturbs the vertex orbits of the corners it shared, CGAL rebuilds those
+         * attributes, and the rebuilt ones come back with no id at all.
+         *
+         * Nodes additionally get their corner key here, and `assign_missing_node_ids()` is called on
+         * its own between the individual insertions of a cut: a key must exist before any frame is
+         * read from one.
          */
         void assign_missing_ids() {
-            assign_missing_ids_of<0>(m_next_node_id);
+            assign_missing_node_ids();
             assign_missing_ids_of<1>(m_next_edge_id);
             assign_missing_ids_of<2>(m_next_face_id);
             assign_missing_ids_of<3>(m_next_block_id);
         }
 
         /** @copydoc assign_missing_ids
-         * @brief Gives an id to every node that has none — the 0-dimensional half of
-         * `assign_missing_ids()`, called on its own between the individual insertions of a cut. */
-        void assign_missing_node_ids() { assign_missing_ids_of<0>(m_next_node_id); }
+         * @brief Gives a corner key and an id to every node that has neither — the 0-dimensional
+         * half of `assign_missing_ids()`, called on its own between the individual insertions of a
+         * cut, where a key must exist before any frame is read from one. */
+        void assign_missing_node_ids() {
+            for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
+                 it != itend;
+                 ++it) {
+                if (it->info().corner_key < 0) it->info().corner_key = m_next_corner_key++;
+            }
+            assign_missing_ids_of<0>(m_next_node_id);
+        }
 
         /**
          * @brief The key a node is ordered by when a canonical frame has to choose a starting corner.
@@ -3031,7 +3061,7 @@ namespace gecko {
          */
         static std::tuple<Int, double, double, double> node_order(Node ANode) {
             const Point3d &p = ANode->info().point;
-            return {ANode->info().id, p.x(), p.y(), p.z()};
+            return {ANode->info().corner_key, p.x(), p.y(), p.z()};
         }
 
         /**
@@ -3108,8 +3138,8 @@ namespace gecko {
                 corners.push_back(m_cmap.template attribute<0>(it));
             }
             for (std::size_t c = 0; c < TN; ++c) {
-                const auto hit =
-                    std::find_if(corners.begin(), corners.end(), [&](Node AN) { return AN->info().id == AFrame[c]; });
+                const auto hit = std::find_if(
+                    corners.begin(), corners.end(), [&](Node AN) { return AN->info().corner_key == AFrame[c]; });
                 if (hit == corners.end()) return false;
                 AOut[c] = *hit;
             }
@@ -3170,7 +3200,7 @@ namespace gecko {
                 }
             }
             for (std::size_t c = 0; c < 8; ++c) {
-                ABlock->info().frame[c] = best[c]->info().id;
+                ABlock->info().frame[c] = best[c]->info().corner_key;
             }
             return best;
         }
@@ -3218,7 +3248,7 @@ namespace gecko {
             std::array<Node, 4> canonical{};
             for (std::size_t i = 0; i < 4; ++i) {
                 canonical[i] = forward ? cycle[(start + i) % 4] : cycle[(start + 4 - i) % 4];
-                AFace->info().frame[i] = canonical[i]->info().id;
+                AFace->info().frame[i] = canonical[i]->info().corner_key;
             }
             return canonical;
         }
@@ -3794,7 +3824,9 @@ namespace gecko {
                 }
                 // Sorted for the same reason the sheet's edges are: `AMids` is keyed on handles, and
                 // `cut_loop()` starts from whichever of these comes first.
-                std::sort(mids.begin(), mids.end(), [](Node a, Node b) { return a->info().id < b->info().id; });
+                std::sort(mids.begin(), mids.end(), [](Node a, Node b) {
+                    return a->info().corner_key < b->info().corner_key;
+                });
                 assert(mids.size() == 4 && "Blocking::split_sheet_blocks: block must carry exactly 4 cut nodes");
 
                 const std::vector<Dart> path = cut_loop(sb.block, mids);
@@ -3912,6 +3944,8 @@ namespace gecko {
         /** @brief Source of a node's `CellInfo::id`. Only ever increases, so an id is never reused
          * and the order it defines never changes meaning. */
         Int m_next_node_id = 0;
+        /** @brief Source of `NodeInfo::corner_key`. Only ever increases, for the same reason. */
+        Int m_next_corner_key = 0;
         /** @brief Source of an edge's `CellInfo::id`. @see m_next_node_id */
         Int m_next_edge_id = 0;
         /** @brief Source of a face's `CellInfo::id`. @see m_next_node_id */

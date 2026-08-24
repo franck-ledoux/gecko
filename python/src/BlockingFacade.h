@@ -404,57 +404,18 @@ namespace gecko::python {
          */
         bool delete_sheet(int edge_index, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
 
-        /** @brief The blocking and the id books kept alongside it; public only so the .cpp's
-         * free-function helpers can name it — never part of the class' actual (Python-facing)
-         * interface. */
+        /** @brief The blocking and what little bookkeeping is still kept alongside it; public only
+         * so the .cpp's free-function helpers can name it — never part of the class' actual
+         * (Python-facing) interface. */
         struct Impl {
             using BlockingT = Blocking<FacetedGeometry>;
 
             BlockingT blocking;
             std::unordered_map<int, typename BlockingT::Face> faces_by_id;
-            std::unordered_map<int, typename BlockingT::Node> nodes_by_id;
             int next_face_id = 0;
             int next_block_id = 0;
-            int next_node_id = 0;
 
             explicit Impl(const FacetedGeometry &geom, int degree) : blocking(geom, static_cast<std::size_t>(degree)) {}
-
-            /**
-             * @brief Drops every id whose node attribute no longer exists.
-             *
-             * Deleting a block garbage-collects the corners it alone owned, and sewing merges pairs
-             * of coincident ones — either way the id map is left holding handles to attributes that
-             * are gone, and node_position()/node_classification_dims() would read freed memory
-             * through them. Membership is decided by comparing handles against the live ones, which
-             * never dereferences a stale one.
-             */
-            void forget_stale_nodes() {
-                auto &map = blocking.cmap();
-                std::set<typename BlockingT::Node> live;
-                for (auto it = map.template attributes<0>().begin(), itend = map.template attributes<0>().end();
-                     it != itend;
-                     ++it) {
-                    live.insert(it);
-                }
-                for (auto it = nodes_by_id.begin(); it != nodes_by_id.end();) {
-                    it = (live.count(it->second) == 0) ? nodes_by_id.erase(it) : std::next(it);
-                }
-            }
-
-            /** @brief Registers every not-yet-known corner node of the structure, so a freshly
-             * created block's corners become addressable by id. Cheap and idempotent: nodes already
-             * present keep their id. */
-            void index_new_nodes() {
-                auto &map = blocking.cmap();
-                for (auto it = map.template attributes<0>().begin(), itend = map.template attributes<0>().end();
-                     it != itend;
-                     ++it) {
-                    const bool known = std::any_of(nodes_by_id.begin(), nodes_by_id.end(), [&it](const auto &entry) {
-                        return entry.second == it;
-                    });
-                    if (!known) nodes_by_id.emplace(next_node_id++, it);
-                }
-            }
         };
 
     private:

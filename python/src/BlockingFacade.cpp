@@ -60,14 +60,12 @@ namespace gecko::python {
         const auto points = to_points<4>(corners, "Blocking.create_quad_block");
         const int id = m_impl.next_face_id++;
         m_impl.faces_by_id.emplace(id, m_impl.blocking.create_quad_block(points));
-        m_impl.index_new_nodes();
         return id;
     }
 
     int BlockingFacade::create_hex_block(const std::vector<std::array<double, 3>> &corners) {
         const auto points = to_points<8>(corners, "Blocking.create_hex_block");
         const auto block = m_impl.blocking.create_hex_block(points);
-        m_impl.index_new_nodes();
         // Reported as a position in the block traversal rather than a counter of its own:
         // that is the one blocks are addressed by everywhere else here, and a counter no
         // other method accepts is not an id, only a number.
@@ -79,14 +77,7 @@ namespace gecko::python {
         return -1;
     }
 
-    void BlockingFacade::build_connectivity() {
-        m_impl.blocking.build_connectivity();
-        // Sewing merges each pair of coincident corners into one attribute, discarding the
-        // other — ids still pointing at the discarded one have to go, and whatever the merge
-        // left unnamed has to be picked up.
-        m_impl.forget_stale_nodes();
-        m_impl.index_new_nodes();
-    }
+    void BlockingFacade::build_connectivity() { m_impl.blocking.build_connectivity(); }
 
     void BlockingFacade::classify(double tol_vertex, double tol_curve, double tol_surface) {
         m_impl.blocking.classify(tol_vertex, tol_curve, tol_surface);
@@ -155,17 +146,7 @@ namespace gecko::python {
         }
     } // namespace
 
-    void BlockingFacade::delete_block(int block_index) {
-        m_impl.blocking.delete_block(block_at(m_impl, block_index));
-        // A deletion takes corner nodes with it, so ids pointing at them have to go. But
-        // pruning alone leaves the map *short*: erasing a block's darts disturbs the vertex
-        // orbits of the corners it shared, and CGAL rebuilds an attribute rather than
-        // re-pointing it whenever it has to — so a corner that is still very much there can
-        // come back as a different attribute, which no id then names. Prune, then re-index,
-        // or node_ids() quietly stops listing corners the blocking still has.
-        m_impl.forget_stale_nodes();
-        m_impl.index_new_nodes();
-    }
+    void BlockingFacade::delete_block(int block_index) { m_impl.blocking.delete_block(block_at(m_impl, block_index)); }
 
     std::vector<double> BlockingFacade::edge_bends() const {
         const auto &map = m_impl.blocking.cmap();
@@ -270,8 +251,6 @@ namespace gecko::python {
 
     bool BlockingFacade::cut_sheet(int edge_index, double param) {
         if (!m_impl.blocking.cut_sheet(edge_at(m_impl, edge_index), param)) return false;
-        // A cut creates corner nodes, which have to become addressable like any other.
-        m_impl.index_new_nodes();
         return true;
     }
 
@@ -282,42 +261,48 @@ namespace gecko::python {
         // Collapsing merges corners pairwise, so ids naming the side that went have to go — and the
         // survivors can come back as attributes CGAL rebuilt, which no id then names. Prune, then
         // re-index, for the reason delete_block() spells out.
-        m_impl.forget_stale_nodes();
-        m_impl.index_new_nodes();
         return true;
     }
 
     namespace {
+        /** @brief The node carrying @p node_id, straight from the map.
+         *
+         * There used to be a book of ids kept alongside the blocking here, refreshed after every
+         * operation: pruned of the corners a deletion had collected, then extended with the ones an
+         * edit had created. The kernel names its own cells now (`CellInfo::id`), so the book was
+         * one more thing that had to be right rather than a source of truth.
+         */
         template<typename TImpl>
         auto find_node(TImpl &impl, int node_id) {
-            const auto it = impl.nodes_by_id.find(node_id);
-            if (it == impl.nodes_by_id.end()) {
+            const auto node = impl.blocking.template cell_by_id<0>(node_id);
+            if (node == nullptr) {
                 throw std::out_of_range("Blocking: unknown node id " + std::to_string(node_id));
             }
-            return it;
+            return node;
         }
     } // namespace
 
     std::vector<int> BlockingFacade::node_ids() const {
+        const auto &map = m_impl.blocking.cmap();
         std::vector<int> ids;
-        ids.reserve(m_impl.nodes_by_id.size());
-        for (const auto &[id, node] : m_impl.nodes_by_id)
-            ids.push_back(id);
+        for (auto it = map.attributes<0>().begin(), itend = map.attributes<0>().end(); it != itend; ++it) {
+            ids.push_back(static_cast<int>(it->info().id));
+        }
         std::sort(ids.begin(), ids.end());
         return ids;
     }
 
     std::array<double, 3> BlockingFacade::node_position(int node_id) const {
-        const auto &p = find_node(m_impl, node_id)->second->info().point;
+        const auto &p = find_node(m_impl, node_id)->info().point;
         return std::array<double, 3>{p.x(), p.y(), p.z()};
     }
 
     void BlockingFacade::move_node(int node_id, double x, double y, double z) {
-        m_impl.blocking.move_node(find_node(m_impl, node_id)->second, Point3d(x, y, z));
+        m_impl.blocking.move_node(find_node(m_impl, node_id), Point3d(x, y, z));
     }
 
     void BlockingFacade::snap_node(int node_id, double tol_vertex, double tol_curve, double tol_surface) {
-        m_impl.blocking.snap_node(find_node(m_impl, node_id)->second, tol_vertex, tol_curve, tol_surface);
+        m_impl.blocking.snap_node(find_node(m_impl, node_id), tol_vertex, tol_curve, tol_surface);
     }
 
     namespace {
@@ -330,16 +315,19 @@ namespace gecko::python {
     } // namespace
 
     std::vector<int> BlockingFacade::node_classification_dims() const {
-        std::vector<int> ids;
-        ids.reserve(m_impl.nodes_by_id.size());
-        for (const auto &[id, node] : m_impl.nodes_by_id)
-            ids.push_back(id);
-        std::sort(ids.begin(), ids.end()); // node_ids()' order
+        const auto &map = m_impl.blocking.cmap();
+        // Paired with the id and sorted on it, so the result lines up with node_ids() whatever order
+        // the map hands its attributes back in.
+        std::vector<std::pair<int, int>> by_id;
+        for (auto it = map.attributes<0>().begin(), itend = map.attributes<0>().end(); it != itend; ++it) {
+            by_id.emplace_back(static_cast<int>(it->info().id), classification_dim(it->info().geom_targets));
+        }
+        std::sort(by_id.begin(), by_id.end());
 
         std::vector<int> dims;
-        dims.reserve(ids.size());
-        for (const int id : ids) {
-            dims.push_back(classification_dim(m_impl.nodes_by_id.at(id)->info().geom_targets));
+        dims.reserve(by_id.size());
+        for (const auto &[id, dim] : by_id) {
+            dims.push_back(dim);
         }
         return dims;
     }
