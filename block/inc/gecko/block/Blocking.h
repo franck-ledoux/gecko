@@ -1030,6 +1030,39 @@ namespace gecko {
             }
         }
 
+        /**
+         * @brief Copy assignment, which the compiler cannot write here.
+         *
+         * CGAL's map declares a move constructor, and that alone suppresses its implicit copy
+         * assignment — so `Blocking`'s is deleted too, by a rule about a class two levels down. The
+         * copy *constructor* is fine, so copy-and-swap gives back what was only missing by accident.
+         *
+         * Being a value that can be assigned as well as copied is what snapshot-based undo needs: a
+         * history is a stack of whole blockings, and taking one back means assigning it over the
+         * current one.
+         *
+         * @param AOther The blocking to copy.
+         * @return This blocking.
+         */
+        Blocking &operator=(const Blocking &AOther) {
+            if (this != &AOther) {
+                Blocking copy(AOther);
+                m_cmap.swap(copy.m_cmap);
+                m_geom_model = copy.m_geom_model;
+                m_degree = copy.m_degree;
+                m_next_node_id = copy.m_next_node_id;
+                m_next_corner_key = copy.m_next_corner_key;
+                m_next_edge_id = copy.m_next_edge_id;
+                m_next_face_id = copy.m_next_face_id;
+                m_next_block_id = copy.m_next_block_id;
+            }
+            return *this;
+        }
+
+        /** @brief Copy construction, which the compiler writes correctly. @param AOther The blocking
+         * to copy. */
+        Blocking(const Blocking &AOther) = default;
+
         /** @brief Gives access to the underlying combinatorial map. @return The internal map. */
         Map &cmap() { return m_cmap; }
         /** @copydoc cmap() */

@@ -889,3 +889,109 @@ def test_create_block_returns_an_id_that_keeps_working(geom_model_path):
     blocking.delete_block(first)
     assert first not in blocking.block_ids()
     assert second in blocking.block_ids()
+
+
+def test_undo_takes_back_one_edit_at_a_time(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    assert not blocking.can_undo()
+    assert not blocking.can_redo()
+
+    blocking.create_hex_block(_UNIT_HEX)
+    assert blocking.can_undo()
+    assert blocking.cut_sheet(_edge_along(blocking, 2, 0.0, 1.0), 0.5)
+    assert blocking.nb_cells(3) == 2
+
+    blocking.undo()
+    assert blocking.nb_cells(3) == 1
+    assert blocking.is_valid_topology()
+    assert blocking.block_volumes(2)[0] == pytest.approx(1.0, abs=1e-12)
+
+    blocking.undo()
+    assert blocking.nb_cells(3) == 0
+    assert blocking.nb_cells(0) == 0
+    assert not blocking.can_undo()
+
+    # And nothing happens when there is nothing left to take back.
+    blocking.undo()
+    assert blocking.nb_cells(3) == 0
+
+    blocking.redo()
+    assert blocking.nb_cells(3) == 1
+    blocking.redo()
+    assert blocking.nb_cells(3) == 2
+    assert not blocking.can_redo()
+
+
+def test_undo_restores_geometry_and_ids_not_just_counts(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+    blocking.create_hex_block([(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+                               (1.0, 0.0, 1.0), (2.0, 0.0, 1.0), (2.0, 1.0, 1.0), (1.0, 1.0, 1.0)])
+    blocking.build_connectivity()
+
+    before_ids = sorted(blocking.block_ids())
+    before_volumes = sorted(blocking.block_volumes(2))
+    before_nodes = sorted(blocking.node_ids())
+    kept = before_ids[1]
+
+    blocking.delete_block(before_ids[0])
+    assert before_ids[0] not in blocking.block_ids()
+
+    blocking.undo()
+    # Not just the same number of blocks: the same ids, so a caller holding one still resolves.
+    assert sorted(blocking.block_ids()) == before_ids
+    assert sorted(blocking.node_ids()) == before_nodes
+    assert kept in blocking.block_ids()
+    restored = sorted(blocking.block_volumes(2))
+    assert all(a == pytest.approx(b, abs=1e-12) for a, b in zip(restored, before_volumes))
+    assert blocking.is_valid_topology()
+
+
+def test_a_refused_operation_costs_no_undo_step(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    # A cut the kernel refuses changes nothing, so it must not spend an undo step either. Checked by
+    # what one undo lands on rather than by a counter: had the refusal pushed a snapshot, undoing
+    # once would give back the very same 1-block state instead of the empty one before it.
+    assert not blocking.cut_sheet(blocking.edge_ids()[0], 1.5)
+    blocking.undo()
+    assert blocking.nb_cells(3) == 0
+
+
+def test_a_new_edit_discards_the_redo_history(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+    assert blocking.cut_sheet(_edge_along(blocking, 2, 0.0, 1.0), 0.5)
+    blocking.undo()
+    assert blocking.can_redo()
+
+    assert blocking.cut_sheet(_edge_along(blocking, 0, 0.0, 1.0), 0.25)
+    assert not blocking.can_redo()
+    assert blocking.nb_cells(3) == 2
+
+
+def test_history_depth_bounds_what_can_be_taken_back(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    assert blocking.history_depth() == 20
+    blocking.set_history_depth(2)
+    assert blocking.history_depth() == 2
+
+    blocking.create_hex_block(_UNIT_HEX)
+    for axis in (0, 1, 2):
+        assert blocking.cut_sheet(_edge_along(blocking, axis, 0.0, 1.0), 0.5)
+    assert blocking.nb_cells(3) == 8
+
+    # Only the last 2 edits are still reachable; the rest have been dropped.
+    blocking.undo()
+    blocking.undo()
+    assert blocking.nb_cells(3) == 2
+    assert not blocking.can_undo()
+
+    with pytest.raises(ValueError):
+        blocking.set_history_depth(0)

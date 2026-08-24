@@ -122,6 +122,25 @@ namespace gecko::app {
                  py::arg("face_id"),
                  "Checks whether the face with this id can be deleted.")
             .def("delete_face", &BlockingFacade::delete_face, py::arg("face_id"), "Deletes the face with this id.")
+            .def("can_undo", &BlockingFacade::can_undo, "Whether there is an edit to take back.")
+            .def("can_redo", &BlockingFacade::can_redo, "Whether there is an undone edit to put back.")
+            .def("undo",
+                 &BlockingFacade::undo,
+                 "Takes back the most recent edit, restoring the blocking as it was just before it. Snapshot-based: "
+                 "every operation that changes the blocking copies it first. Not a stack of inverse operations, "
+                 "because these operations have no inverses — collapsing the layer a cut just made does not restore "
+                 "the block. Ids survive an undo, so a block id from before the undone edit finds its block again. "
+                 "Does nothing when there is nothing to take back.")
+            .def("redo",
+                 &BlockingFacade::redo,
+                 "Puts back the most recently undone edit. Any new edit discards the redo history, which is what "
+                 "makes the two stacks a line rather than a tree.")
+            .def("set_history_depth",
+                 &BlockingFacade::set_history_depth,
+                 py::arg("depth"),
+                 "How many edits can be taken back (at least 1). A snapshot is a whole copy of the blocking, so the "
+                 "history costs depth times its size.")
+            .def("history_depth", &BlockingFacade::history_depth, "How many edits can be taken back.")
             .def("edge_ids",
                  &BlockingFacade::edge_ids,
                  "Every edge's id, in the order ``edge_vertices``/``edge_segments``/``edge_bends``/"

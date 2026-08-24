@@ -133,6 +133,19 @@ blocking.cut_sheet(target, 0.5)                 # False, changing nothing, if th
 # one of those vertices with no corner on it — or when the sheet cannot be collapsed at all.
 blocking.delete_sheet(target, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
+# Undo. Every operation that changes the blocking snapshots it first, so taking an edit back is
+# putting that snapshot in place — not a stack of inverse operations, because these operations have
+# no inverses (collapsing the layer a cut just made does not restore the block). Ids survive an undo,
+# so a block id from before the undone edit finds its block again. An operation the kernel *refuses*
+# costs no undo step, and any new edit discards the redo history.
+print(blocking.can_undo(), blocking.can_redo())
+blocking.undo()
+blocking.redo()
+
+# A snapshot is a whole copy of the blocking, so the history costs depth times its size: a few
+# thousand cells at degree 3 is a couple of megabytes each.
+blocking.set_history_depth(20)
+
 # What each block encloses, from its own stored geometry — exact at 1 subdivision when its faces are
 # planar, converging as it grows otherwise. Negative means that block came out inverted.
 print(blocking.block_volumes(subdivisions=1))

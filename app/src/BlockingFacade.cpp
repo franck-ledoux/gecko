@@ -49,26 +49,82 @@ namespace gecko::app {
     BlockingFacade::BlockingFacade(const GeomModelFacade &model, int degree)
         : m_impl(model.native(), checked_degree(degree)) {}
 
+    BlockingFacade::Checkpoint::Checkpoint(BlockingFacade &AFacade) : m_facade(AFacade) {
+        m_facade.m_undo.push_back(m_facade.m_impl.blocking);
+    }
+
+    BlockingFacade::Checkpoint::~Checkpoint() {
+        if (!m_keep) {
+            m_facade.m_undo.pop_back();
+            return;
+        }
+        // A new edit is what makes the history a line rather than a tree: whatever had been undone
+        // is no longer reachable from here.
+        m_facade.m_redo.clear();
+        const auto depth = static_cast<std::size_t>(m_facade.m_history_depth);
+        if (m_facade.m_undo.size() > depth) {
+            m_facade.m_undo.erase(m_facade.m_undo.begin(), m_facade.m_undo.end() - static_cast<long>(depth));
+        }
+    }
+
+    bool BlockingFacade::can_undo() const { return !m_undo.empty(); }
+
+    bool BlockingFacade::can_redo() const { return !m_redo.empty(); }
+
+    void BlockingFacade::undo() {
+        if (m_undo.empty()) return;
+        m_redo.push_back(m_impl.blocking);
+        m_impl.blocking = m_undo.back();
+        m_undo.pop_back();
+    }
+
+    void BlockingFacade::redo() {
+        if (m_redo.empty()) return;
+        m_undo.push_back(m_impl.blocking);
+        m_impl.blocking = m_redo.back();
+        m_redo.pop_back();
+    }
+
+    void BlockingFacade::set_history_depth(int depth) {
+        if (depth < 1) {
+            throw std::invalid_argument("Blocking.set_history_depth: depth must be >= 1, got " + std::to_string(depth));
+        }
+        m_history_depth = depth;
+        const auto keep = static_cast<std::size_t>(depth);
+        if (m_undo.size() > keep) {
+            m_undo.erase(m_undo.begin(), m_undo.end() - static_cast<long>(keep));
+        }
+    }
+
+    int BlockingFacade::history_depth() const { return m_history_depth; }
+
     int BlockingFacade::degree() const { return static_cast<int>(m_impl.blocking.degree()); }
 
     void BlockingFacade::set_degree(int degree, double tol_vertex, double tol_curve, double tol_surface) {
         check_degree(degree, "Blocking.set_degree");
+        const Checkpoint checkpoint(*this);
         m_impl.blocking.set_degree(static_cast<std::size_t>(degree), tol_vertex, tol_curve, tol_surface);
     }
 
     int BlockingFacade::create_quad_block(const std::vector<std::array<double, 3>> &corners) {
+        const Checkpoint checkpoint(*this);
         const auto points = to_points<4>(corners, "Blocking.create_quad_block");
         return static_cast<int>(m_impl.blocking.create_quad_block(points)->info().id);
     }
 
     int BlockingFacade::create_hex_block(const std::vector<std::array<double, 3>> &corners) {
+        const Checkpoint checkpoint(*this);
         const auto points = to_points<8>(corners, "Blocking.create_hex_block");
         return static_cast<int>(m_impl.blocking.create_hex_block(points)->info().id);
     }
 
-    void BlockingFacade::build_connectivity() { m_impl.blocking.build_connectivity(); }
+    void BlockingFacade::build_connectivity() {
+        const Checkpoint checkpoint(*this);
+        m_impl.blocking.build_connectivity();
+    }
 
     void BlockingFacade::classify(double tol_vertex, double tol_curve, double tol_surface) {
+        const Checkpoint checkpoint(*this);
         m_impl.blocking.classify(tol_vertex, tol_curve, tol_surface);
     }
 
@@ -116,10 +172,12 @@ namespace gecko::app {
     }
 
     void BlockingFacade::delete_face(int face_id) {
+        const Checkpoint checkpoint(*this);
         m_impl.blocking.delete_face(cell_or_throw<2>(m_impl, face_id, "face"));
     }
 
     void BlockingFacade::delete_block(int block_id) {
+        const Checkpoint checkpoint(*this);
         m_impl.blocking.delete_block(cell_or_throw<3>(m_impl, block_id, "block"));
     }
 
@@ -202,18 +260,21 @@ namespace gecko::app {
     }
 
     bool BlockingFacade::cut_sheet(int edge_id, double param) {
-        if (!m_impl.blocking.cut_sheet(cell_or_throw<1>(m_impl, edge_id, "edge"), param)) return false;
+        Checkpoint checkpoint(*this);
+        if (!m_impl.blocking.cut_sheet(cell_or_throw<1>(m_impl, edge_id, "edge"), param)) {
+            checkpoint.discard();
+            return false;
+        }
         return true;
     }
 
     bool BlockingFacade::delete_sheet(int edge_id, double tol_vertex, double tol_curve, double tol_surface) {
+        Checkpoint checkpoint(*this);
         if (!m_impl.blocking.delete_sheet(
                 cell_or_throw<1>(m_impl, edge_id, "edge"), tol_vertex, tol_curve, tol_surface)) {
+            checkpoint.discard();
             return false;
         }
-        // Collapsing merges corners pairwise, so ids naming the side that went have to go — and the
-        // survivors can come back as attributes CGAL rebuilt, which no id then names. Prune, then
-        // re-index, for the reason delete_block() spells out.
         return true;
     }
 
@@ -274,10 +335,12 @@ namespace gecko::app {
     }
 
     void BlockingFacade::move_node(int node_id, double x, double y, double z) {
+        const Checkpoint checkpoint(*this);
         m_impl.blocking.move_node(find_node(m_impl, node_id), Point3d(x, y, z));
     }
 
     void BlockingFacade::snap_node(int node_id, double tol_vertex, double tol_curve, double tol_surface) {
+        const Checkpoint checkpoint(*this);
         m_impl.blocking.snap_node(find_node(m_impl, node_id), tol_vertex, tol_curve, tol_surface);
     }
 

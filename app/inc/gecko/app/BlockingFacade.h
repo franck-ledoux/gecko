@@ -422,6 +422,47 @@ namespace gecko::app {
          */
         bool delete_sheet(int edge_id, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
 
+        /**
+         * @brief Whether there is an edit to take back. @return true if undo() would do something.
+         */
+        [[nodiscard]] bool can_undo() const;
+        /** @brief Whether there is an undone edit to put back. @return true if redo() would do
+         * something. */
+        [[nodiscard]] bool can_redo() const;
+
+        /**
+         * @brief Takes back the most recent edit, restoring the blocking as it was just before it.
+         *
+         * Snapshot-based: every operation that changes the blocking copies it first, and undoing puts
+         * that copy back. Not a stack of inverse operations, because the operations here do not have
+         * inverses — collapsing the layer a cut just created does not restore the block, as
+         * `delete_sheet()` documents and the tests fix.
+         *
+         * Ids survive an undo, since the snapshot carries them: a caller holding a block id from
+         * before the undone edit finds its block again, exactly as it would had the edit not happened.
+         *
+         * Does nothing when there is nothing to take back.
+         */
+        void undo();
+        /** @brief Puts back the most recently undone edit. Does nothing when there is none; any new
+         * edit discards the redo history, which is what makes the two stacks a line rather than a
+         * tree. */
+        void redo();
+
+        /**
+         * @brief How many edits can be taken back. Beyond this the oldest is dropped.
+         *
+         * A snapshot is a whole copy of the blocking, so the history costs depth times its size.
+         * A few thousand cells at degree 3 is a couple of megabytes each, which is what makes 20 a
+         * sensible default rather than a compromise.
+         *
+         * @param depth Number of edits to keep, at least 1.
+         * @throw std::invalid_argument if @p depth is below 1.
+         */
+        void set_history_depth(int depth);
+        /** @brief How many edits can be taken back. @return The current depth. */
+        [[nodiscard]] int history_depth() const;
+
         /** @brief The blocking and what little bookkeeping is still kept alongside it; public only
          * so the .cpp's free-function helpers can name it — never part of the class' actual
          * (Python-facing) interface. */
@@ -441,7 +482,42 @@ namespace gecko::app {
         };
 
     private:
+        /**
+         * @brief Scope guard taking the snapshot one edit can be undone from.
+         *
+         * Declared at the top of every method that changes the blocking, for the reason
+         * `Blocking::EditSession` is: written as a call, "snapshot before you edit" is a rule to
+         * remember, and the one place it is forgotten is the one edit that cannot be taken back.
+         *
+         * An operation that *refuses* — `cut_sheet()` and `delete_sheet()` both can — calls
+         * `discard()`, since a snapshot of a state nothing changed would spend an undo step undoing
+         * nothing.
+         */
+        class Checkpoint {
+        public:
+            /** @brief Snapshots @p AFacade's blocking. @param AFacade The façade being edited. */
+            explicit Checkpoint(BlockingFacade &AFacade);
+            Checkpoint(const Checkpoint &) = delete;
+            Checkpoint &operator=(const Checkpoint &) = delete;
+            /** @brief Keeps the snapshot, unless it was discarded. */
+            ~Checkpoint();
+            /** @brief Drops the snapshot: the edit did not happen. */
+            void discard() { m_keep = false; }
+
+        private:
+            /** @brief The façade whose history this guard writes into. */
+            BlockingFacade &m_facade;
+            /** @brief Whether the snapshot is still wanted when the guard ends. */
+            bool m_keep = true;
+        };
+
         Impl m_impl;
+        /** @brief Snapshots to undo to, oldest first; the last is the state before the last edit. */
+        std::vector<Impl::BlockingT> m_undo;
+        /** @brief Snapshots to redo to, discarded by any new edit. */
+        std::vector<Impl::BlockingT> m_redo;
+        /** @brief How many entries `m_undo` keeps. @see set_history_depth() */
+        int m_history_depth = 20;
     };
 
 } // namespace gecko::app
