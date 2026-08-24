@@ -3032,10 +3032,12 @@ namespace gecko {
             assign_missing_ids_of<3>(m_next_block_id);
         }
 
-        /** @copydoc assign_missing_ids
-         * @brief Gives a corner key and an id to every node that has neither — the 0-dimensional
-         * half of `assign_missing_ids()`, called on its own between the individual insertions of a
-         * cut, where a key must exist before any frame is read from one. */
+        /**
+         * @brief Gives a corner key and an id to every node that has neither.
+         *
+         * The 0-dimensional half of `assign_missing_ids()`, called on its own between the individual
+         * insertions of a cut, where a key must exist before any frame is read from one.
+         */
         void assign_missing_node_ids() {
             for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
                  it != itend;

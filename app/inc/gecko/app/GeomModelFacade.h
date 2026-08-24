@@ -9,7 +9,7 @@
 
 #include <gecko/geom/FacetedGeometry.h>
 
-namespace gecko::python {
+namespace gecko::app {
 
     /**
      * @class GeomModelFacade
@@ -141,4 +141,4 @@ namespace gecko::python {
         std::unique_ptr<FacetedGeometry> m_model;
     };
 
-} // namespace gecko::python
+} // namespace gecko::app

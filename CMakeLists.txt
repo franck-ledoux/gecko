@@ -206,6 +206,7 @@ if (GECKO_BUILD_LINT)
             ${CMAKE_SOURCE_DIR}/mesh/inc/*.h ${CMAKE_SOURCE_DIR}/mesh/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/io/inc/*.h ${CMAKE_SOURCE_DIR}/io/tst/*.cpp
             ${CMAKE_SOURCE_DIR}/block/inc/*.h ${CMAKE_SOURCE_DIR}/block/tst/*.cpp
+            ${CMAKE_SOURCE_DIR}/app/inc/*.h ${CMAKE_SOURCE_DIR}/app/src/*.cpp
             ${CMAKE_SOURCE_DIR}/python/src/*.h ${CMAKE_SOURCE_DIR}/python/src/*.cpp
             ${CMAKE_SOURCE_DIR}/biy/src/*.h ${CMAKE_SOURCE_DIR}/biy/src/*.cpp
     )
@@ -283,6 +284,7 @@ add_subdirectory(mesh)
 add_subdirectory(io)
 add_subdirectory(geom)
 add_subdirectory(block)
+add_subdirectory(app)
 
 if (GECKO_BUILD_SANDBOX)
     add_subdirectory(sandbox)

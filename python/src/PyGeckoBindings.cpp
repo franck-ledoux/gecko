@@ -4,12 +4,12 @@
 
 #include <pybind11/stl.h>
 
-#include "BlockingFacade.h"
-#include "GeomModelFacade.h"
+#include <gecko/app/BlockingFacade.h>
+#include <gecko/app/GeomModelFacade.h>
 
 namespace py = pybind11;
 
-namespace gecko::python {
+namespace gecko::app {
 
     namespace {
         std::string hello() { return "Hello from gecko!"; }
@@ -274,4 +274,4 @@ namespace gecko::python {
                  "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.");
     }
 
-} // namespace gecko::python
+} // namespace gecko::app

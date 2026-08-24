@@ -11,17 +11,13 @@ add_executable(biy
         src/BiyApp.cpp
         src/BiyConfig.cpp
         src/PythonConsole.cpp
-        # The façade + binding glue, shared verbatim with the `gecko` Python extension module. Too
-        # small to be worth an installed library of its own (same call as python/CMakeLists.txt).
-        ${CMAKE_SOURCE_DIR}/python/src/GeomModelFacade.cpp
-        ${CMAKE_SOURCE_DIR}/python/src/BlockingFacade.cpp
+        # The pybind11 glue, compiled in rather than linked: biy embeds the interpreter and has to
+        # register the same module the `gecko` extension exposes, from inside its own process.
         ${CMAKE_SOURCE_DIR}/python/src/PyGeckoBindings.cpp
 )
 target_include_directories(biy PRIVATE ${CMAKE_SOURCE_DIR}/python/src)
 target_link_libraries(biy PRIVATE
-        Gecko::Block
-        Gecko::Geom
-        Gecko::Io
+        Gecko::App
         polyscope
         pybind11::embed
         json_dep

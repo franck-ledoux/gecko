@@ -1,4 +1,4 @@
-#include "GeomModelFacade.h"
+#include <gecko/app/GeomModelFacade.h>
 
 #include <algorithm>
 #include <map>
@@ -7,7 +7,7 @@
 
 #include <gecko/utils/Groups.h>
 
-namespace gecko::python {
+namespace gecko::app {
 
     GeomModelFacade::GeomModelFacade(const std::string &path) : m_model(std::make_unique<FacetedGeometry>(path)) {}
 
@@ -203,4 +203,4 @@ namespace gecko::python {
         return result;
     }
 
-} // namespace gecko::python
+} // namespace gecko::app

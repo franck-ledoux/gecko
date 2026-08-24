@@ -14,8 +14,8 @@ namespace polyscope {
 } // namespace polyscope
 
 #include "BiyConfig.h"
-#include "BlockingFacade.h"
-#include "GeomModelFacade.h"
+#include <gecko/app/BlockingFacade.h>
+#include <gecko/app/GeomModelFacade.h>
 
 namespace gecko::biy {
 
@@ -87,14 +87,14 @@ namespace gecko::biy {
         [[nodiscard]] std::mutex &mutex() { return m_mutex; }
 
         /** @brief The geometric model, for injection into the Python console. @return The model. */
-        [[nodiscard]] python::GeomModelFacade &model() { return *m_model; }
+        [[nodiscard]] app::GeomModelFacade &model() { return *m_model; }
 
         /**
          * @brief Gets the blocking, creating an empty one on first use so the Python console always
          * has a `blocking` to talk to.
          * @return The blocking.
          */
-        [[nodiscard]] python::BlockingFacade &blocking();
+        [[nodiscard]] app::BlockingFacade &blocking();
 
         /**
          * @brief Asks for the Polyscope structures to be rebuilt on the next frame. Call after any
@@ -233,8 +233,8 @@ namespace gecko::biy {
 
         std::mutex m_mutex;
         BiyConfig m_config;
-        std::unique_ptr<python::GeomModelFacade> m_model;
-        std::unique_ptr<python::BlockingFacade> m_blocking;
+        std::unique_ptr<app::GeomModelFacade> m_model;
+        std::unique_ptr<app::BlockingFacade> m_blocking;
         std::string m_model_path;
         /** @brief Set by `request_refresh()`, consumed by the next `per_frame()`. Atomic rather than
          * guarded by `m_mutex`: the console calls `request_refresh()` while already holding that

@@ -78,7 +78,7 @@ namespace gecko::biy {
          * the geometry itself was corrupted, a value at rounding while the screen shows curves means
          * the drawing was, and those are opposite places to look.
          */
-        std::string bend_report(python::BlockingFacade &blocking) {
+        std::string bend_report(app::BlockingFacade &blocking) {
             const auto bends = blocking.edge_bends();
             if (bends.empty()) return {};
             const auto worst = std::max_element(bends.begin(), bends.end());
@@ -148,7 +148,7 @@ namespace gecko::biy {
     } // namespace
 
     BiyApp::BiyApp(const std::string &model_path, int order)
-        : m_model(std::make_unique<python::GeomModelFacade>(model_path)), m_model_path(model_path), m_order(order) {
+        : m_model(std::make_unique<app::GeomModelFacade>(model_path)), m_model_path(model_path), m_order(order) {
         std::string config_message;
         m_config = BiyConfig::load("biy_config.json", config_message);
         m_show_block_edges = m_config.show_block_edges;
@@ -269,8 +269,8 @@ namespace gecko::biy {
         polyscope::options::automaticallyComputeSceneExtents = false;
     }
 
-    python::BlockingFacade &BiyApp::blocking() {
-        if (!m_blocking) m_blocking = std::make_unique<python::BlockingFacade>(*m_model, m_order);
+    app::BlockingFacade &BiyApp::blocking() {
+        if (!m_blocking) m_blocking = std::make_unique<app::BlockingFacade>(*m_model, m_order);
         return *m_blocking;
     }
 

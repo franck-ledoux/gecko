@@ -12,9 +12,9 @@
 #include <gecko/math/BezierCurve.h>
 #include <gecko/math/Point3d.h>
 
-#include "GeomModelFacade.h"
+#include <gecko/app/GeomModelFacade.h>
 
-namespace gecko::python {
+namespace gecko::app {
 
     /**
      * @class BlockingFacade
@@ -351,23 +351,23 @@ namespace gecko::python {
         [[nodiscard]] std::vector<int> mesh_quad_owners(int subdivisions);
 
         /**
-         * @brief The edges cut_sheet() would split if aimed at @p edge_index — the whole sheet, not
-         * just the one edge — so a caller can show what a cut is about to do before doing it.
-         * @param edge_id An edge, as its position in the order edge_vertices()/edge_segments()/
-         *        edge_classification_dims() all use.
-         * @return Those same positions, for every edge of the sheet (@p edge_index included), or an
-         *         empty list when the sheet cannot be cut homogeneously.
-         * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
-         */
-        /**
          * @brief Measures every block of the blocking, from its own stored geometry.
          * @param subdivisions Intervals per parametric axis (>= 1). Exact at 1 for a block whose
          *        faces are planar; converges as it grows for a curved or warped one.
-         * @return One signed volume per block, in the order nb_cells(3) counts them. A negative
+         * @return One signed volume per block, in the order block_ids() reports them. A negative
          *         value means that block's frame is inverted.
          */
         [[nodiscard]] std::vector<double> block_volumes(int subdivisions);
 
+        /**
+         * @brief The edges cut_sheet() would split if aimed at @p edge_id — the whole sheet, not just
+         * the one edge — so a caller can show what a cut is about to do before doing it.
+         * @param edge_id An edge id, as edge_ids() reports them.
+         * @return A *position* per edge of the sheet, in the order edge_vertices()/edge_segments()
+         *         use, or an empty list when the sheet cannot be cut homogeneously. Positions rather
+         *         than ids because this answer exists to be drawn: see edge_ids().
+         * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
+         */
         [[nodiscard]] std::vector<int> sheet_edges(int edge_id);
 
         /**
@@ -426,10 +426,17 @@ namespace gecko::python {
          * so the .cpp's free-function helpers can name it — never part of the class' actual
          * (Python-facing) interface. */
         struct Impl {
+            /** @brief The kernel type this façade wraps. */
             using BlockingT = Blocking<FacetedGeometry>;
 
+            /** @brief The blocking itself — all the state there is, now that cells name themselves. */
             BlockingT blocking;
 
+            /**
+             * @brief Builds the blocking this façade wraps.
+             * @param geom The geometric model to build against.
+             * @param degree The Bezier degree every cell's geometry is built at.
+             */
             explicit Impl(const FacetedGeometry &geom, int degree) : blocking(geom, static_cast<std::size_t>(degree)) {}
         };
 
@@ -437,4 +444,4 @@ namespace gecko::python {
         Impl m_impl;
     };
 
-} // namespace gecko::python
+} // namespace gecko::app

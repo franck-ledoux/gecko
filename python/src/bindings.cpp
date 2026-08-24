@@ -7,4 +7,4 @@
 
 #include "PyGeckoBindings.h"
 
-PYBIND11_MODULE(gecko, m) { gecko::python::register_gecko_module(m); }
+PYBIND11_MODULE(gecko, m) { gecko::app::register_gecko_module(m); }

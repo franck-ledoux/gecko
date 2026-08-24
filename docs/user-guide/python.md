@@ -167,7 +167,7 @@ cd build && ctest -R test_python --output-on-failure
 
 ## Code coverage
 
-Because `gecko`'s C++ source (`python/src/bindings.cpp`) is compiled by the very same CMake build
+Because `gecko`'s C++ source (`python/src/bindings.cpp`, over the `Gecko::App` façades) is compiled by the very same CMake build
 as the rest of the library, it picks up the project's `--coverage` instrumentation automatically
 whenever `GECKO_CODE_COVERAGE`/`GECKO_CODE_COVERAGE_HTML_REPORT` is on (see
 [Building & Testing](../developer-guide/testing.md#code-coverage-html-report)) — and because

@@ -1,11 +1,11 @@
-#include "BlockingFacade.h"
+#include <gecko/app/BlockingFacade.h>
 
 #include <stdexcept>
 #include <type_traits>
 
 #include <gecko/io/VtkMeshWriter.h>
 
-namespace gecko::python {
+namespace gecko::app {
 
     namespace {
         template<std::size_t K>
@@ -578,4 +578,4 @@ namespace gecko::python {
         return owners;
     }
 
-} // namespace gecko::python
+} // namespace gecko::app
