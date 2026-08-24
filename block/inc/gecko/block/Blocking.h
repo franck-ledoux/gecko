@@ -2712,27 +2712,9 @@ namespace gecko {
                     sys[r][unknowns + 2] = rhs.z();
                 }
 
-                for (std::size_t col = 0; col < unknowns; ++col) {
-                    std::size_t pivot = col;
-                    for (std::size_t r = col + 1; r < unknowns; ++r) {
-                        if (std::abs(sys[r][col]) > std::abs(sys[pivot][col])) pivot = r;
-                    }
-                    std::swap(sys[col], sys[pivot]);
-                    // A Bernstein collocation matrix at distinct parameters is non-singular, so this
-                    // only guards against a degenerate build rather than an expected case.
-                    if (std::abs(sys[col][col]) < 1e-300) continue;
-                    for (std::size_t r = 0; r < unknowns; ++r) {
-                        if (r == col) continue;
-                        const double factor = sys[r][col] / sys[col][col];
-                        for (std::size_t c = col; c < unknowns + 3; ++c) {
-                            sys[r][c] -= factor * sys[col][c];
-                        }
-                    }
-                }
-
+                const auto solved = solve_for_points(sys);
                 for (std::size_t r = 0; r < unknowns; ++r) {
-                    const double d = sys[r][r];
-                    fitted[r + 1] = Point3d(sys[r][unknowns] / d, sys[r][unknowns + 1] / d, sys[r][unknowns + 2] / d);
+                    fitted[r + 1] = solved[r];
                 }
                 return fitted;
             }
@@ -2985,19 +2967,130 @@ namespace gecko {
             const auto result = nearest_of(AFace->info().geom_targets, AFace->info().surface.value(0.5, 0.5));
             if (result.nearest_dim != GroupDim::Dim2) return;
 
-            const std::size_t n = m_degree + 1;
-            std::vector<std::vector<Point3d>> samples(n, std::vector<Point3d>(n));
-            for (std::size_t i = 0; i < n; ++i) {
-                for (std::size_t j = 0; j < n; ++j) {
-                    const double u = static_cast<double>(i) / static_cast<double>(m_degree);
-                    const double v = static_cast<double>(j) / static_cast<double>(m_degree);
+            // Far more samples than there are unknowns, and none of them on the boundary: the fit
+            // below moves only the interior control points, so a boundary sample would pull against
+            // rows it cannot move and bias the answer.
+            const std::size_t steps = 4 * m_degree;
+            std::vector<std::array<double, 2>> params;
+            std::vector<Point3d> points;
+            for (std::size_t i = 1; i < steps; ++i) {
+                for (std::size_t j = 1; j < steps; ++j) {
+                    const double u = static_cast<double>(i) / static_cast<double>(steps);
+                    const double v = static_cast<double>(j) / static_cast<double>(steps);
                     Point3d sample = AFace->info().surface.value(u, v);
-                    const bool interior = i > 0 && i + 1 < n && j > 0 && j + 1 < n;
-                    if (interior) project_onto(result.nearest_dim, result.nearest_tag, sample);
-                    samples[i][j] = sample;
+                    project_onto(result.nearest_dim, result.nearest_tag, sample);
+                    params.push_back({u, v});
+                    points.push_back(sample);
                 }
             }
-            AFace->info().surface = interpolating_surface(samples);
+            AFace->info().surface = fitted_interior(AFace->info().surface, params, points);
+        }
+
+        /**
+         * @brief Solves one square linear system carrying 3 right-hand sides, one per coordinate.
+         *
+         * Gauss-Jordan with partial pivoting, in place. The 3 coordinates share a matrix, so they are
+         * carried as 3 extra columns rather than solved 3 times.
+         *
+         * @param ASystem The augmented system, `n` rows of `n + 3`; consumed.
+         * @return One point per row: the solution.
+         */
+        static std::vector<Point3d> solve_for_points(std::vector<std::vector<double>> &ASystem) {
+            const std::size_t n = ASystem.size();
+            for (std::size_t col = 0; col < n; ++col) {
+                std::size_t pivot = col;
+                for (std::size_t r = col + 1; r < n; ++r) {
+                    if (std::abs(ASystem[r][col]) > std::abs(ASystem[pivot][col])) pivot = r;
+                }
+                std::swap(ASystem[col], ASystem[pivot]);
+                // Both systems built on this are non-singular by construction — a Bernstein
+                // collocation matrix at distinct parameters, and a Gram matrix of linearly
+                // independent basis functions — so this only guards a degenerate build.
+                if (std::abs(ASystem[col][col]) < 1e-300) continue;
+                for (std::size_t r = 0; r < n; ++r) {
+                    if (r == col) continue;
+                    const double factor = ASystem[r][col] / ASystem[col][col];
+                    for (std::size_t c = col; c < n + 3; ++c) {
+                        ASystem[r][c] -= factor * ASystem[col][c];
+                    }
+                }
+            }
+            std::vector<Point3d> solution(n);
+            for (std::size_t r = 0; r < n; ++r) {
+                const double d = ASystem[r][r];
+                solution[r] = Point3d(ASystem[r][n] / d, ASystem[r][n + 1] / d, ASystem[r][n + 2] / d);
+            }
+            return solution;
+        }
+
+        /**
+         * @brief Refits a surface's *interior* control points so it follows @p APoints as closely as
+         * a surface of its degree can, leaving its 4 boundary rows exactly where they are.
+         *
+         * Least squares over far more points than there are unknowns, which is what separates this
+         * from `interpolating_surface()`: interpolation pins the surface at `(degree+1)^2` parameters
+         * and says nothing about what happens between them, and between them is where the error
+         * lives. Fitting a cube's face to a sphere, the interpolant sat 4e-03 off at its own
+         * parameters — the fixture's own faceting — and 2.2e-02 off halfway between them.
+         *
+         * The boundary is left alone rather than fitted, which is what keeps the face welded to its
+         * edges and to the neighbouring face across each of them.
+         *
+         * @param ASurface The surface to refit; its boundary rows are kept verbatim.
+         * @param AParams The parameters @p APoints were taken at, `(u,v)` each.
+         * @param APoints The points to follow, one per entry of @p AParams.
+         * @return The refitted surface, or @p ASurface unchanged when its degree leaves no interior
+         *         control point to move.
+         */
+        static FaceSurfaceT fitted_interior(const FaceSurfaceT &ASurface,
+                                            const std::vector<std::array<double, 2>> &AParams,
+                                            const std::vector<Point3d> &APoints) {
+            const std::size_t n = ASurface.degree();
+            if (n < 2) return ASurface;
+
+            // The unknowns: the (n-1)^2 control points that are not on a boundary row.
+            std::vector<std::pair<std::size_t, std::size_t>> interior;
+            for (std::size_t i = 1; i < n; ++i) {
+                for (std::size_t j = 1; j < n; ++j) {
+                    interior.emplace_back(i, j);
+                }
+            }
+            const std::size_t unknowns = interior.size();
+            std::vector<std::vector<double>> sys(unknowns, std::vector<double>(unknowns + 3, 0.0));
+
+            for (std::size_t k = 0; k < AParams.size(); ++k) {
+                const double u = AParams[k][0];
+                const double v = AParams[k][1];
+                // What the boundary already contributes at this parameter, moved to the right side.
+                Vector3d residual(Point3d(0, 0, 0), APoints[k]);
+                for (std::size_t i = 0; i <= n; ++i) {
+                    for (std::size_t j = 0; j <= n; ++j) {
+                        if (i > 0 && i < n && j > 0 && j < n) continue;
+                        const double w = bernstein(n, i, u) * bernstein(n, j, v);
+                        residual = residual - Vector3d(Point3d(0, 0, 0), ASurface.control_point(i, j)) * w;
+                    }
+                }
+                std::vector<double> weight(unknowns);
+                for (std::size_t p = 0; p < unknowns; ++p) {
+                    weight[p] = bernstein(n, interior[p].first, u) * bernstein(n, interior[p].second, v);
+                }
+                // The normal equations, accumulated sample by sample.
+                for (std::size_t p = 0; p < unknowns; ++p) {
+                    for (std::size_t q = 0; q < unknowns; ++q) {
+                        sys[p][q] += weight[p] * weight[q];
+                    }
+                    sys[p][unknowns] += weight[p] * residual.x();
+                    sys[p][unknowns + 1] += weight[p] * residual.y();
+                    sys[p][unknowns + 2] += weight[p] * residual.z();
+                }
+            }
+
+            const auto solved = solve_for_points(sys);
+            auto grid = ASurface.control_points();
+            for (std::size_t p = 0; p < unknowns; ++p) {
+                grid[interior[p].first][interior[p].second] = solved[p];
+            }
+            return FaceSurfaceT(grid);
         }
 
         /**
