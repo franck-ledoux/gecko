@@ -534,7 +534,7 @@ namespace gecko {
          *        module's other editing operations share).
          * @return true if `AFace` can be deleted.
          */
-        bool can_delete_face(Face AFace) const {
+        bool can_delete_face(typename Map::template Attribute_const_descriptor<2>::type AFace) const {
             (void)AFace;
             return is_purely_2d();
         }

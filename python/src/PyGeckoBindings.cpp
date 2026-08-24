@@ -79,8 +79,8 @@ namespace gecko::python {
             .def("create_hex_block",
                  &BlockingFacade::create_hex_block,
                  py::arg("corners"),
-                 "Creates a standalone hex block from its 8 (x,y,z) corners (HEX8 ordering). Returns where it sits in "
-                 "the block traversal — a position, not a lasting id: cutting or deleting renumbers what follows.")
+                 "Creates a standalone hex block from its 8 (x,y,z) corners (HEX8 ordering). Returns the new block "
+                 "id, which keeps naming that block for as long as it exists.")
             .def("build_connectivity",
                  &BlockingFacade::build_connectivity,
                  "Auto-detects and sews coincident blocks created so far. Not incremental.")
@@ -122,6 +122,18 @@ namespace gecko::python {
                  py::arg("face_id"),
                  "Checks whether the face with this id can be deleted.")
             .def("delete_face", &BlockingFacade::delete_face, py::arg("face_id"), "Deletes the face with this id.")
+            .def("edge_ids",
+                 &BlockingFacade::edge_ids,
+                 "Every edge's id, in the order ``edge_vertices``/``edge_segments``/``edge_bends``/"
+                 "``edge_classification_dims`` index. The bridge between the 2 ways of naming a cell: what is drawn "
+                 "is positional, because a renderer indexes a flat array, while what is acted on is an id, because "
+                 "a position is only true until the next operation renumbers it.")
+            .def("face_ids",
+                 &BlockingFacade::face_ids,
+                 "Every face's id, in the order ``face_classification_dims``/``face_grid_owners`` index.")
+            .def("block_ids",
+                 &BlockingFacade::block_ids,
+                 "Every block's id, in the order ``block_volumes``/``mesh_hex_owners`` index.")
             .def("node_ids", &BlockingFacade::node_ids, "Ids of every corner node of the block structure.")
             .def("node_position",
                  &BlockingFacade::node_position,
@@ -212,25 +224,26 @@ namespace gecko::python {
                  "control points to its own chord. A straight blocking reads as zero here whatever is done to it.")
             .def("delete_block",
                  &BlockingFacade::delete_block,
-                 py::arg("block_index"),
+                 py::arg("block_id"),
                  "Deletes one block, along with every face, edge and corner that existed only because of it. "
                  "What it shared with a neighbouring block stays, as that neighbour's boundary.")
             .def("sheet_edges",
                  &BlockingFacade::sheet_edges,
-                 py::arg("edge_index"),
-                 "Every edge ``cut_sheet`` would split if aimed at ``edge_index`` — the whole sheet, as positions in "
-                 "the same order ``edge_vertices``/``edge_segments`` use. Empty when the sheet cannot be cut.")
+                 py::arg("edge_id"),
+                 "Every edge ``cut_sheet`` would split if aimed at ``edge_id`` — the whole sheet, as positions in "
+                 "the same order ``edge_vertices``/``edge_segments`` use, for drawing. Empty when the sheet cannot "
+                 "be cut.")
             .def("sheet_cut_points",
                  &BlockingFacade::sheet_cut_points,
-                 py::arg("edge_index"),
+                 py::arg("edge_id"),
                  py::arg("param"),
                  "Where a cut would land: one point per sheet edge, in the same order ``sheet_edges`` reports, each "
                  "on the side the whole sheet agrees on. Empty when the sheet cannot be cut.")
             .def("cut_sheet",
                  &BlockingFacade::cut_sheet,
-                 py::arg("edge_index"),
+                 py::arg("edge_id"),
                  py::arg("param"),
-                 "Cuts the blocking along the whole sheet through ``edge_index``, at ``param`` along that edge "
+                 "Cuts the blocking along the whole sheet through ``edge_id``, at ``param`` along that edge "
                  "(strictly between 0 and 1), splitting every block the sheet crosses in 2 and keeping the geometry "
                  "it cut through exactly. Returns False, changing nothing, if the cut is not possible.")
             .def("mesh_hex_owners",
@@ -247,11 +260,11 @@ namespace gecko::python {
                  "generate no mesh quads and are not counted.")
             .def("delete_sheet",
                  &BlockingFacade::delete_sheet,
-                 py::arg("edge_index"),
+                 py::arg("edge_id"),
                  py::arg("tol_vertex"),
                  py::arg("tol_curve") = -1.0,
                  py::arg("tol_surface") = -1.0,
-                 "Deletes the whole sheet through ``edge_index``, collapsing every block it crosses and gluing back "
+                 "Deletes the whole sheet through ``edge_id``, collapsing every block it crosses and gluing back "
                  "what was either side of it — the inverse of ``cut_sheet``. Where 2 corners merge, the more "
                  "constrained classification wins (a model vertex over a curve, a curve over a surface) and the "
                  "merged corner is projected onto it. A sheet holding every block there is collapses too, leaving "

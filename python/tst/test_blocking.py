@@ -276,14 +276,14 @@ def test_sheet_edges_reports_the_whole_sheet_before_cutting(geom_model_path):
 
     # Every edge belongs to some sheet, and a sheet is always reported including the edge asked for.
     for index in range(blocking.nb_cells(1)):
-        sheet = blocking.sheet_edges(index)
+        sheet = blocking.sheet_edges(blocking.edge_ids()[index])
         assert index in sheet
         # A hex edge has 3 parallel siblings; crossing into the neighbour block adds more.
         assert len(sheet) in (4, 6)
 
     # The 2 blocks share 2 y-running edges, so some sheet must span both blocks (6 edges) and some
     # must stay inside one (4) — that difference is the propagation itself.
-    sizes = {len(blocking.sheet_edges(i)) for i in range(blocking.nb_cells(1))}
+    sizes = {len(blocking.sheet_edges(e)) for e in blocking.edge_ids()}
     assert sizes == {4, 6}
 
 
@@ -293,9 +293,9 @@ def test_cut_sheet_splits_the_blocks_and_keeps_the_blocking_valid(geom_model_pat
     blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
     assert blocking.nb_cells(3) == 1
 
-    sheet = blocking.sheet_edges(0)
+    sheet = blocking.sheet_edges(blocking.edge_ids()[0])
     assert len(sheet) == 4
-    assert blocking.cut_sheet(0, 0.5)
+    assert blocking.cut_sheet(blocking.edge_ids()[0], 0.5)
 
     assert blocking.nb_cells(3) == 2
     assert blocking.nb_cells(0) == 12
@@ -310,7 +310,7 @@ def test_cut_sheet_refuses_out_of_range_parameters(geom_model_path):
     blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
 
     for bad in (0.0, 1.0, -0.5, 2.0):
-        assert not blocking.cut_sheet(0, bad)
+        assert not blocking.cut_sheet(blocking.edge_ids()[0], bad)
     assert blocking.nb_cells(3) == 1
 
 
@@ -391,7 +391,7 @@ def test_every_edge_cuts_a_block_into_two_positive_volumes(geom_model_path, degr
         model = gecko.GeomModel(geom_model_path)
         blocking = gecko.Blocking(model, degree=degree)
         blocking.create_hex_block(_TALL_BOX)
-        assert blocking.cut_sheet(index, 0.25)
+        assert blocking.cut_sheet(blocking.edge_ids()[index], 0.25)
 
         volumes = blocking.block_volumes(4)
         assert len(volumes) == 2
@@ -417,13 +417,13 @@ def test_a_sheet_stays_in_one_plane_after_an_earlier_cut(geom_model_path, degree
 
     ends = blocking.edge_vertices(1)
     for i in range(blocking.nb_cells(1)):
-        sheet = blocking.sheet_edges(i)
+        sheet = blocking.sheet_edges(blocking.edge_ids()[i])
         assert sheet, "edge %d lost its sheet" % i
         a, b = ends[i * 2], ends[i * 2 + 1]
         # The cut runs perpendicular to the edges it splits, so on this axis-aligned block every cut
         # point shares the coordinate of the axis the aimed edge runs along.
         axis = max(range(3), key=lambda k: abs(a[k] - b[k]))
-        along = [p[axis] for p in blocking.sheet_cut_points(i, 0.4)]
+        along = [p[axis] for p in blocking.sheet_cut_points(blocking.edge_ids()[i], 0.4)]
         assert max(along) - min(along) < 1e-12, (
             "sheet through edge %d is not planar: %r" % (i, sorted(along)))
 
@@ -463,7 +463,7 @@ def test_delete_block_takes_only_what_the_block_owned(geom_model_path):
     assert blocking.nb_cells(0) == 12
     assert blocking.nb_cells(3) == 2
 
-    blocking.delete_block(0)
+    blocking.delete_block(blocking.block_ids()[0])
 
     # The shared face, its edges and its corners survive as the other block's boundary; the 4
     # corners the deleted block alone owned go with it.
@@ -484,11 +484,11 @@ def test_delete_block_after_a_cut(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model, degree=3)
     blocking.create_hex_block(_unit_hex_at(0.0, 1.0))
-    assert blocking.cut_sheet(0, 0.4)
+    assert blocking.cut_sheet(blocking.edge_ids()[0], 0.4)
     assert blocking.nb_cells(3) == 2
 
     volumes_before = sorted(blocking.block_volumes(2))
-    blocking.delete_block(0)
+    blocking.delete_block(blocking.block_ids()[0])
 
     assert blocking.nb_cells(3) == 1
     assert blocking.is_valid_topology()
@@ -507,7 +507,7 @@ def test_delete_every_block_then_start_again(geom_model_path):
     blocking.build_connectivity()
 
     while blocking.nb_cells(3) > 0:
-        blocking.delete_block(0)
+        blocking.delete_block(blocking.block_ids()[0])
         assert blocking.is_valid_topology()
 
     # An empty blocking is a state to be in, not a broken one.
@@ -543,10 +543,10 @@ def test_deleting_blocks_keeps_every_corner_addressable(geom_model_path):
     blocking = gecko.Blocking(model, degree=3)
     blocking.create_hex_block(_TALL_BOX)
     for _ in range(3):
-        assert blocking.cut_sheet(random.randrange(blocking.nb_cells(1)), 0.5)
+        assert blocking.cut_sheet(random.choice(blocking.edge_ids()), 0.5)
 
     while blocking.nb_cells(3) > 0:
-        blocking.delete_block(random.randrange(blocking.nb_cells(3)))
+        blocking.delete_block(random.choice(blocking.block_ids()))
         assert blocking.is_valid_topology()
         # Every corner the blocking has must still be addressable, and every id must still resolve.
         assert len(blocking.node_ids()) == blocking.nb_cells(0)
@@ -566,7 +566,7 @@ def test_deleting_blocks_never_bends_a_straight_grid(geom_model_path):
     blocking = gecko.Blocking(model, degree=3)
     blocking.create_hex_block(_TALL_BOX)
     for _ in range(3):
-        assert blocking.cut_sheet(random.randrange(blocking.nb_cells(1)), 0.5)
+        assert blocking.cut_sheet(random.choice(blocking.edge_ids()), 0.5)
 
     def worst_bend():
         points = blocking.edge_control_points()
@@ -583,7 +583,7 @@ def test_deleting_blocks_never_bends_a_straight_grid(geom_model_path):
 
     assert worst_bend() < 1e-12
     while blocking.nb_cells(3) > 0:
-        blocking.delete_block(random.randrange(blocking.nb_cells(3)))
+        blocking.delete_block(random.choice(blocking.block_ids()))
         assert worst_bend() < 1e-12
 
 
@@ -599,10 +599,10 @@ def test_edge_bends_is_zero_on_a_straight_blocking(geom_model_path):
     assert max(blocking.edge_bends()) < 1e-12
 
     for _ in range(3):
-        assert blocking.cut_sheet(random.randrange(blocking.nb_cells(1)), round(random.uniform(0.1, 0.9), 3))
+        assert blocking.cut_sheet(random.choice(blocking.edge_ids()), round(random.uniform(0.1, 0.9), 3))
         assert max(blocking.edge_bends()) < 1e-12
     while blocking.nb_cells(3) > 0:
-        blocking.delete_block(random.randrange(blocking.nb_cells(3)))
+        blocking.delete_block(random.choice(blocking.block_ids()))
         assert not blocking.edge_bends() or max(blocking.edge_bends()) < 1e-12
 
     # And it reports one entry per edge, so a caller can say which edge is at fault.
@@ -665,29 +665,38 @@ def test_cutting_after_a_deletion_still_cuts_every_edge_from_the_same_end(geom_m
     blocking = gecko.Blocking(model, degree=3)
     blocking.create_hex_block(_UNIT_HEX)
 
+    # Positions, not ids: the sequence was found by a search that addressed cells by where they sat
+    # in the traversal, and it is that exact sequence which trips the bug. Each one is turned into
+    # the id at that position just before it is used.
     for step in (("cut", 10, 0.6), ("cut", 3, 0.221), ("del", 3), ("del", 2), ("cut", 20, 0.239)):
         if step[0] == "cut":
-            assert blocking.cut_sheet(step[1], step[2])
+            assert blocking.cut_sheet(blocking.edge_ids()[step[1]], step[2])
         else:
-            blocking.delete_block(step[1])
+            blocking.delete_block(blocking.block_ids()[step[1]])
         assert blocking.is_valid_topology()
         # A box cut by axis-aligned sheets has none but straight edges, at every step.
         assert max(blocking.edge_bends()) < 1e-12
 
 
 def _edge_along(blocking, axis, low, high):
-    """The edge running along `axis` whose 2 endpoints sit at `low` and `high` on it."""
+    """The id of the edge running along `axis` whose 2 endpoints sit at `low` and `high` on it.
+
+    Shows both halves of the naming split in one place: the control points come back as a flat array
+    indexed by position, so the search runs over positions, and what it hands back is the id at that
+    position — the only thing that will still mean this edge after the next operation.
+    """
     n = blocking.degree() + 1
     cps = blocking.edge_control_points()
-    for e in range(blocking.nb_cells(1)):
-        a = cps[e * n]
-        b = cps[e * n + n - 1]
+    ids = blocking.edge_ids()
+    for position in range(len(ids)):
+        a = cps[position * n]
+        b = cps[position * n + n - 1]
         others = [k for k in range(3) if k != axis]
         if any(abs(a[k] - b[k]) > 1e-9 for k in others):
             continue
         ends = sorted((a[axis], b[axis]))
         if abs(ends[0] - low) < 1e-6 and abs(ends[1] - high) < 1e-6:
-            return e
+            return ids[position]
     raise AssertionError("no edge along axis %d from %g to %g" % (axis, low, high))
 
 
@@ -718,7 +727,7 @@ def test_delete_sheet_empties_the_blocking_when_the_sheet_is_all_of_it(geom_mode
     blocking.create_hex_block(_UNIT_HEX)
 
     # Nothing either side to glue, so what is left is nothing — a state to be in, not a failure.
-    assert blocking.delete_sheet(0, 1e-9)
+    assert blocking.delete_sheet(blocking.edge_ids()[0], 1e-9)
     assert blocking.is_valid_topology()
     assert blocking.nb_cells(3) == 0
     assert blocking.nb_cells(0) == 0
@@ -745,7 +754,7 @@ def test_an_unclassified_grid_comes_apart_one_sheet_at_a_time(geom_model_path):
     while blocking.nb_cells(1) > 0:
         steps += 1
         assert steps < 40
-        assert any(blocking.delete_sheet(e, 1e-9) for e in range(blocking.nb_cells(1)))
+        assert any(blocking.delete_sheet(e, 1e-9) for e in blocking.edge_ids())
         assert blocking.is_valid_topology()
         bends = blocking.edge_bends()
         assert max(bends, default=0.0) < 1e-12
@@ -813,7 +822,7 @@ def test_delete_sheet_refuses_to_merge_2_different_model_vertices(square_model_p
     # All 4 corners are on the square's own vertices, so every edge joins 2 different ones. Merging
     # any pair would leave a model vertex with no corner of the blocking on it.
     assert blocking.node_classification_dims() == [0, 0, 0, 0]
-    for e in range(blocking.nb_cells(1)):
+    for e in blocking.edge_ids():
         assert not blocking.delete_sheet(e, 1e-6)
     assert blocking.nb_cells(2) == 1
     assert blocking.nb_cells(0) == 4
@@ -821,8 +830,62 @@ def test_delete_sheet_refuses_to_merge_2_different_model_vertices(square_model_p
     # Cut it, and the inner sheet becomes collapsible: its edges join a vertex to a mere curve point,
     # and the vertex survives that. It is the vertex-to-vertex pairing that is refused, not
     # classification as such.
-    assert blocking.cut_sheet(0, 0.5)
+    assert blocking.cut_sheet(blocking.edge_ids()[0], 0.5)
     assert blocking.nb_cells(2) == 2
-    assert any(blocking.delete_sheet(e, 1e-6) for e in range(blocking.nb_cells(1)))
+    assert any(blocking.delete_sheet(e, 1e-6) for e in blocking.edge_ids())
     assert blocking.nb_cells(2) == 1
     assert blocking.is_valid_topology()
+
+
+def test_ids_keep_naming_the_same_cell_while_positions_do_not(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+    blocking.create_hex_block([(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+                               (1.0, 0.0, 1.0), (2.0, 0.0, 1.0), (2.0, 1.0, 1.0), (1.0, 1.0, 1.0)])
+    blocking.build_connectivity()
+
+    # The bridge lines up with the display arrays it names.
+    assert len(blocking.edge_ids()) == blocking.nb_cells(1)
+    assert len(blocking.face_ids()) == blocking.nb_cells(2)
+    assert len(blocking.block_ids()) == blocking.nb_cells(3)
+    assert len(blocking.edge_bends()) == len(blocking.edge_ids())
+    assert len(blocking.block_volumes(1)) == len(blocking.block_ids())
+    assert len(set(blocking.edge_ids())) == len(blocking.edge_ids())
+
+    # A block, remembered both ways, and the other one deleted out from under it.
+    kept_id = blocking.block_ids()[1]
+    kept_position = 1
+    kept_volume = blocking.block_volumes(2)[kept_position]
+    blocking.delete_block(blocking.block_ids()[0])
+
+    # The id still names it; the position now names something else, or nothing at all.
+    assert kept_id in blocking.block_ids()
+    surviving_position = blocking.block_ids().index(kept_id)
+    assert surviving_position != kept_position
+    assert blocking.block_volumes(2)[surviving_position] == pytest.approx(kept_volume, abs=1e-12)
+
+    # And an id stops resolving exactly when its cell goes.
+    blocking.delete_block(kept_id)
+    assert kept_id not in blocking.block_ids()
+    with pytest.raises(IndexError):
+        blocking.delete_block(kept_id)
+
+
+def test_create_block_returns_an_id_that_keeps_working(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    first = blocking.create_hex_block(_UNIT_HEX)
+    second = blocking.create_hex_block([(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+                                        (1.0, 0.0, 1.0), (2.0, 0.0, 1.0), (2.0, 1.0, 1.0), (1.0, 1.0, 1.0)])
+    assert first != second
+    blocking.build_connectivity()
+
+    # Cutting renumbers the traversal; both ids still name their block.
+    assert blocking.cut_sheet(_edge_along(blocking, 0, 0.0, 1.0), 0.5)
+    assert first in blocking.block_ids()
+    assert second in blocking.block_ids()
+
+    blocking.delete_block(first)
+    assert first not in blocking.block_ids()
+    assert second in blocking.block_ids()

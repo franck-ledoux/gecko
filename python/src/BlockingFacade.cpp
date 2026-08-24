@@ -58,23 +58,12 @@ namespace gecko::python {
 
     int BlockingFacade::create_quad_block(const std::vector<std::array<double, 3>> &corners) {
         const auto points = to_points<4>(corners, "Blocking.create_quad_block");
-        const int id = m_impl.next_face_id++;
-        m_impl.faces_by_id.emplace(id, m_impl.blocking.create_quad_block(points));
-        return id;
+        return static_cast<int>(m_impl.blocking.create_quad_block(points)->info().id);
     }
 
     int BlockingFacade::create_hex_block(const std::vector<std::array<double, 3>> &corners) {
         const auto points = to_points<8>(corners, "Blocking.create_hex_block");
-        const auto block = m_impl.blocking.create_hex_block(points);
-        // Reported as a position in the block traversal rather than a counter of its own:
-        // that is the one blocks are addressed by everywhere else here, and a counter no
-        // other method accepts is not an id, only a number.
-        auto &map = m_impl.blocking.cmap();
-        int index = 0;
-        for (auto it = map.attributes<3>().begin(), itend = map.attributes<3>().end(); it != itend; ++it, ++index) {
-            if (it == block) return index;
-        }
-        return -1;
+        return static_cast<int>(m_impl.blocking.create_hex_block(points)->info().id);
     }
 
     void BlockingFacade::build_connectivity() { m_impl.blocking.build_connectivity(); }
@@ -103,50 +92,36 @@ namespace gecko::python {
     bool BlockingFacade::is_purely_2d() const { return m_impl.blocking.is_purely_2d(); }
 
     namespace {
-        template<typename TImpl>
-        auto find_face(TImpl &impl, int face_id) {
-            const auto it = impl.faces_by_id.find(face_id);
-            if (it == impl.faces_by_id.end()) {
-                throw std::out_of_range("Blocking: unknown face id " + std::to_string(face_id));
+        /** @brief The cell of dimension @p TDim carrying @p id, or a throw naming what was not found.
+         * @tparam TDim The cell dimension.
+         * @tparam TImpl The blocking state type, const or not.
+         * @param impl The blocking state.
+         * @param id The id to resolve.
+         * @param what What to call it in the message ("edge", "face", "block").
+         * @return That cell.
+         * @throw std::out_of_range if no cell of that dimension carries @p id — which is what a
+         *        caller sees when the cell it was holding on to has since been deleted. */
+        template<unsigned int TDim, typename TImpl>
+        auto cell_or_throw(TImpl &impl, int id, const char *what) {
+            const auto cell = impl.blocking.template cell_by_id<TDim>(id);
+            if (cell == nullptr) {
+                throw std::out_of_range(std::string("Blocking: unknown ") + what + " id " + std::to_string(id));
             }
-            return it;
+            return cell;
         }
     } // namespace
 
     bool BlockingFacade::can_delete_face(int face_id) const {
-        return m_impl.blocking.can_delete_face(find_face(m_impl, face_id)->second);
+        return m_impl.blocking.can_delete_face(cell_or_throw<2>(m_impl, face_id, "face"));
     }
 
     void BlockingFacade::delete_face(int face_id) {
-        const auto it = find_face(m_impl, face_id);
-        m_impl.blocking.delete_face(it->second);
-        m_impl.faces_by_id.erase(it);
+        m_impl.blocking.delete_face(cell_or_throw<2>(m_impl, face_id, "face"));
     }
 
-    namespace {
-        /** @brief The block sitting at position @p index of a blocking's own block traversal — the
-         * order `mesh_hexes()` emits its cells in, and the one `block_volumes()` reports in.
-         * @tparam TImpl The blocking state type.
-         * @param impl The blocking state.
-         * @param index The position to resolve.
-         * @return That block.
-         * @throw std::out_of_range if the blocking has no such block. */
-        template<typename TImpl>
-        auto block_at(TImpl &impl, int index) {
-            auto &map = impl.blocking.cmap();
-            if (index >= 0) {
-                int seen = 0;
-                for (auto it = map.template attributes<3>().begin(), itend = map.template attributes<3>().end();
-                     it != itend;
-                     ++it, ++seen) {
-                    if (seen == index) return it;
-                }
-            }
-            throw std::out_of_range("Blocking: unknown block index " + std::to_string(index));
-        }
-    } // namespace
-
-    void BlockingFacade::delete_block(int block_index) { m_impl.blocking.delete_block(block_at(m_impl, block_index)); }
+    void BlockingFacade::delete_block(int block_id) {
+        m_impl.blocking.delete_block(cell_or_throw<3>(m_impl, block_id, "block"));
+    }
 
     std::vector<double> BlockingFacade::edge_bends() const {
         const auto &map = m_impl.blocking.cmap();
@@ -180,36 +155,13 @@ namespace gecko::python {
                                                std::string(Impl::BlockingT::NODE_CLASSIFICATION_TAG_VARIABLE)});
     }
 
-    namespace {
-        /** @brief The edge sitting at position @p index of a blocking's own edge traversal — the
-         * order every edge-indexed accessor here shares.
-         * @tparam TImpl The blocking state type.
-         * @param impl The blocking state.
-         * @param index The position to resolve.
-         * @return That edge.
-         * @throw std::out_of_range if the blocking has no such edge. */
-        template<typename TImpl>
-        auto edge_at(TImpl &impl, int index) {
-            auto &map = impl.blocking.cmap();
-            if (index >= 0) {
-                int seen = 0;
-                for (auto it = map.template attributes<1>().begin(), itend = map.template attributes<1>().end();
-                     it != itend;
-                     ++it, ++seen) {
-                    if (seen == index) return it;
-                }
-            }
-            throw std::out_of_range("Blocking: unknown edge index " + std::to_string(index));
-        }
-    } // namespace
-
     std::vector<double> BlockingFacade::block_volumes(int subdivisions) {
         check_subdivisions(subdivisions, "Blocking.block_volumes");
         return m_impl.blocking.block_volumes(subdivisions);
     }
 
-    std::vector<int> BlockingFacade::sheet_edges(int edge_index) {
-        const auto sheet = m_impl.blocking.find_sheet(edge_at(m_impl, edge_index));
+    std::vector<int> BlockingFacade::sheet_edges(int edge_id) {
+        const auto sheet = m_impl.blocking.find_sheet(cell_or_throw<1>(m_impl, edge_id, "edge"));
         std::vector<int> indices;
         if (!sheet.has_value()) return indices;
 
@@ -227,9 +179,9 @@ namespace gecko::python {
         return indices;
     }
 
-    std::vector<std::array<double, 3>> BlockingFacade::sheet_cut_points(int edge_index, double param) {
+    std::vector<std::array<double, 3>> BlockingFacade::sheet_cut_points(int edge_id, double param) {
         std::vector<std::array<double, 3>> points;
-        const auto sheet = m_impl.blocking.find_sheet(edge_at(m_impl, edge_index));
+        const auto sheet = m_impl.blocking.find_sheet(cell_or_throw<1>(m_impl, edge_id, "edge"));
         if (!sheet.has_value()) return points;
 
         // Walked in the blocking's own edge order rather than the sheet's: find_sheet()
@@ -249,13 +201,14 @@ namespace gecko::python {
         return points;
     }
 
-    bool BlockingFacade::cut_sheet(int edge_index, double param) {
-        if (!m_impl.blocking.cut_sheet(edge_at(m_impl, edge_index), param)) return false;
+    bool BlockingFacade::cut_sheet(int edge_id, double param) {
+        if (!m_impl.blocking.cut_sheet(cell_or_throw<1>(m_impl, edge_id, "edge"), param)) return false;
         return true;
     }
 
-    bool BlockingFacade::delete_sheet(int edge_index, double tol_vertex, double tol_curve, double tol_surface) {
-        if (!m_impl.blocking.delete_sheet(edge_at(m_impl, edge_index), tol_vertex, tol_curve, tol_surface)) {
+    bool BlockingFacade::delete_sheet(int edge_id, double tol_vertex, double tol_curve, double tol_surface) {
+        if (!m_impl.blocking.delete_sheet(
+                cell_or_throw<1>(m_impl, edge_id, "edge"), tol_vertex, tol_curve, tol_surface)) {
             return false;
         }
         // Collapsing merges corners pairwise, so ids naming the side that went have to go — and the
@@ -281,6 +234,29 @@ namespace gecko::python {
             return node;
         }
     } // namespace
+
+    namespace {
+        /** @brief Every cell id of one dimension, in the map's own traversal order.
+         * @tparam TDim The cell dimension.
+         * @param map The blocking's map.
+         * @return One id per cell, in the order the display accessors of that dimension emit. */
+        template<unsigned int TDim, typename TMap>
+        std::vector<int> ids_in_traversal_order(const TMap &map) {
+            std::vector<int> ids;
+            for (auto it = map.template attributes<TDim>().begin(), itend = map.template attributes<TDim>().end();
+                 it != itend;
+                 ++it) {
+                ids.push_back(static_cast<int>(it->info().id));
+            }
+            return ids;
+        }
+    } // namespace
+
+    std::vector<int> BlockingFacade::edge_ids() const { return ids_in_traversal_order<1>(m_impl.blocking.cmap()); }
+
+    std::vector<int> BlockingFacade::face_ids() const { return ids_in_traversal_order<2>(m_impl.blocking.cmap()); }
+
+    std::vector<int> BlockingFacade::block_ids() const { return ids_in_traversal_order<3>(m_impl.blocking.cmap()); }
 
     std::vector<int> BlockingFacade::node_ids() const {
         const auto &map = m_impl.blocking.cmap();

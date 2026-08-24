@@ -361,6 +361,12 @@ namespace gecko::biy {
         refresh_mesh();
     }
 
+    int BiyApp::display_position(int ADim, int AId) const {
+        const auto ids = (ADim == 1) ? m_blocking->edge_ids() : m_blocking->block_ids();
+        const auto found = std::find(ids.begin(), ids.end(), AId);
+        return (found == ids.end()) ? -1 : static_cast<int>(std::distance(ids.begin(), found));
+    }
+
     glm::vec3 BiyApp::block_color(int index) {
         // Hues stepped by the golden ratio rather than picked from a fixed palette: a blocking has
         // no bound on how many blocks it holds, and a palette of N runs out and starts repeating —
@@ -1051,9 +1057,12 @@ namespace gecko::biy {
         // asking for pixel-perfect aiming.
         if (std::abs(best_param - 0.5) < m_config.cut_snap_tolerance) best_param = 0.5;
 
-        m_hover_edge = best_edge;
+        // The search ran over the display arrays, so `best_edge` is a position; what is kept is
+        // the id at that position, since the hover outlives the frame it was made in. The sheet is
+        // the other way round: it is drawn, so it stays positional.
+        m_hover_edge = m_blocking->edge_ids()[static_cast<std::size_t>(best_edge)];
         m_cut_param = static_cast<float>(best_param);
-        m_sheet = m_blocking->sheet_edges(best_edge);
+        m_sheet = m_blocking->sheet_edges(*m_hover_edge);
     }
 
     void BiyApp::refresh_cut_preview() {
@@ -1278,7 +1287,9 @@ namespace gecko::biy {
             clear();
             return;
         }
-        m_hover_block = static_cast<int>(hit.index);
+        // The blocks are drawn one hex per 3-cell in the blocking's own order, so a picked cell
+        // index is a position; kept as the id at that position, for the reason `m_hover_edge` gives.
+        m_hover_block = m_blocking->block_ids()[hit.index];
     }
 
     void BiyApp::refresh_delete_preview() {
@@ -1291,7 +1302,15 @@ namespace gecko::biy {
         }
 
         const auto hexes = m_blocking->mesh_hexes(1);
-        const auto index = static_cast<std::size_t>(*m_hover_block);
+        const int position = display_position(3, *m_hover_block);
+        if (position < 0) {
+            m_hover_block.reset();
+            if (polyscope::hasVolumeMesh(DELETE_PREVIEW)) {
+                polyscope::removeStructure(polyscope::getVolumeMesh(DELETE_PREVIEW));
+            }
+            return;
+        }
+        const auto index = static_cast<std::size_t>(position);
         if (index >= hexes.size()) {
             m_hover_block.reset();
             return;
@@ -1369,21 +1388,21 @@ namespace gecko::biy {
             return;
         }
 
-        const int index = *m_hover_block;
+        const int block_id = *m_hover_block;
         const std::size_t before = m_blocking->nb_cells(3);
-        m_blocking->delete_block(index);
+        m_blocking->delete_block(block_id);
         const std::size_t after = m_blocking->nb_cells(3);
 
-        // The highlight describes a block that no longer exists, and every index behind it has
-        // shifted, so it goes before anything is drawn again.
+        // The highlight describes a block that no longer exists, so it goes before anything is drawn
+        // again.
         m_hover_block.reset();
         m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
         refresh_delete_preview();
         refresh_view();
 
-        m_status = "Deleted block " + std::to_string(index) + " — blocks " + std::to_string(before) + " to " +
+        m_status = "Deleted block " + std::to_string(block_id) + " — blocks " + std::to_string(before) + " to " +
                    std::to_string(after);
-        report("deleted block " + std::to_string(index) + ", blocks " + std::to_string(before) + " -> " +
+        report("deleted block " + std::to_string(block_id) + ", blocks " + std::to_string(before) + " -> " +
                std::to_string(after) + "." + bend_report(*m_blocking));
     }
 
