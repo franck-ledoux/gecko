@@ -179,8 +179,8 @@ namespace gecko {
                       itend = m_cmap.template one_dart_per_incident_cell<1, 2>(d1).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(QUAD_EDGES, a, b);
                 Edge e = create_edge();
                 m_cmap.template set_attribute<1>(it, e);
@@ -248,8 +248,8 @@ namespace gecko {
                       itend = m_cmap.template one_dart_per_incident_cell<1, 3>(d1).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(HEX_EDGES, a, b);
                 Edge e = create_edge();
                 m_cmap.template set_attribute<1>(it, e);
@@ -272,7 +272,7 @@ namespace gecko {
                 std::array<int, 4> corner_idx{};
                 Dart fd = it;
                 for (std::size_t c = 0; c < 4; ++c) {
-                    corner_idx[c] = node_index(nodes, m_cmap.template attribute<0>(fd));
+                    corner_idx[c] = index_in(nodes, m_cmap.template attribute<0>(fd));
                     fd = m_cmap.template beta<1>(fd);
                 }
                 const std::size_t f = find_face(corner_idx);
@@ -676,11 +676,11 @@ namespace gecko {
                 const Node from = start_of.at(e);
 
                 for (const Block b : blocks_of_edge(e)) {
-                    const std::array<Node, 8> corners = block_local_nodes(b);
-                    const std::array<Edge, 12> edges = block_edges(b, corners);
-                    const std::size_t ie = table_index(edges, e);
+                    const std::array<Node, 8> corners = frame_of(b);
+                    const std::array<Edge, 12> edges = edges_of(b, corners);
+                    const std::size_t ie = index_in(edges, e);
                     const int axis = hex_edge_axis(ie);
-                    const int side = HEX_CORNER_UVW[static_cast<std::size_t>(node_index(corners, from))][axis];
+                    const int side = HEX_CORNER_UVW[static_cast<std::size_t>(index_in(corners, from))][axis];
                     for (std::size_t k = 0; k < 12; ++k) {
                         if (hex_edge_axis(k) != axis) continue;
                         const auto a = static_cast<std::size_t>(HEX_EDGES[k].first);
@@ -691,11 +691,11 @@ namespace gecko {
                 }
 
                 for (const Face f : standalone_faces_of_edge(e)) {
-                    const std::array<Node, 4> corners = face_local_nodes(f);
-                    const std::array<Edge, 4> edges = face_edges(f, corners);
-                    const std::size_t ie = table_index(edges, e);
+                    const std::array<Node, 4> corners = frame_of(f);
+                    const std::array<Edge, 4> edges = edges_of(f, corners);
+                    const std::size_t ie = index_in(edges, e);
                     const int axis = quad_edge_axis(ie);
-                    const int side = QUAD_CORNER_IJ[static_cast<std::size_t>(node_index(corners, from))][axis];
+                    const int side = QUAD_CORNER_IJ[static_cast<std::size_t>(index_in(corners, from))][axis];
                     for (std::size_t k = 0; k < 4; ++k) {
                         if (quad_edge_axis(k) != axis) continue;
                         const auto a = static_cast<std::size_t>(QUAD_EDGES[k].first);
@@ -2172,17 +2172,17 @@ namespace gecko {
         void rebuild_face_surface(Face AFace) {
             const Dart fd = AFace->dart();
             // The face's own frame, canonical rather than whichever dart happens to name it — see
-            // `face_local_nodes()`. Every reader and writer of a face's surface goes through it, or
+            // `frame_of()`. Every reader and writer of a face's surface goes through it, or
             // one of them ends up reading in a frame another one did not write.
-            const std::array<Node, 4> local_nodes = face_local_nodes(AFace);
+            const std::array<Node, 4> local_nodes = frame_of(AFace);
 
             std::array<TEdgeCurve, 4> curves{};
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
                       itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(local_nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(QUAD_EDGES, a, b);
                 const Edge e = m_cmap.template attribute<1>(it);
                 curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]);
@@ -2319,7 +2319,7 @@ namespace gecko {
             // permutation maps the block onto itself and nothing shows; on a curved block it
             // samples the interior in the wrong order, and a cut used to leave inverted cells in
             // the generated mesh because of it.
-            const std::array<Node, 8> local_nodes = block_local_nodes(ABlock);
+            const std::array<Node, 8> local_nodes = frame_of(ABlock);
 
             Vector3d acc(0.0, 0.0, 0.0);
             for (const Node &node : local_nodes) {
@@ -2350,15 +2350,15 @@ namespace gecko {
             // permutation maps the block onto itself and nothing shows; on a curved block it
             // samples the interior in the wrong order, and a cut used to leave inverted cells in
             // the generated mesh because of it.
-            const std::array<Node, 8> local_nodes = block_local_nodes(ABlock);
+            const std::array<Node, 8> local_nodes = frame_of(ABlock);
 
             std::array<TEdgeCurve, 12> curves{};
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
                       itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(local_nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(HEX_EDGES, a, b);
                 const Edge e = m_cmap.template attribute<1>(it);
                 curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(HEX_EDGES[k].first)]);
@@ -2379,10 +2379,10 @@ namespace gecko {
                  ++it) {
                 const Face face = m_cmap.template attribute<2>(it);
                 if (face == nullptr) continue;
-                const std::array<Node, 4> own = face_local_nodes(face);
+                const std::array<Node, 4> own = frame_of(face);
                 std::array<int, 4> own_in_block{};
                 for (std::size_t c = 0; c < 4; ++c) {
-                    own_in_block[c] = node_index(local_nodes, own[c]);
+                    own_in_block[c] = index_in(local_nodes, own[c]);
                 }
                 const std::size_t f = find_face(own_in_block);
                 const std::array<int, 4> uv = hex_face_uv_corners(f);
@@ -2495,8 +2495,8 @@ namespace gecko {
                                  std::size_t AS) {
             FaceGrid fg;
             const Dart fd = AFace->dart();
-            // The very frame the surface was stored in — see `face_local_nodes()`.
-            fg.local_nodes = face_local_nodes(AFace);
+            // The very frame the surface was stored in — see `frame_of()`.
+            fg.local_nodes = frame_of(AFace);
 
             fg.grid.assign(AS + 1, std::vector<NodeId>(AS + 1));
             fg.grid[0][0] = ANodeIds.at(fg.local_nodes[0]);
@@ -2508,8 +2508,8 @@ namespace gecko {
                       itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(fg.local_nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(fg.local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(fg.local_nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(fg.local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(QUAD_EDGES, a, b);
                 const Edge e = m_cmap.template attribute<1>(it);
                 fill_boundary_line(fg.grid, QUAD_EDGES[k], fg.local_nodes, AEdgeChains.at(e), AS);
@@ -2680,7 +2680,7 @@ namespace gecko {
                 const auto c = static_cast<std::size_t>(ACornerIdx[k]);
                 block_to_uvw[k] = {static_cast<long>(HEX_CORNER_UVW[c][varying_axes[0]]) * static_cast<long>(AS),
                                    static_cast<long>(HEX_CORNER_UVW[c][varying_axes[1]]) * static_cast<long>(AS)};
-                const int face_local = node_index(AFaceGrid.local_nodes, ALocalNodes[c]);
+                const int face_local = index_in(AFaceGrid.local_nodes, ALocalNodes[c]);
                 const auto &pq = FACE_CORNER_PQ[static_cast<std::size_t>(face_local)];
                 block_to_face_pq[k] = {pq.first * static_cast<long>(AS), pq.second * static_cast<long>(AS)};
             }
@@ -2726,7 +2726,7 @@ namespace gecko {
             // permutation maps the block onto itself and nothing shows; on a curved block it
             // samples the interior in the wrong order, and a cut used to leave inverted cells in
             // the generated mesh because of it.
-            const std::array<Node, 8> local_nodes = block_local_nodes(ABlock);
+            const std::array<Node, 8> local_nodes = frame_of(ABlock);
 
             Grid3D grid(AS + 1, std::vector<std::vector<NodeId>>(AS + 1, std::vector<NodeId>(AS + 1)));
 
@@ -2740,8 +2740,8 @@ namespace gecko {
                       itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(local_nodes, m_cmap.template attribute<0>(it));
-                const int b = node_index(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 const std::size_t k = find_edge(HEX_EDGES, a, b);
                 const Edge e = m_cmap.template attribute<1>(it);
                 fill_hex_edge_line(grid, HEX_EDGES[k], local_nodes, AEdgeChains.at(e), AS);
@@ -2754,7 +2754,7 @@ namespace gecko {
                 std::array<int, 4> corner_idx{};
                 Dart wd = it;
                 for (std::size_t c = 0; c < 4; ++c) {
-                    corner_idx[c] = node_index(local_nodes, m_cmap.template attribute<0>(wd));
+                    corner_idx[c] = index_in(local_nodes, m_cmap.template attribute<0>(wd));
                     wd = m_cmap.template beta<1>(wd);
                 }
                 const Face face = m_cmap.template attribute<2>(it);
@@ -2900,18 +2900,19 @@ namespace gecko {
         }
 
         /**
-         * @brief Finds the index of @p AN in @p ANodes.
+         * @brief Where @p AN sits in @p ANodes — a cell's own frame, or any small table indexed
+         * against it.
          * @param ANodes The node table to search.
          * @param AN The node to find.
          * @return The matching index.
          * @pre @p AN must be one of @p ANodes.
          */
         template<std::size_t TN>
-        static int node_index(const std::array<Node, TN> &ANodes, Node AN) {
+        static int index_in(const std::array<Node, TN> &ANodes, Node AN) {
             for (std::size_t i = 0; i < TN; ++i) {
                 if (ANodes[i] == AN) return static_cast<int>(i);
             }
-            assert(false && "Blocking::node_index: node not found");
+            assert(false && "Blocking::index_in: node not found");
             return -1;
         }
 
@@ -3179,7 +3180,8 @@ namespace gecko {
         }
 
         /**
-         * @brief One block's 8 corners in the `HEX_CORNER_UVW` order its volume is stored against.
+         * @brief One block's 8 corners in the `HEX_CORNER_UVW` order its volume is stored against —
+         * the block's own local frame.
          *
          * The frame is recorded on the block the first time it is asked for, and read back by id
          * afterwards — never re-derived while it still holds. Deriving it afresh each time is what
@@ -3192,7 +3194,7 @@ namespace gecko {
          * @return Its 8 corners.
          * @pre The block must still be a plain hex when it has no frame recorded yet.
          */
-        std::array<Node, 8> block_local_nodes(Block ABlock) {
+        std::array<Node, 8> frame_of(Block ABlock) {
             std::array<Node, 8> recorded{};
             if (frame_nodes<3, 8>(ABlock->dart(), ABlock->info().frame, recorded)) return recorded;
             // Read from whichever of the block's darts gives the lexicographically smallest tuple of
@@ -3200,7 +3202,7 @@ namespace gecko {
             // the 24 of them are the cube's rotations — and which one the attribute names is CGAL's
             // to change: it re-points an attribute the moment the dart it named is erased, which a
             // deletion next door does. A frame that moves silently rotates everything stored in it,
-            // and the block's volume is stored in it. See `face_local_nodes()` for the same trap one
+            // and the block's volume is stored in it. See `frame_of()` for the same trap one
             // dimension down, and what it does to a straight edge.
             // Nothing recorded yet: settle on the dart giving the lexicographically smallest tuple
             // of corners, so a blocking rebuilt from the same input frames its blocks the same way.
@@ -3238,10 +3240,11 @@ namespace gecko {
         }
 
         /**
-         * @brief One face's 4 corners in the order its surface is stored against.
+         * @brief One face's 4 corners in the order its surface is stored against — the face's own
+         * local frame.
          *
          * Recorded on the face the first time it is asked for and read back by id afterwards, for
-         * the reason `block_local_nodes()` gives one dimension up. A face between 2 blocks carries
+         * the reason `frame_of()` gives one dimension up. A face between 2 blocks carries
          * darts on both sides, and the 2 sides walk its cycle in *opposite* directions: deleting one
          * block erases that side's darts, CGAL re-points the attribute to the surviving side, and a
          * frame derived from it silently mirrors. The surface then reads back reflected, and the
@@ -3257,7 +3260,7 @@ namespace gecko {
          * @return Its 4 corners.
          * @pre The face must still be a plain quad when it has no frame recorded yet.
          */
-        std::array<Node, 4> face_local_nodes(Face AFace) {
+        std::array<Node, 4> frame_of(Face AFace) {
             std::array<Node, 4> recorded{};
             if (frame_nodes<2, 4>(AFace->dart(), AFace->info().frame, recorded)) return recorded;
 
@@ -3287,17 +3290,18 @@ namespace gecko {
 
         /** @brief One block's 12 edges, indexed to match `HEX_EDGES`.
          * @param ABlock The block to inspect.
-         * @param ACorners Its 8 corners, from `block_local_nodes()`.
+         * @param ACorners Its 8 corners, which must be the block's own frame as `frame_of()` gives
+         *        it — the edge table is indexed against those corner positions and against no others.
          * @return Its 12 edges in `HEX_EDGES` order. */
-        std::array<Edge, 12> block_edges(Block ABlock, const std::array<Node, 8> &ACorners) {
+        std::array<Edge, 12> edges_of(Block ABlock, const std::array<Node, 8> &ACorners) {
             std::array<Edge, 12> edges{};
             const Dart bd = ABlock->dart();
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
                       itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(ACorners, m_cmap.template attribute<0>(it));
-                const int b = node_index(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(ACorners, m_cmap.template attribute<0>(it));
+                const int b = index_in(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 edges[find_edge(HEX_EDGES, a, b)] = m_cmap.template attribute<1>(it);
             }
             return edges;
@@ -3305,34 +3309,36 @@ namespace gecko {
 
         /** @brief One face's 4 edges, indexed to match `QUAD_EDGES`.
          * @param AFace The face to inspect.
-         * @param ACorners Its 4 corners, from `face_local_nodes()`.
+         * @param ACorners Its 4 corners, which must be the face's own frame as `frame_of()` gives it
+         *        — the edge table is indexed against those corner positions and against no others.
          * @return Its 4 edges in `QUAD_EDGES` order. */
-        std::array<Edge, 4> face_edges(Face AFace, const std::array<Node, 4> &ACorners) {
+        std::array<Edge, 4> edges_of(Face AFace, const std::array<Node, 4> &ACorners) {
             std::array<Edge, 4> edges{};
             const Dart fd = AFace->dart();
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
                       itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
                  it != itend;
                  ++it) {
-                const int a = node_index(ACorners, m_cmap.template attribute<0>(it));
-                const int b = node_index(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const int a = index_in(ACorners, m_cmap.template attribute<0>(it));
+                const int b = index_in(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
                 edges[find_edge(QUAD_EDGES, a, b)] = m_cmap.template attribute<1>(it);
             }
             return edges;
         }
 
-        /** @brief Finds which slot of @p ATable holds @p AEdge.
+        /** @brief Where @p AEdge sits in @p ATable — the edge counterpart of the overload above,
+         * for `HEX_EDGES`/`QUAD_EDGES`-indexed tables.
          * @tparam TN Number of slots.
          * @param ATable The edge table to search.
          * @param AEdge The edge to find.
          * @return Its index.
          * @pre @p AEdge must be in @p ATable. */
         template<std::size_t TN>
-        static std::size_t table_index(const std::array<Edge, TN> &ATable, Edge AEdge) {
+        static std::size_t index_in(const std::array<Edge, TN> &ATable, Edge AEdge) {
             for (std::size_t k = 0; k < TN; ++k) {
                 if (ATable[k] == AEdge) return k;
             }
-            assert(false && "Blocking::table_index: edge not found");
+            assert(false && "Blocking::index_in: edge not found");
             return 0;
         }
 
@@ -3374,8 +3380,8 @@ namespace gecko {
                  it != itend;
                  ++it) {
                 const Face f = it;
-                const std::array<Node, 4> corners = face_local_nodes(f);
-                const std::array<Edge, 4> edges = face_edges(f, corners);
+                const std::array<Node, 4> corners = frame_of(f);
+                const std::array<Edge, 4> edges = edges_of(f, corners);
 
                 std::vector<std::size_t> hits;
                 for (std::size_t k = 0; k < 4; ++k) {
@@ -3387,7 +3393,7 @@ namespace gecko {
                 if (quad_edge_axis(hits[1]) != axis) return false;
 
                 const Node from = AStart.at(edges[hits[0]]);
-                ASheet.faces.push_back(SheetFace{f, corners, axis, node_index(corners, from)});
+                ASheet.faces.push_back(SheetFace{f, corners, axis, index_in(corners, from)});
             }
             return true;
         }
@@ -3405,8 +3411,8 @@ namespace gecko {
                  it != itend;
                  ++it) {
                 const Block b = it;
-                const std::array<Node, 8> corners = block_local_nodes(b);
-                const std::array<Edge, 12> edges = block_edges(b, corners);
+                const std::array<Node, 8> corners = frame_of(b);
+                const std::array<Edge, 12> edges = edges_of(b, corners);
 
                 std::vector<std::size_t> hits;
                 for (std::size_t k = 0; k < 12; ++k) {
@@ -3420,7 +3426,7 @@ namespace gecko {
                 }
 
                 const Node from = AStart.at(edges[hits[0]]);
-                ASheet.blocks.push_back(SheetBlock{b, corners, axis, node_index(corners, from)});
+                ASheet.blocks.push_back(SheetBlock{b, corners, axis, index_in(corners, from)});
             }
             return true;
         }
@@ -3437,13 +3443,13 @@ namespace gecko {
             Node to{};
         };
 
-        /** @brief Like `node_index()`, but reports absence instead of asserting.
+        /** @brief Like `index_in()`, but reports absence instead of asserting.
          * @tparam TN Number of slots.
          * @param ANodes The node table to search.
          * @param AN The node to find.
          * @return Its index, or -1 when @p AN is not in @p ANodes. */
         template<std::size_t TN>
-        static int node_index_or_none(const std::array<Node, TN> &ANodes, Node AN) {
+        static int index_in_or_none(const std::array<Node, TN> &ANodes, Node AN) {
             for (std::size_t i = 0; i < TN; ++i) {
                 if (ANodes[i] == AN) return static_cast<int>(i);
             }
@@ -3668,7 +3674,7 @@ namespace gecko {
                 const Node mid_a = m_cmap.template attribute<0>(mid_darts[0]);
                 const Node mid_b = m_cmap.template attribute<0>(mid_darts[1]);
                 const int side_a =
-                    QUAD_CORNER_IJ[static_cast<std::size_t>(node_index(sf.corners, AMids.at(mid_a).from))][other];
+                    QUAD_CORNER_IJ[static_cast<std::size_t>(index_in(sf.corners, AMids.at(mid_a).from))][other];
                 const Node curve_start = (side_a == 0) ? mid_a : mid_b;
                 const Node curve_end = (side_a == 0) ? mid_b : mid_a;
                 // Pinned onto those 2 nodes: read off a surface, the curve reaches them only to
@@ -3714,18 +3720,18 @@ namespace gecko {
                               bool ALow,
                               std::size_t AAxis,
                               std::size_t AOther) {
-            const std::array<Node, 4> corners = face_local_nodes(AHalf);
+            const std::array<Node, 4> corners = frame_of(AHalf);
             std::array<std::array<int, 2>, 4> corner_ab{};
             for (std::size_t c = 0; c < 4; ++c) {
                 const auto mid = AMids.find(corners[c]);
                 if (mid != AMids.end()) {
                     // A cut node sits at the far end of the near half and the near end of the far
                     // one; across the cut it keeps the parent coordinate of the edge it was born on.
-                    const int idx = node_index(ASheetFace.corners, mid->second.from);
+                    const int idx = index_in(ASheetFace.corners, mid->second.from);
                     corner_ab[c][AAxis] = ALow ? 1 : 0;
                     corner_ab[c][AOther] = QUAD_CORNER_IJ[static_cast<std::size_t>(idx)][AOther];
                 } else {
-                    const int idx = node_index(ASheetFace.corners, corners[c]);
+                    const int idx = index_in(ASheetFace.corners, corners[c]);
                     corner_ab[c] = QUAD_CORNER_IJ[static_cast<std::size_t>(idx)];
                 }
             }
@@ -3793,7 +3799,7 @@ namespace gecko {
                                const std::map<Node, MidNode> &AMids,
                                bool ALow,
                                std::size_t AAxis) {
-            const std::array<Node, 8> corners = block_local_nodes(AHalf);
+            const std::array<Node, 8> corners = frame_of(AHalf);
             std::array<std::array<int, 3>, 8> corner_uvw{};
             for (std::size_t c = 0; c < 8; ++c) {
                 const auto mid = AMids.find(corners[c]);
@@ -3801,11 +3807,11 @@ namespace gecko {
                     // A cut node keeps the parent coordinates of the edge it was born on across the
                     // 2 axes the cut left alone, and sits at the far end of the near half along the
                     // third — the near end of the far half.
-                    const int idx = node_index(ASheetBlock.corners, mid->second.from);
+                    const int idx = index_in(ASheetBlock.corners, mid->second.from);
                     corner_uvw[c] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)];
                     corner_uvw[c][AAxis] = ALow ? 1 : 0;
                 } else {
-                    const int idx = node_index(ASheetBlock.corners, corners[c]);
+                    const int idx = index_in(ASheetBlock.corners, corners[c]);
                     corner_uvw[c] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)];
                 }
             }
@@ -3845,8 +3851,8 @@ namespace gecko {
                 // axis. Every other new node in the map belongs to some other block of the sheet.
                 std::vector<Node> mids;
                 for (const auto &[mid, ends] : AMids) {
-                    const int ia = node_index_or_none(sb.corners, ends.from);
-                    const int ib = node_index_or_none(sb.corners, ends.to);
+                    const int ia = index_in_or_none(sb.corners, ends.from);
+                    const int ib = index_in_or_none(sb.corners, ends.to);
                     if (ia < 0 || ib < 0) continue;
                     if (HEX_CORNER_UVW[static_cast<std::size_t>(ia)][axis] ==
                         HEX_CORNER_UVW[static_cast<std::size_t>(ib)][axis]) {
@@ -3939,12 +3945,12 @@ namespace gecko {
                 if (ax != AAxis) kept[k++] = ax;
             }
 
-            const std::array<Node, 4> corners = face_local_nodes(AFace);
+            const std::array<Node, 4> corners = frame_of(AFace);
             std::array<std::array<int, 2>, 4> corner_ab{};
             for (std::size_t c = 0; c < 4; ++c) {
                 // Every corner of this face is a cut node, and keeps the parent-block coordinates of
                 // the edge it was born on along both axes the cut left alone.
-                const int idx = node_index(ASheetBlock.corners, AMids.at(corners[c]).from);
+                const int idx = index_in(ASheetBlock.corners, AMids.at(corners[c]).from);
                 for (std::size_t a = 0; a < 2; ++a) {
                     corner_ab[c][a] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)][kept[a]];
                 }
