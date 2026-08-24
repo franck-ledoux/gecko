@@ -160,9 +160,15 @@ print(blocking.mesh_quad_owners(subdivisions=2))  # standalone quad blocks only;
 # so meshing after a cut traces the same points as before. Note classify() rebuilds faces and blocks
 # from their boundaries and so discards that — cut first, classify after.
 
-# The exported mesh's nodes also carry 2 POINT_DATA scalars, "classification_dim"/"classification_tag"
+# The exported mesh's nodes carry 2 POINT_DATA scalars, "classification_dim"/"classification_tag"
 # (-1/-1 when unclassified) — the same dim/tag pair node_classification_dims() reports, for every
 # node the subdivision generates, not just the original block corners.
+#
+# The file carries more than the blocks. Every block edge lying on a model curve is written as a VTK
+# line, every block face lying on a model surface as a VTK quad, so the export describes the boundary
+# and not only the volume. CELL_DATA then gives, for every element: the same "classification_dim"/
+# "classification_tag" pair (the curve id on a line, the surface id on a quad) and "block_id", which
+# names the block a hexahedron came from and reads -1 on a line or a quad.
 blocking.write_vtk(subdivisions=4, path="blocking.vtk")
 ```
 

@@ -58,10 +58,7 @@ namespace gecko::io {
          * grouping elements by topological dimension the way Gmsh's `$Elements` sections do, so
          * edges, faces and cells are all written into the same 2 arrays, in that order. A node
          * carrying no edge/face/cell of its own is still present in `POINTS` but contributes no
-         * `CELLS` entry (VTK legacy has no standalone "point element"). No `CELL_DATA` is written
-         * (out of scope for this export — see issue #22's "VTK legacy export of the block structure"
-         * ask, satisfied by `write(path, blocking.to_mesh(1))`: 1 subdivision reproduces exactly the
-         * block corners, one quad/hex per top-cell).
+         * `CELLS` entry (VTK legacy has no standalone "point element").
          *
          * @p ANodeIntVariables optionally names `Variable<Int>` node variables already registered on
          * @p mesh (see `UnstructuredMesh::add_variable`) to write as `POINT_DATA`/`SCALARS` sections —
@@ -71,14 +68,24 @@ namespace gecko::io {
          * names are present — this writer stays a general VTK legacy exporter, agnostic of what any
          * particular variable name means; it is the caller's job to know which variables exist.
          *
+         * @p AElementIntVariables does the same for `CELL_DATA`, and has one wrinkle the point
+         * side does not: VTK's cell data covers the single `CELLS` array, so one array has to span
+         * edges, faces and cells together. A name is therefore looked up on all 3 registries and the
+         * values concatenated in that same order, with -1 standing in wherever the name is not
+         * registered for a dimension — `block_id` on an edge, say. A name present on none of the 3
+         * is skipped, exactly as on the point side.
+         *
          * @param path Path of the .vtk file to write (overwritten if it already exists).
          * @param mesh Mesh structure to write.
          * @param ANodeIntVariables Names of `Variable<Int>` node variables to write as `POINT_DATA`.
+         * @param AElementIntVariables Names of `Variable<Int>` edge/face/cell variables to write as
+         *        `CELL_DATA`.
          * @throw std::runtime_error if the file cannot be opened for writing.
          */
         static void write(const std::string &path,
                           const UnstructuredMesh<TopologyTraits> &mesh,
-                          const std::vector<std::string> &ANodeIntVariables = {}) {
+                          const std::vector<std::string> &ANodeIntVariables = {},
+                          const std::vector<std::string> &AElementIntVariables = {}) {
             std::ofstream file(path);
             if (!file) {
                 throw std::runtime_error("gecko::io::VtkMeshWriter::write: cannot open file '" + path +
@@ -147,6 +154,51 @@ namespace gecko::io {
                 file << "LOOKUP_TABLE default\n";
                 for (UInt i = 0; i < mesh.nb_nodes(); ++i) {
                     file << values[i] << "\n";
+                }
+            }
+
+            bool wrote_cell_data_header = false;
+            for (const std::string &name : AElementIntVariables) {
+                const bool on_edges = mesh.template has_variable<CellType::Edge>(name);
+                const bool on_faces = mesh.template has_variable<CellType::Face>(name);
+                const bool on_cells = mesh.template has_variable<CellType::Cell>(name);
+                if (!on_edges && !on_faces && !on_cells) continue;
+                if (!wrote_cell_data_header) {
+                    file << "CELL_DATA " << nb_elements << "\n";
+                    wrote_cell_data_header = true;
+                }
+                file << "SCALARS " << name << " int 1\n";
+                file << "LOOKUP_TABLE default\n";
+                // In the order the CELLS array was written: edges, then faces, then cells.
+                if (on_edges) {
+                    const auto &values = mesh.template get_variable<Int, CellType::Edge>(name);
+                    for (UInt i = 0; i < mesh.nb_edges(); ++i) {
+                        file << values[i] << "\n";
+                    }
+                } else {
+                    for (UInt i = 0; i < mesh.nb_edges(); ++i) {
+                        file << "-1\n";
+                    }
+                }
+                if (on_faces) {
+                    const auto &values = mesh.template get_variable<Int, CellType::Face>(name);
+                    for (UInt i = 0; i < mesh.nb_faces(); ++i) {
+                        file << values[i] << "\n";
+                    }
+                } else {
+                    for (UInt i = 0; i < mesh.nb_faces(); ++i) {
+                        file << "-1\n";
+                    }
+                }
+                if (on_cells) {
+                    const auto &values = mesh.template get_variable<Int, CellType::Cell>(name);
+                    for (UInt i = 0; i < mesh.nb_cells(); ++i) {
+                        file << values[i] << "\n";
+                    }
+                } else {
+                    for (UInt i = 0; i < mesh.nb_cells(); ++i) {
+                        file << "-1\n";
+                    }
                 }
             }
         }

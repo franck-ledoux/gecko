@@ -1,5 +1,7 @@
 """Tests for the gecko.Blocking façade — see docs/user-guide/python.md."""
 
+import pathlib
+
 import pytest
 
 import gecko
@@ -995,3 +997,34 @@ def test_history_depth_bounds_what_can_be_taken_back(geom_model_path):
 
     with pytest.raises(ValueError):
         blocking.set_history_depth(0)
+
+
+def test_write_vtk_carries_the_classified_boundary_and_the_block_ids(tmp_path, geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(_UNIT_HEX)
+    assert blocking.cut_sheet(_edge_along(blocking, 2, 0.0, 1.0), 0.5)
+
+    path = str(tmp_path / "export.vtk")
+    blocking.write_vtk(2, path)
+    text = pathlib.Path(path).read_text()
+
+    # Point data as before, and now cell data too, in that order.
+    assert "POINT_DATA" in text
+    assert "CELL_DATA" in text
+    assert text.index("POINT_DATA") < text.index("CELL_DATA")
+    for name in ("classification_dim", "classification_tag", "block_id"):
+        assert text.count("SCALARS %s int 1" % name) >= 1
+
+    # One CELL_DATA value per element of the single CELLS array.
+    n_elements = int(text.split("CELL_TYPES ")[1].split("\n")[0])
+    body = text.split("CELL_DATA")[1]
+    block_ids = body.split("SCALARS block_id int 1\nLOOKUP_TABLE default\n")[1].splitlines()[:n_elements]
+    assert len(block_ids) == n_elements
+
+    # Every hexahedron names its block; nothing else does.
+    types = text.split("CELL_TYPES %d\n" % n_elements)[1].splitlines()[:n_elements]
+    named = {int(b) for t, b in zip(types, block_ids) if t == "12"}
+    unnamed = {int(b) for t, b in zip(types, block_ids) if t != "12"}
+    assert named == set(blocking.block_ids())
+    assert unnamed <= {-1}

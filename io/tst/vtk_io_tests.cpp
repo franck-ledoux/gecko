@@ -157,3 +157,66 @@ TEST_CASE("Vtk_UnknownNodeIntVariableName_IsSilentlySkipped", "[Vtk IO]") {
     REQUIRE(content.find("POINT_DATA") == std::string::npos);
     REQUIRE(content.find("SCALARS") == std::string::npos);
 }
+
+TEST_CASE("Vtk_NamedElementIntVariables_SpanEdgesFacesAndCellsInThatOrder", "[Vtk IO]") {
+    // VTK legacy keeps one CELL_DATA block over the single CELLS array, so a cell variable has to
+    // span edges, faces and cells together — in the order they were written. A name registered on
+    // only some of the 3 still gets a full-length array, with -1 standing in for the rest: that is
+    // what lets `block_id` be written at all, since an edge has no block.
+    CubicMesh mesh;
+    auto n0 = mesh.add_node(0, 0, 0);
+    auto n1 = mesh.add_node(1, 0, 0);
+    auto n2 = mesh.add_node(1, 1, 0);
+    auto n3 = mesh.add_node(0, 1, 0);
+    auto n4 = mesh.add_node(0, 0, 1);
+    auto n5 = mesh.add_node(1, 0, 1);
+    auto n6 = mesh.add_node(1, 1, 1);
+    auto n7 = mesh.add_node(0, 1, 1);
+
+    const auto e0 = mesh.add_edge(n0, n1);
+    const auto e1 = mesh.add_edge(n1, n2);
+    const auto f0 = mesh.add_face(n0, n1, n2, n3);
+    const auto c0 = mesh.add_cell(n0, n1, n2, n3, n4, n5, n6, n7);
+
+    auto &edge_tags = mesh.add_variable<Int, CellType::Edge>("classification_tag");
+    edge_tags[e0.value] = 10;
+    edge_tags[e1.value] = 11;
+    auto &face_tags = mesh.add_variable<Int, CellType::Face>("classification_tag");
+    face_tags[f0.value] = 20;
+    auto &blocks = mesh.add_variable<Int, CellType::Cell>("block_id");
+    blocks[c0.value] = 7;
+
+    const auto path = vtk_path("gecko_vtk_cell_data_test.vtk").string();
+    io::CubicVtkWriter::write(path, mesh, {}, {"classification_tag", "block_id", "nothing_named_this"});
+    const std::string content = read_file(path);
+    std::filesystem::remove(path);
+
+    REQUIRE(content.find("CELL_DATA 4") != std::string::npos);
+    // The 2 edges, then the face, then the cell — which has no tag of its own, so -1.
+    REQUIRE(content.find("SCALARS classification_tag int 1\nLOOKUP_TABLE default\n10\n11\n20\n-1\n") !=
+            std::string::npos);
+    // And the other way round: only the cell has a block, so the edges and the face read -1.
+    REQUIRE(content.find("SCALARS block_id int 1\nLOOKUP_TABLE default\n-1\n-1\n-1\n7\n") != std::string::npos);
+    // A name on none of the 3 registries is skipped, as on the point side.
+    REQUIRE(content.find("nothing_named_this") == std::string::npos);
+    // Cell data comes after point data, and the header is written once for both arrays.
+    REQUIRE(content.find("CELLS ") < content.find("CELL_DATA"));
+    REQUIRE(content.find("CELL_DATA") < content.find("SCALARS classification_tag"));
+    REQUIRE(content.find("CELL_DATA", content.find("CELL_DATA") + 1) == std::string::npos);
+}
+
+TEST_CASE("Vtk_NoElementIntVariables_WritesNoCellData", "[Vtk IO]") {
+    CubicMesh mesh;
+    auto n0 = mesh.add_node(0, 0, 0);
+    auto n1 = mesh.add_node(1, 0, 0);
+    auto n2 = mesh.add_node(1, 1, 0);
+    auto n3 = mesh.add_node(0, 1, 0);
+    mesh.add_face(n0, n1, n2, n3);
+
+    const auto path = vtk_path("gecko_vtk_no_cell_data_test.vtk").string();
+    io::CubicVtkWriter::write(path, mesh);
+    const std::string content = read_file(path);
+    std::filesystem::remove(path);
+
+    REQUIRE(content.find("CELL_DATA") == std::string::npos);
+}
