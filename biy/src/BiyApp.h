@@ -191,6 +191,11 @@ namespace gecko::biy {
          * the status line and on the terminal.
          * @param trigger How the cut was asked for, for the terminal line ("click" or "space"). */
         void perform_cut(const char *trigger);
+        /** @brief Takes one edit back, or puts one back, and clears everything that described the
+         * blocking as it was.
+         * @param ARedo true to redo, false to undo. */
+        void step_history(bool ARedo);
+
         /** @brief Tracks what the cursor is over in Collapse mode, lighting the sheet it would take
          * out, and collapses it on a click or on space. */
         void handle_collapse();

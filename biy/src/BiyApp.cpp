@@ -22,6 +22,17 @@
 #include <polyscope/volume_mesh.h>
 
 namespace gecko::biy {
+    namespace {
+        /** @brief What to call the modifier in the UI. ImGui maps Cmd onto KeyCtrl on macOS, so the
+         * chord is the same one either way and only its name differs. */
+#ifdef __APPLE__
+        constexpr const char *CTRL_LABEL = "Cmd";
+#else
+        constexpr const char *CTRL_LABEL = "Ctrl";
+#endif
+        /** @brief What to call Shift in the UI. */
+        constexpr const char *SHIFT_LABEL = "Shift";
+    } // namespace
 
     namespace {
         // Polyscope structure names. They double as the labels shown in the Scene panel and as
@@ -789,6 +800,18 @@ namespace gecko::biy {
             if (ImGui::IsKeyPressed(ImGuiKey_X)) set_mouse_mode(MouseMode::Cut);
             if (ImGui::IsKeyPressed(ImGuiKey_S)) set_mouse_mode(MouseMode::Collapse);
             if (ImGui::IsKeyPressed(ImGuiKey_D)) set_mouse_mode(MouseMode::Delete);
+
+            // Redo first: its chord also satisfies undo's, so testing undo first would swallow it.
+            // ImGui reports Cmd as KeyCtrl on macOS (ConfigMacOSXBehaviors), which is what a user
+            // there expects anyway.
+            const ImGuiIO &keys = ImGui::GetIO();
+            if (keys.KeyCtrl && keys.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+                step_history(true);
+            } else if (keys.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
+                step_history(true);
+            } else if (keys.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+                step_history(false);
+            }
         }
 
         ImGui::TextUnformatted("Mouse mode");
@@ -855,6 +878,26 @@ namespace gecko::biy {
         if (ImGui::Button("Create bounding box")) create_bounding_box(0.1);
 
         const bool has_blocking = m_blocking != nullptr;
+
+        // Undo/redo sit above the operations they take back, and are the only controls here not
+        // disabled along with the rest: with no blocking there is nothing to undo either, which the
+        // buttons say by being greyed out on their own terms rather than on the section's.
+        ImGui::BeginDisabled(!has_blocking || !m_blocking->can_undo());
+        if (ImGui::Button("Undo")) step_history(false);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!has_blocking || !m_blocking->can_redo());
+        if (ImGui::Button("Redo")) step_history(true);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%s Z / %s %s Z)", CTRL_LABEL, CTRL_LABEL, SHIFT_LABEL);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Every operation that changes the blocking can be taken back, up to %d of them. "
+                              "An operation the kernel refuses costs no step, and a new edit discards what "
+                              "was undone.",
+                              has_blocking ? m_blocking->history_depth() : 0);
+        }
+
         ImGui::BeginDisabled(!has_blocking);
 
         if (ImGui::Button("Build connectivity")) {
@@ -1193,6 +1236,42 @@ namespace gecko::biy {
                    (after > before ? " — blocks " + std::to_string(before) + " to " + std::to_string(after) : "");
         report("cut " + std::to_string(cut_edges) + " edges at t=" + format_param(m_cut_param) + ", blocks " +
                std::to_string(before) + " -> " + std::to_string(after) + "." + bend_report(*m_blocking));
+    }
+
+    void BiyApp::step_history(bool ARedo) {
+        if (!m_blocking) return;
+        const bool possible = ARedo ? m_blocking->can_redo() : m_blocking->can_undo();
+        if (!possible) {
+            m_status = ARedo ? "Nothing to redo" : "Nothing to undo";
+            return;
+        }
+
+        const std::size_t before = m_blocking->nb_cells(3);
+        if (ARedo) {
+            m_blocking->redo();
+        } else {
+            m_blocking->undo();
+        }
+
+        // Everything the viewer was holding describes a blocking that no longer exists: the hovered
+        // edge and block are ids, and an id from the state just abandoned need not resolve in the one
+        // restored. Dropped rather than re-resolved — whatever the cursor is over will be picked up
+        // again on the next mouse move.
+        m_hover_edge.reset();
+        m_sheet.clear();
+        m_hover_block.reset();
+        m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
+        m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
+        refresh_cut_preview();
+        refresh_delete_preview();
+        refresh_view();
+
+        const std::size_t after = m_blocking->nb_cells(3);
+        m_status = std::string(ARedo ? "Redid" : "Undid") + " one edit — blocks " + std::to_string(before) + " to " +
+                   std::to_string(after);
+        std::cout << "biy [history]: " << (ARedo ? "redid" : "undid") << " one edit, blocks " << before << " -> "
+                  << after << ". " << (m_blocking->can_undo() ? "" : "no more to undo. ")
+                  << (m_blocking->can_redo() ? "" : "no more to redo.") << std::endl;
     }
 
     void BiyApp::handle_collapse() {
