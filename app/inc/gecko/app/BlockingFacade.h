@@ -12,9 +12,9 @@
 #include <gecko/math/BezierCurve.h>
 #include <gecko/math/Point3d.h>
 
-#include "GeomModelFacade.h"
+#include <gecko/app/GeomModelFacade.h>
 
-namespace gecko::python {
+namespace gecko::app {
 
     /**
      * @class BlockingFacade
@@ -74,9 +74,8 @@ namespace gecko::python {
          * @brief Creates a new, unsewn hex block.
          * @param corners The 8 corner positions, each an (x,y,z) triple — see
          *        gecko::Blocking::create_hex_block for the expected HEX8 ordering.
-         * @return Where the new block sits in the block traversal — the order mesh_hexes() emits its
-         *         cells in, and the one delete_block()/block_volumes() speak. A position, not a
-         *         lasting id: cutting or deleting renumbers what follows.
+         * @return The id assigned to the newly created block, which keeps naming it for as long as
+         *         it exists.
          * @throw std::invalid_argument if @p corners doesn't have exactly 8 entries.
          */
         int create_hex_block(const std::vector<std::array<double, 3>> &corners);
@@ -99,10 +98,10 @@ namespace gecko::python {
         /**
          * @brief Deletes one block, along with every face, edge and corner that existed only because
          * of it — what it shared with a neighbouring block stays, as that neighbour's boundary.
-         * @param block_index A block, as its position in the order mesh_hexes()/block_volumes() use.
-         * @throw std::out_of_range if @p block_index is not a block of this blocking.
+         * @param block_id A block id, as block_ids() reports them.
+         * @throw std::out_of_range if @p block_id is not a block of this blocking.
          */
-        void delete_block(int block_index);
+        void delete_block(int block_id);
 
         /** @brief Auto-detects and sews coincident blocks created so far. Not incremental. */
         void build_connectivity();
@@ -165,6 +164,25 @@ namespace gecko::python {
 
         /** @brief Gets the id of every corner node of the block structure. @return The node ids. */
         [[nodiscard]] std::vector<int> node_ids() const;
+
+        /**
+         * @brief Every edge's id, in the order the display accessors of that dimension emit —
+         * edge_vertices(), edge_segments(), edge_bends(), edge_classification_dims().
+         *
+         * The bridge between the two ways of naming a cell here, and both are needed. What is drawn
+         * has to be positional: a renderer indexes a flat array. What is *acted on* has to be an id:
+         * a position is only true until the next operation renumbers it, and a viewer that picks a
+         * position one frame and acts on it the next would act on a different edge.
+         *
+         * @return One id per edge, aligned with those accessors.
+         */
+        [[nodiscard]] std::vector<int> edge_ids() const;
+        /** @brief Every face's id, in the order face_classification_dims() and face_grid_owners()
+         * index. @return One id per face. @see edge_ids() */
+        [[nodiscard]] std::vector<int> face_ids() const;
+        /** @brief Every block's id, in the order block_volumes() and mesh_hex_owners() index.
+         * @return One id per block. @see edge_ids() */
+        [[nodiscard]] std::vector<int> block_ids() const;
         /**
          * @brief Gets the position of a corner node.
          * @param node_id A node id, from node_ids().
@@ -333,48 +351,48 @@ namespace gecko::python {
         [[nodiscard]] std::vector<int> mesh_quad_owners(int subdivisions);
 
         /**
-         * @brief The edges cut_sheet() would split if aimed at @p edge_index — the whole sheet, not
-         * just the one edge — so a caller can show what a cut is about to do before doing it.
-         * @param edge_index An edge, as its position in the order edge_vertices()/edge_segments()/
-         *        edge_classification_dims() all use.
-         * @return Those same positions, for every edge of the sheet (@p edge_index included), or an
-         *         empty list when the sheet cannot be cut homogeneously.
-         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
-         */
-        /**
          * @brief Measures every block of the blocking, from its own stored geometry.
          * @param subdivisions Intervals per parametric axis (>= 1). Exact at 1 for a block whose
          *        faces are planar; converges as it grows for a curved or warped one.
-         * @return One signed volume per block, in the order nb_cells(3) counts them. A negative
+         * @return One signed volume per block, in the order block_ids() reports them. A negative
          *         value means that block's frame is inverted.
          */
         [[nodiscard]] std::vector<double> block_volumes(int subdivisions);
 
-        [[nodiscard]] std::vector<int> sheet_edges(int edge_index);
+        /**
+         * @brief The edges cut_sheet() would split if aimed at @p edge_id — the whole sheet, not just
+         * the one edge — so a caller can show what a cut is about to do before doing it.
+         * @param edge_id An edge id, as edge_ids() reports them.
+         * @return A *position* per edge of the sheet, in the order edge_vertices()/edge_segments()
+         *         use, or an empty list when the sheet cannot be cut homogeneously. Positions rather
+         *         than ids because this answer exists to be drawn: see edge_ids().
+         * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
+         */
+        [[nodiscard]] std::vector<int> sheet_edges(int edge_id);
 
         /**
          * @brief Where a cut would actually land: one point per sheet edge, each on the side the
          * sheet agrees on, so the whole cut locus can be shown before committing to it.
-         * @param edge_index An edge, in the same order sheet_edges() uses.
+         * @param edge_id An edge, in the same order sheet_edges() uses.
          * @param param Where along that edge to cut, strictly inside (0, 1).
          * @return One point per edge of the sheet, in sheet_edges() order, or an empty list when the
          *         sheet cannot be cut homogeneously.
-         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
          */
-        [[nodiscard]] std::vector<std::array<double, 3>> sheet_cut_points(int edge_index, double param);
+        [[nodiscard]] std::vector<std::array<double, 3>> sheet_cut_points(int edge_id, double param);
 
         /**
          * @brief Cuts the blocking along the whole sheet through one edge, splitting every block the
          * sheet crosses in 2 and keeping the geometry it cut through exactly (see
          * `Blocking::cut_sheet()`).
-         * @param edge_index An edge, in the same order sheet_edges() uses.
+         * @param edge_id An edge, in the same order sheet_edges() uses.
          * @param param Where along that edge to cut, measured along its own curve exactly as
          *        edge_vertices() samples it, strictly inside (0, 1).
          * @return false, changing nothing, if @p param is out of range or the sheet cannot be cut
          *         homogeneously.
-         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
          */
-        bool cut_sheet(int edge_index, double param);
+        bool cut_sheet(int edge_id, double param);
 
         /**
          * @brief Deletes the whole sheet through one edge, gluing back what was either side of it —
@@ -385,7 +403,7 @@ namespace gecko::python {
          * a surface, and the merged corner is projected onto the winner. So a block structure fitted
          * to a model does not drift off its features when a layer is taken out of it.
          *
-         * @param edge_index An edge of the sheet, in the same order sheet_edges() uses.
+         * @param edge_id An edge of the sheet, in the same order sheet_edges() uses.
          * @param tol_vertex Tolerance for snapping onto a vertex, as classify() defines it — used
          *        only where a refitted cell has to fall back on a proximity search.
          * @param tol_curve Tolerance for snapping onto a curve. Defaults to @p tol_vertex.
@@ -400,65 +418,106 @@ namespace gecko::python {
          *
          * @return false, changing nothing, when the sheet cannot be collapsed — see
          *         `Blocking::delete_sheet()` for the cases.
-         * @throw std::out_of_range if @p edge_index is not an edge of this blocking.
+         * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
          */
-        bool delete_sheet(int edge_index, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
+        bool delete_sheet(int edge_id, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
 
-        /** @brief The blocking and the id books kept alongside it; public only so the .cpp's
-         * free-function helpers can name it — never part of the class' actual (Python-facing)
-         * interface. */
+        /**
+         * @brief Whether there is an edit to take back. @return true if undo() would do something.
+         */
+        [[nodiscard]] bool can_undo() const;
+        /** @brief Whether there is an undone edit to put back. @return true if redo() would do
+         * something. */
+        [[nodiscard]] bool can_redo() const;
+
+        /**
+         * @brief Takes back the most recent edit, restoring the blocking as it was just before it.
+         *
+         * Snapshot-based: every operation that changes the blocking copies it first, and undoing puts
+         * that copy back. Not a stack of inverse operations, because the operations here do not have
+         * inverses — collapsing the layer a cut just created does not restore the block, as
+         * `delete_sheet()` documents and the tests fix.
+         *
+         * Ids survive an undo, since the snapshot carries them: a caller holding a block id from
+         * before the undone edit finds its block again, exactly as it would had the edit not happened.
+         *
+         * Does nothing when there is nothing to take back.
+         */
+        void undo();
+        /** @brief Puts back the most recently undone edit. Does nothing when there is none; any new
+         * edit discards the redo history, which is what makes the two stacks a line rather than a
+         * tree. */
+        void redo();
+
+        /**
+         * @brief How many edits can be taken back. Beyond this the oldest is dropped.
+         *
+         * A snapshot is a whole copy of the blocking, so the history costs depth times its size.
+         * A few thousand cells at degree 3 is a couple of megabytes each, which is what makes 20 a
+         * sensible default rather than a compromise.
+         *
+         * @param depth Number of edits to keep, at least 1.
+         * @throw std::invalid_argument if @p depth is below 1.
+         */
+        void set_history_depth(int depth);
+        /** @brief How many edits can be taken back. @return The current depth. */
+        [[nodiscard]] int history_depth() const;
+
+        /** @brief The blocking and what little bookkeeping is still kept alongside it; public only
+         * so the .cpp's free-function helpers can name it — never part of the class' actual
+         * (Python-facing) interface. */
         struct Impl {
+            /** @brief The kernel type this façade wraps. */
             using BlockingT = Blocking<FacetedGeometry>;
 
+            /** @brief The blocking itself — all the state there is, now that cells name themselves. */
             BlockingT blocking;
-            std::unordered_map<int, typename BlockingT::Face> faces_by_id;
-            std::unordered_map<int, typename BlockingT::Node> nodes_by_id;
-            int next_face_id = 0;
-            int next_block_id = 0;
-            int next_node_id = 0;
-
-            explicit Impl(const FacetedGeometry &geom, int degree) : blocking(geom, static_cast<std::size_t>(degree)) {}
 
             /**
-             * @brief Drops every id whose node attribute no longer exists.
-             *
-             * Deleting a block garbage-collects the corners it alone owned, and sewing merges pairs
-             * of coincident ones — either way the id map is left holding handles to attributes that
-             * are gone, and node_position()/node_classification_dims() would read freed memory
-             * through them. Membership is decided by comparing handles against the live ones, which
-             * never dereferences a stale one.
+             * @brief Builds the blocking this façade wraps.
+             * @param geom The geometric model to build against.
+             * @param degree The Bezier degree every cell's geometry is built at.
              */
-            void forget_stale_nodes() {
-                auto &map = blocking.cmap();
-                std::set<typename BlockingT::Node> live;
-                for (auto it = map.template attributes<0>().begin(), itend = map.template attributes<0>().end();
-                     it != itend;
-                     ++it) {
-                    live.insert(it);
-                }
-                for (auto it = nodes_by_id.begin(); it != nodes_by_id.end();) {
-                    it = (live.count(it->second) == 0) ? nodes_by_id.erase(it) : std::next(it);
-                }
-            }
-
-            /** @brief Registers every not-yet-known corner node of the structure, so a freshly
-             * created block's corners become addressable by id. Cheap and idempotent: nodes already
-             * present keep their id. */
-            void index_new_nodes() {
-                auto &map = blocking.cmap();
-                for (auto it = map.template attributes<0>().begin(), itend = map.template attributes<0>().end();
-                     it != itend;
-                     ++it) {
-                    const bool known = std::any_of(nodes_by_id.begin(), nodes_by_id.end(), [&it](const auto &entry) {
-                        return entry.second == it;
-                    });
-                    if (!known) nodes_by_id.emplace(next_node_id++, it);
-                }
-            }
+            explicit Impl(const FacetedGeometry &geom, int degree) : blocking(geom, static_cast<std::size_t>(degree)) {}
         };
 
     private:
+        /**
+         * @brief Scope guard taking the snapshot one edit can be undone from.
+         *
+         * Declared at the top of every method that changes the blocking, for the reason
+         * `Blocking::EditSession` is: written as a call, "snapshot before you edit" is a rule to
+         * remember, and the one place it is forgotten is the one edit that cannot be taken back.
+         *
+         * An operation that *refuses* — `cut_sheet()` and `delete_sheet()` both can — calls
+         * `discard()`, since a snapshot of a state nothing changed would spend an undo step undoing
+         * nothing.
+         */
+        class Checkpoint {
+        public:
+            /** @brief Snapshots @p AFacade's blocking. @param AFacade The façade being edited. */
+            explicit Checkpoint(BlockingFacade &AFacade);
+            Checkpoint(const Checkpoint &) = delete;
+            Checkpoint &operator=(const Checkpoint &) = delete;
+            /** @brief Keeps the snapshot, unless it was discarded. */
+            ~Checkpoint();
+            /** @brief Drops the snapshot: the edit did not happen. */
+            void discard() { m_keep = false; }
+
+        private:
+            /** @brief The façade whose history this guard writes into. */
+            BlockingFacade &m_facade;
+            /** @brief Whether the snapshot is still wanted when the guard ends. */
+            bool m_keep = true;
+        };
+
         Impl m_impl;
+        /** @brief Snapshots to undo to, oldest first; the last is the state before the last edit. */
+        std::vector<Impl::BlockingT> m_undo;
+        /** @brief Snapshots to redo to, discarded by any new edit. */
+        std::vector<Impl::BlockingT> m_redo;
+        /** @brief How many entries `m_undo` keeps. @see set_history_depth() */
+        int m_history_depth = 20;
     };
 
-} // namespace gecko::python
+} // namespace gecko::app

@@ -22,6 +22,17 @@
 #include <polyscope/volume_mesh.h>
 
 namespace gecko::biy {
+    namespace {
+        /** @brief What to call the modifier in the UI. ImGui maps Cmd onto KeyCtrl on macOS, so the
+         * chord is the same one either way and only its name differs. */
+#ifdef __APPLE__
+        constexpr const char *CTRL_LABEL = "Cmd";
+#else
+        constexpr const char *CTRL_LABEL = "Ctrl";
+#endif
+        /** @brief What to call Shift in the UI. */
+        constexpr const char *SHIFT_LABEL = "Shift";
+    } // namespace
 
     namespace {
         // Polyscope structure names. They double as the labels shown in the Scene panel and as
@@ -78,7 +89,7 @@ namespace gecko::biy {
          * the geometry itself was corrupted, a value at rounding while the screen shows curves means
          * the drawing was, and those are opposite places to look.
          */
-        std::string bend_report(python::BlockingFacade &blocking) {
+        std::string bend_report(app::BlockingFacade &blocking) {
             const auto bends = blocking.edge_bends();
             if (bends.empty()) return {};
             const auto worst = std::max_element(bends.begin(), bends.end());
@@ -148,7 +159,7 @@ namespace gecko::biy {
     } // namespace
 
     BiyApp::BiyApp(const std::string &model_path, int order)
-        : m_model(std::make_unique<python::GeomModelFacade>(model_path)), m_model_path(model_path), m_order(order) {
+        : m_model(std::make_unique<app::GeomModelFacade>(model_path)), m_model_path(model_path), m_order(order) {
         std::string config_message;
         m_config = BiyConfig::load("biy_config.json", config_message);
         m_show_block_edges = m_config.show_block_edges;
@@ -269,8 +280,8 @@ namespace gecko::biy {
         polyscope::options::automaticallyComputeSceneExtents = false;
     }
 
-    python::BlockingFacade &BiyApp::blocking() {
-        if (!m_blocking) m_blocking = std::make_unique<python::BlockingFacade>(*m_model, m_order);
+    app::BlockingFacade &BiyApp::blocking() {
+        if (!m_blocking) m_blocking = std::make_unique<app::BlockingFacade>(*m_model, m_order);
         return *m_blocking;
     }
 
@@ -359,6 +370,12 @@ namespace gecko::biy {
         }
 
         refresh_mesh();
+    }
+
+    int BiyApp::display_position(int ADim, int AId) const {
+        const auto ids = (ADim == 1) ? m_blocking->edge_ids() : m_blocking->block_ids();
+        const auto found = std::find(ids.begin(), ids.end(), AId);
+        return (found == ids.end()) ? -1 : static_cast<int>(std::distance(ids.begin(), found));
     }
 
     glm::vec3 BiyApp::block_color(int index) {
@@ -783,6 +800,18 @@ namespace gecko::biy {
             if (ImGui::IsKeyPressed(ImGuiKey_X)) set_mouse_mode(MouseMode::Cut);
             if (ImGui::IsKeyPressed(ImGuiKey_S)) set_mouse_mode(MouseMode::Collapse);
             if (ImGui::IsKeyPressed(ImGuiKey_D)) set_mouse_mode(MouseMode::Delete);
+
+            // Redo first: its chord also satisfies undo's, so testing undo first would swallow it.
+            // ImGui reports Cmd as KeyCtrl on macOS (ConfigMacOSXBehaviors), which is what a user
+            // there expects anyway.
+            const ImGuiIO &keys = ImGui::GetIO();
+            if (keys.KeyCtrl && keys.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+                step_history(true);
+            } else if (keys.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
+                step_history(true);
+            } else if (keys.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+                step_history(false);
+            }
         }
 
         ImGui::TextUnformatted("Mouse mode");
@@ -849,6 +878,26 @@ namespace gecko::biy {
         if (ImGui::Button("Create bounding box")) create_bounding_box(0.1);
 
         const bool has_blocking = m_blocking != nullptr;
+
+        // Undo/redo sit above the operations they take back, and are the only controls here not
+        // disabled along with the rest: with no blocking there is nothing to undo either, which the
+        // buttons say by being greyed out on their own terms rather than on the section's.
+        ImGui::BeginDisabled(!has_blocking || !m_blocking->can_undo());
+        if (ImGui::Button("Undo")) step_history(false);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!has_blocking || !m_blocking->can_redo());
+        if (ImGui::Button("Redo")) step_history(true);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%s Z / %s %s Z)", CTRL_LABEL, CTRL_LABEL, SHIFT_LABEL);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Every operation that changes the blocking can be taken back, up to %d of them. "
+                              "An operation the kernel refuses costs no step, and a new edit discards what "
+                              "was undone.",
+                              has_blocking ? m_blocking->history_depth() : 0);
+        }
+
         ImGui::BeginDisabled(!has_blocking);
 
         if (ImGui::Button("Build connectivity")) {
@@ -1051,9 +1100,12 @@ namespace gecko::biy {
         // asking for pixel-perfect aiming.
         if (std::abs(best_param - 0.5) < m_config.cut_snap_tolerance) best_param = 0.5;
 
-        m_hover_edge = best_edge;
+        // The search ran over the display arrays, so `best_edge` is a position; what is kept is
+        // the id at that position, since the hover outlives the frame it was made in. The sheet is
+        // the other way round: it is drawn, so it stays positional.
+        m_hover_edge = m_blocking->edge_ids()[static_cast<std::size_t>(best_edge)];
         m_cut_param = static_cast<float>(best_param);
-        m_sheet = m_blocking->sheet_edges(best_edge);
+        m_sheet = m_blocking->sheet_edges(*m_hover_edge);
     }
 
     void BiyApp::refresh_cut_preview() {
@@ -1186,6 +1238,42 @@ namespace gecko::biy {
                std::to_string(before) + " -> " + std::to_string(after) + "." + bend_report(*m_blocking));
     }
 
+    void BiyApp::step_history(bool ARedo) {
+        if (!m_blocking) return;
+        const bool possible = ARedo ? m_blocking->can_redo() : m_blocking->can_undo();
+        if (!possible) {
+            m_status = ARedo ? "Nothing to redo" : "Nothing to undo";
+            return;
+        }
+
+        const std::size_t before = m_blocking->nb_cells(3);
+        if (ARedo) {
+            m_blocking->redo();
+        } else {
+            m_blocking->undo();
+        }
+
+        // Everything the viewer was holding describes a blocking that no longer exists: the hovered
+        // edge and block are ids, and an id from the state just abandoned need not resolve in the one
+        // restored. Dropped rather than re-resolved — whatever the cursor is over will be picked up
+        // again on the next mouse move.
+        m_hover_edge.reset();
+        m_sheet.clear();
+        m_hover_block.reset();
+        m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
+        m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
+        refresh_cut_preview();
+        refresh_delete_preview();
+        refresh_view();
+
+        const std::size_t after = m_blocking->nb_cells(3);
+        m_status = std::string(ARedo ? "Redid" : "Undid") + " one edit — blocks " + std::to_string(before) + " to " +
+                   std::to_string(after);
+        std::cout << "biy [history]: " << (ARedo ? "redid" : "undid") << " one edit, blocks " << before << " -> "
+                  << after << ". " << (m_blocking->can_undo() ? "" : "no more to undo. ")
+                  << (m_blocking->can_redo() ? "" : "no more to redo.") << std::endl;
+    }
+
     void BiyApp::handle_collapse() {
         if (!m_blocking || m_mode != MouseMode::Collapse) return;
         ImGuiIO &io = ImGui::GetIO();
@@ -1278,7 +1366,9 @@ namespace gecko::biy {
             clear();
             return;
         }
-        m_hover_block = static_cast<int>(hit.index);
+        // The blocks are drawn one hex per 3-cell in the blocking's own order, so a picked cell
+        // index is a position; kept as the id at that position, for the reason `m_hover_edge` gives.
+        m_hover_block = m_blocking->block_ids()[hit.index];
     }
 
     void BiyApp::refresh_delete_preview() {
@@ -1291,7 +1381,15 @@ namespace gecko::biy {
         }
 
         const auto hexes = m_blocking->mesh_hexes(1);
-        const auto index = static_cast<std::size_t>(*m_hover_block);
+        const int position = display_position(3, *m_hover_block);
+        if (position < 0) {
+            m_hover_block.reset();
+            if (polyscope::hasVolumeMesh(DELETE_PREVIEW)) {
+                polyscope::removeStructure(polyscope::getVolumeMesh(DELETE_PREVIEW));
+            }
+            return;
+        }
+        const auto index = static_cast<std::size_t>(position);
         if (index >= hexes.size()) {
             m_hover_block.reset();
             return;
@@ -1369,21 +1467,21 @@ namespace gecko::biy {
             return;
         }
 
-        const int index = *m_hover_block;
+        const int block_id = *m_hover_block;
         const std::size_t before = m_blocking->nb_cells(3);
-        m_blocking->delete_block(index);
+        m_blocking->delete_block(block_id);
         const std::size_t after = m_blocking->nb_cells(3);
 
-        // The highlight describes a block that no longer exists, and every index behind it has
-        // shifted, so it goes before anything is drawn again.
+        // The highlight describes a block that no longer exists, so it goes before anything is drawn
+        // again.
         m_hover_block.reset();
         m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
         refresh_delete_preview();
         refresh_view();
 
-        m_status = "Deleted block " + std::to_string(index) + " — blocks " + std::to_string(before) + " to " +
+        m_status = "Deleted block " + std::to_string(block_id) + " — blocks " + std::to_string(before) + " to " +
                    std::to_string(after);
-        report("deleted block " + std::to_string(index) + ", blocks " + std::to_string(before) + " -> " +
+        report("deleted block " + std::to_string(block_id) + ", blocks " + std::to_string(before) + " -> " +
                std::to_string(after) + "." + bend_report(*m_blocking));
     }
 

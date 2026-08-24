@@ -103,17 +103,26 @@ if blocking.can_delete_face(face_a):
 # a non-zero entry says the geometry is at fault and a zero one says the drawing is.
 print(max(blocking.edge_bends()))
 
-# Deleting a block takes with it every face, edge and corner that existed only because of it;
-# whatever it shared with a neighbour stays, as that neighbour's boundary. The index is a position
-# in the block traversal — the same order mesh_hexes() and block_volumes() use.
-blocking.delete_block(0)
+# Cells are named two different ways here, and the difference matters. What is *drawn* comes back
+# as flat arrays a renderer indexes by position — edge_vertices(), edge_bends(), block_volumes(),
+# mesh_hexes(). What is *acted on* is named by id, because a position is only true until the next
+# operation renumbers the traversal, and cutting or deleting is exactly what does that. edge_ids(),
+# face_ids() and block_ids() bridge the two: one id per cell, in the order those arrays index.
+edge_ids = blocking.edge_ids()
+print(len(edge_ids) == len(blocking.edge_bends()))   # True — same order, same length
 
-# Cutting: pick an edge (by its position in edge_vertices()/edge_segments() order) and a parameter
-# along it. The cut runs through every edge parallel to that one, across every block they touch —
-# sheet_edges() reports which, and sheet_cut_points() where, before anything is modified.
-sheet = blocking.sheet_edges(0)                 # [] if the sheet cannot be cut evenly
-preview = blocking.sheet_cut_points(0, 0.5)     # one point per edge of `sheet`, in the same order
-blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if the cut is impossible
+# Deleting a block takes with it every face, edge and corner that existed only because of it;
+# whatever it shared with a neighbour stays, as that neighbour's boundary.
+blocking.delete_block(blocking.block_ids()[0])
+
+# Cutting: pick an edge by id, and a parameter along it. The cut runs through every edge parallel to
+# that one, across every block they touch — sheet_edges() reports which, and sheet_cut_points()
+# where, before anything is modified. sheet_edges() answers in positions, because what it is for is
+# highlighting the sheet on screen.
+target = blocking.edge_ids()[0]
+sheet = blocking.sheet_edges(target)            # [] if the sheet cannot be cut evenly
+preview = blocking.sheet_cut_points(target, 0.5)  # one point per edge of `sheet`, in the same order
+blocking.cut_sheet(target, 0.5)                 # False, changing nothing, if the cut is impossible
 
 # The inverse: take a whole layer out and glue back what was either side of it. Where 2 corners
 # merge, the more constrained classification wins — a model vertex over a curve, a curve over a
@@ -122,7 +131,20 @@ blocking.cut_sheet(0, 0.5)                      # False, changing nothing, if th
 # an unclassified grid can be taken apart one sheet at a time. Returns False, changing nothing, when
 # one of the sheet's edges joins 2 corners on 2 *different* model vertices — merging them would leave
 # one of those vertices with no corner on it — or when the sheet cannot be collapsed at all.
-blocking.delete_sheet(0, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+blocking.delete_sheet(target, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
+# Undo. Every operation that changes the blocking snapshots it first, so taking an edit back is
+# putting that snapshot in place — not a stack of inverse operations, because these operations have
+# no inverses (collapsing the layer a cut just made does not restore the block). Ids survive an undo,
+# so a block id from before the undone edit finds its block again. An operation the kernel *refuses*
+# costs no undo step, and any new edit discards the redo history.
+print(blocking.can_undo(), blocking.can_redo())
+blocking.undo()
+blocking.redo()
+
+# A snapshot is a whole copy of the blocking, so the history costs depth times its size: a few
+# thousand cells at degree 3 is a couple of megabytes each.
+blocking.set_history_depth(20)
 
 # What each block encloses, from its own stored geometry — exact at 1 subdivision when its faces are
 # planar, converging as it grows otherwise. Negative means that block came out inverted.
@@ -158,7 +180,7 @@ cd build && ctest -R test_python --output-on-failure
 
 ## Code coverage
 
-Because `gecko`'s C++ source (`python/src/bindings.cpp`) is compiled by the very same CMake build
+Because `gecko`'s C++ source (`python/src/bindings.cpp`, over the `Gecko::App` façades) is compiled by the very same CMake build
 as the rest of the library, it picks up the project's `--coverage` instrumentation automatically
 whenever `GECKO_CODE_COVERAGE`/`GECKO_CODE_COVERAGE_HTML_REPORT` is on (see
 [Building & Testing](../developer-guide/testing.md#code-coverage-html-report)) — and because

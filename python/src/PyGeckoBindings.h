@@ -2,7 +2,7 @@
 
 #include <pybind11/pybind11.h>
 
-namespace gecko::python {
+namespace gecko::app {
 
     /**
      * @brief Registers gecko's façade classes (GeomModel, Blocking) into a Python module.
@@ -14,4 +14,4 @@ namespace gecko::python {
      */
     void register_gecko_module(pybind11::module_ m);
 
-} // namespace gecko::python
+} // namespace gecko::app

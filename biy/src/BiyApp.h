@@ -14,8 +14,8 @@ namespace polyscope {
 } // namespace polyscope
 
 #include "BiyConfig.h"
-#include "BlockingFacade.h"
-#include "GeomModelFacade.h"
+#include <gecko/app/BlockingFacade.h>
+#include <gecko/app/GeomModelFacade.h>
 
 namespace gecko::biy {
 
@@ -87,14 +87,14 @@ namespace gecko::biy {
         [[nodiscard]] std::mutex &mutex() { return m_mutex; }
 
         /** @brief The geometric model, for injection into the Python console. @return The model. */
-        [[nodiscard]] python::GeomModelFacade &model() { return *m_model; }
+        [[nodiscard]] app::GeomModelFacade &model() { return *m_model; }
 
         /**
          * @brief Gets the blocking, creating an empty one on first use so the Python console always
          * has a `blocking` to talk to.
          * @return The blocking.
          */
-        [[nodiscard]] python::BlockingFacade &blocking();
+        [[nodiscard]] app::BlockingFacade &blocking();
 
         /**
          * @brief Asks for the Polyscope structures to be rebuilt on the next frame. Call after any
@@ -191,6 +191,11 @@ namespace gecko::biy {
          * the status line and on the terminal.
          * @param trigger How the cut was asked for, for the terminal line ("click" or "space"). */
         void perform_cut(const char *trigger);
+        /** @brief Takes one edit back, or puts one back, and clears everything that described the
+         * blocking as it was.
+         * @param ARedo true to redo, false to undo. */
+        void step_history(bool ARedo);
+
         /** @brief Tracks what the cursor is over in Collapse mode, lighting the sheet it would take
          * out, and collapses it on a click or on space. */
         void handle_collapse();
@@ -217,6 +222,13 @@ namespace gecko::biy {
         /** @brief Registers (or removes, when nothing is hovered) the sheet highlight and the markers
          * showing where the cut would land. */
         void refresh_cut_preview();
+        /** @brief Where the cell of dimension @p ADim carrying @p AId sits in that dimension's
+         * display arrays, or -1 if it is gone.
+         * @param ADim 1 for edges, 3 for blocks.
+         * @param AId The cell id.
+         * @return Its position, for indexing the display arrays. */
+        int display_position(int ADim, int AId) const;
+
         /** @brief A visually distinct colour for each block, from its index alone.
          * @param index The block's position in the blocking's own block order.
          * @return Its colour. */
@@ -226,8 +238,8 @@ namespace gecko::biy {
 
         std::mutex m_mutex;
         BiyConfig m_config;
-        std::unique_ptr<python::GeomModelFacade> m_model;
-        std::unique_ptr<python::BlockingFacade> m_blocking;
+        std::unique_ptr<app::GeomModelFacade> m_model;
+        std::unique_ptr<app::BlockingFacade> m_blocking;
         std::string m_model_path;
         /** @brief Set by `request_refresh()`, consumed by the next `per_frame()`. Atomic rather than
          * guarded by `m_mutex`: the console calls `request_refresh()` while already holding that
@@ -237,11 +249,17 @@ namespace gecko::biy {
         MouseMode m_mode = MouseMode::Camera;
         /** @brief Node id of the corner currently being dragged, if any. */
         std::optional<int> m_dragged_node;
-        /** @brief Edge the cursor is currently over in Cut mode, as a position in the order
-         * `BlockingFacade::sheet_edges()` speaks, or unset when the cursor is over no edge. */
+        /** @brief Edge the cursor is currently over in Cut or Collapse mode, as its *id*, or unset
+         * when the cursor is over no edge.
+         *
+         * An id rather than the position the pick came back as, because it is held across frames and
+         * acted on later: a position stops meaning this edge the moment an operation renumbers the
+         * traversal, and the operations here are what does that. What gets *drawn* is still
+         * positional — see `m_sheet`. */
         std::optional<int> m_hover_edge;
-        /** @brief The sheet that edge belongs to, as those same positions — empty when it cannot be
-         * cut homogeneously, which is itself worth showing rather than hiding. */
+        /** @brief The sheet that edge belongs to, as *positions* in the display arrays — this one is
+         * drawn rather than acted on, and a renderer indexes a flat array. Empty when the sheet
+         * cannot be cut homogeneously, which is itself worth showing rather than hiding. */
         std::vector<int> m_sheet;
         /** @brief Where along the hovered edge the cut would fall. Driven by the cursor, and editable
          * as a number in the panel for a cut that has to land on an exact value. */
@@ -249,8 +267,8 @@ namespace gecko::biy {
         /** @brief Last position the cut hover was computed for, so a still cursor costs nothing:
          * each hover test is a full Polyscope pick, which is a render pass. */
         glm::vec2 m_last_cut_mouse{-1.0f, -1.0f};
-        /** @brief Block the cursor is currently over in Delete mode, as a position in the order
-         * `BlockingFacade::delete_block()` speaks, or unset when the cursor is over none. */
+        /** @brief Block the cursor is currently over in Delete mode, as its *id*, or unset when the
+         * cursor is over none. @see m_hover_edge for why an id and not a position. */
         std::optional<int> m_hover_block;
         /** @copydoc m_last_cut_mouse */
         glm::vec2 m_last_delete_mouse{-1.0f, -1.0f};

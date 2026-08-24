@@ -14,7 +14,7 @@ namespace py = pybind11;
 // The same bindings the standalone `gecko` extension module exposes, registered here as a built-in
 // of the embedded interpreter — so `import gecko` works inside biy without locating a built .so,
 // and yields the exact same GeomModel/Blocking classes.
-PYBIND11_EMBEDDED_MODULE(gecko, m) { gecko::python::register_gecko_module(m); }
+PYBIND11_EMBEDDED_MODULE(gecko, m) { gecko::app::register_gecko_module(m); }
 
 namespace gecko::biy {
 

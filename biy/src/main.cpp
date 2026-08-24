@@ -10,11 +10,11 @@
 #include <polyscope/polyscope.h>
 
 #include "BiyApp.h"
-#include "BlockingFacade.h"
+#include <gecko/app/BlockingFacade.h>
 #include "PythonConsole.h"
 
 int main(int argc, char **argv) {
-    using gecko::python::BlockingFacade;
+    using gecko::app::BlockingFacade;
 
     if (argc < 2 || argc > 3) {
         std::cerr << "usage: biy <model.msh> [order]\n"

@@ -258,6 +258,35 @@ and length scale whenever a structure changes, which drags the ground plane alon
 freezes both to the model once it's loaded (`options::automaticallyComputeSceneExtents`). Growing a
 block, or pulling a corner far out, no longer shifts the ground or rescales the view.
 
+## Undo and redo
+
+**Undo** and **Redo** sit at the top of the operations, above what they take back, with `Cmd`+`Z`
+and `Cmd`+`Shift`+`Z` (`Ctrl` elsewhere; `Cmd`+`Y` also redoes). Every operation that changes the
+blocking is covered — creating a block, building connectivity, classifying, changing the order,
+moving or snapping a corner, cutting, collapsing, deleting.
+
+It works by snapshot: each operation copies the blocking before touching it, and undoing puts that
+copy back. Not a stack of inverse operations, because these operations have no inverses — collapsing
+the layer a cut just created does not restore the block, as [Collapsing a sheet](#collapsing-a-sheet)
+explains.
+
+Three things follow from that, and all three are what you would want:
+
+- **Ids survive.** A block id from before the undone edit finds its block again, so anything holding
+  one — the Python console, a script — is not left pointing at nothing.
+- **A refused operation costs no step.** A cut the kernel turns down changed nothing, so undoing
+  after it takes back the edit *before* it rather than undoing nothing.
+- **A new edit discards the redo history**, which is what makes the two stacks a line rather than a
+  tree.
+
+The depth is 20 edits by default. A snapshot is a whole copy of the blocking — a few thousand cells
+at order 3 is a couple of megabytes — so the history costs depth times that; `set_history_depth()`
+from the Python console changes it.
+
+Whatever the cursor was over is dropped on an undo, hover and preview included: those are ids, and an
+id from the state just abandoned need not mean anything in the one restored. Move the mouse and the
+highlight comes straight back.
+
 ## Cutting blocks
 
 **Cut** mode splits blocks along a *sheet*: pick an edge and a point on it, and the cut runs through
