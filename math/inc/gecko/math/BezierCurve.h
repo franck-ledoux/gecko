@@ -172,28 +172,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Raises the curve's degree by one without changing the curve it describes.
-         *
-         * Degree elevation is exact: the returned curve passes through exactly the same points, at
-         * exactly the same parameters. Used when a block structure is asked for a higher order and
-         * an edge has nothing to be refitted onto — raising it keeps the shape it already had rather
-         * than throwing it away.
-         *
-         * @return The same curve, one degree higher.
-         */
-        [[nodiscard]] BezierCurve elevated() const {
-            const std::size_t n = degree();
-            std::vector<TPointT> raised(n + 2);
-            raised[0] = m_control_points[0];
-            raised[n + 1] = m_control_points[n];
-            for (std::size_t i = 1; i <= n; ++i) {
-                const double a = static_cast<double>(i) / static_cast<double>(n + 1);
-                raised[i] = lerp(m_control_points[i], m_control_points[i - 1], a);
-            }
-            return BezierCurve(std::move(raised));
-        }
-
-        /**
          * @brief Computes the K-th derivative curve of the current Bezier curve.
          * @param AK The order of differentiation (e.g. 1 for first derivative, 2 for second).
          * @return A BezierCurve of degree `degree() - AK` representing the K-th derivative curve.

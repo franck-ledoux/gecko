@@ -511,8 +511,7 @@ namespace gecko {
         /**
          * @brief Checks whether this blocking is purely 2D (contains no 3-cell/hex block) — the
          * precondition every 2D editing operation requires (this class' own `delete_face()`, and
-         * the separate `FaceCollapse`/`FaceOpening`/`ChordRemoval`/`ChordInsertion` operation
-         * classes built on top of `Blocking`'s public API).
+         * any 2D editing operation built on top of `Blocking`'s public API).
          * @return true if the blocking has no 3-cells.
          */
         bool is_purely_2d() const { return nb_cells<3>() == 0; }
@@ -2268,15 +2267,13 @@ namespace gecko {
          */
         void classify_and_rebuild_block(Block ABlock, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart bd = ABlock->dart();
-            std::array<Node, 8> local_nodes{};
-            local_nodes[0] = m_cmap.template attribute<0>(bd);
-            local_nodes[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
-            local_nodes[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
-            local_nodes[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
-            local_nodes[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
-            local_nodes[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
-            local_nodes[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
-            local_nodes[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
+            // The frame the block records, not a fresh walk of its darts. Both are valid frames
+            // of the same hex, and they are generally *different* ones — so writing the volume
+            // through one and reading it back through the other permutes it. On a box that
+            // permutation maps the block onto itself and nothing shows; on a curved block it
+            // samples the interior in the wrong order, and a cut used to leave inverted cells in
+            // the generated mesh because of it.
+            const std::array<Node, 8> local_nodes = block_local_nodes(ABlock);
 
             Vector3d acc(0.0, 0.0, 0.0);
             for (const Node &node : local_nodes) {
@@ -2301,15 +2298,13 @@ namespace gecko {
          */
         void rebuild_block_volume(Block ABlock) {
             const Dart bd = ABlock->dart();
-            std::array<Node, 8> local_nodes{};
-            local_nodes[0] = m_cmap.template attribute<0>(bd);
-            local_nodes[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
-            local_nodes[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
-            local_nodes[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
-            local_nodes[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
-            local_nodes[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
-            local_nodes[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
-            local_nodes[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
+            // The frame the block records, not a fresh walk of its darts. Both are valid frames
+            // of the same hex, and they are generally *different* ones — so writing the volume
+            // through one and reading it back through the other permutes it. On a box that
+            // permutation maps the block onto itself and nothing shows; on a curved block it
+            // samples the interior in the wrong order, and a cut used to leave inverted cells in
+            // the generated mesh because of it.
+            const std::array<Node, 8> local_nodes = block_local_nodes(ABlock);
 
             std::array<TEdgeCurve, 12> curves{};
             for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
@@ -2679,15 +2674,13 @@ namespace gecko {
                             Variable<Int> &ATags,
                             std::size_t AS) {
             const Dart bd = ABlock->dart();
-            std::array<Node, 8> local_nodes{};
-            local_nodes[0] = m_cmap.template attribute<0>(bd);
-            local_nodes[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
-            local_nodes[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
-            local_nodes[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
-            local_nodes[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
-            local_nodes[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
-            local_nodes[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
-            local_nodes[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
+            // The frame the block records, not a fresh walk of its darts. Both are valid frames
+            // of the same hex, and they are generally *different* ones — so writing the volume
+            // through one and reading it back through the other permutes it. On a box that
+            // permutation maps the block onto itself and nothing shows; on a curved block it
+            // samples the interior in the wrong order, and a cut used to leave inverted cells in
+            // the generated mesh because of it.
+            const std::array<Node, 8> local_nodes = block_local_nodes(ABlock);
 
             Grid3D grid(AS + 1, std::vector<std::vector<NodeId>>(AS + 1, std::vector<NodeId>(AS + 1)));
 
