@@ -194,12 +194,12 @@ namespace gecko {
             m_cmap.template set_attribute<2>(d1, f);
             // Pinned, because `set_attribute` is free to leave the attribute pointing at any dart of
             // the cell, and everything that later reads a face's surface — `build_face_grid()`,
-            // `rebuild_face_surface()` — anchors `(u,v)` to the cycle starting at *that* dart. Left
+            // `rebuild_geometry()` — anchors `(u,v)` to the cycle starting at *that* dart. Left
             // to chance, the stored surface and its readers would disagree by a square symmetry.
             f->set_dart(d1);
             // Built from that cycle rather than from `curves` directly, so the frame holds whatever
             // dart the cell ends up on later.
-            rebuild_face_surface(f);
+            rebuild_geometry(f);
             return f;
         }
 
@@ -282,30 +282,30 @@ namespace gecko {
                 face->set_dart(it);
                 // Deliberately *not* `face_surfaces[f]`: that one is parameterized in HEX_FACES'
                 // frame, while everything that later reads a face's surface — `build_face_grid()`,
-                // `rebuild_face_surface()` — anchors `(u,v)` to the face's own dart cycle, which is
+                // `rebuild_geometry()` — anchors `(u,v)` to the face's own dart cycle, which is
                 // some rotation or reflection of it. Storing the HEX_FACES form would leave the 2
                 // disagreeing by a square symmetry. That went unnoticed for as long as faces were
                 // only ever sampled on a uniform grid, which a transpose maps onto itself; a sheet
                 // cut is the first thing to sample one asymmetrically, and it put the edge it
                 // inserts across the wrong axis. Rebuilding here yields the very same Coons patch,
                 // in the frame the rest of the class agrees on.
-                rebuild_face_surface(face);
+                rebuild_geometry(face);
             }
 
             Block b = m_cmap.template create_attribute<3>();
             m_cmap.template set_attribute<3>(d1, b);
             // Pinned for the same reason as the faces above: `emit_hex_cells()` and
-            // `rebuild_block_volume()` both walk the block's corners from whatever dart the
+            // `rebuild_geometry()` both walk the block's corners from whatever dart the
             // attribute holds, so leaving it unpinned lets the stored volume and its readers
             // disagree by a cube symmetry.
             b->set_dart(d1);
             // Rebuilt from the block's own dart cycle rather than assembled from `face_surfaces`
             // directly, for the same reason the faces above are: the TFI of those 6 surfaces is
             // parameterized in the order the caller passed its corners in, while `emit_hex_cells()`
-            // and `rebuild_block_volume()` both anchor `(u,v,w)` to the cycle CGAL gives the 3-cell.
+            // and `rebuild_geometry()` both anchor `(u,v,w)` to the cycle CGAL gives the 3-cell.
             // The 2 differ by a cube symmetry whenever those disagree, which a uniform sampling
             // hides and a sheet cut does not — it would split the block across the wrong axis.
-            rebuild_block_volume(b);
+            rebuild_geometry(b);
             return b;
         }
 
@@ -379,19 +379,19 @@ namespace gecko {
             for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
                  it != itend;
                  ++it) {
-                refit_edge(it, tol);
+                refit(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                classify_and_rebuild_face(it, tol);
+                refit(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                classify_and_rebuild_block(it, tol);
+                refit(it, tol);
             }
         }
 
@@ -424,19 +424,19 @@ namespace gecko {
                 const Dart d = it->dart();
                 const Node n0 = m_cmap.template attribute<0>(d);
                 const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-                if (n0 == ANode || n1 == ANode) refit_edge(it, tol);
+                if (n0 == ANode || n1 == ANode) refit(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                if (face_has_node(it, ANode)) classify_and_rebuild_face(it, tol);
+                if (has_corner(it, ANode)) refit(it, tol);
             }
 
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                if (block_has_node(it, ANode)) classify_and_rebuild_block(it, tol);
+                if (has_corner(it, ANode)) refit(it, tol);
             }
         }
 
@@ -675,7 +675,7 @@ namespace gecko {
                 pending.pop_back();
                 const Node from = start_of.at(e);
 
-                for (const Block b : blocks_of_edge(e)) {
+                for (const Block b : blocks_of(e)) {
                     const std::array<Node, 8> corners = frame_of(b);
                     const std::array<Edge, 12> edges = edges_of(b, corners);
                     const std::size_t ie = index_in(edges, e);
@@ -690,7 +690,7 @@ namespace gecko {
                     }
                 }
 
-                for (const Face f : standalone_faces_of_edge(e)) {
+                for (const Face f : standalone_faces_of(e)) {
                     const std::array<Node, 4> corners = frame_of(f);
                     const std::array<Edge, 4> edges = edges_of(f, corners);
                     const std::size_t ie = index_in(edges, e);
@@ -1020,13 +1020,13 @@ namespace gecko {
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                if (face_has_node(it, ANode)) rebuild_face_surface(it);
+                if (has_corner(it, ANode)) rebuild_geometry(it);
             }
 
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                if (block_has_node(it, ANode)) rebuild_block_volume(it);
+                if (has_corner(it, ANode)) rebuild_geometry(it);
             }
         }
 
@@ -1126,7 +1126,7 @@ namespace gecko {
         };
 
         /** @brief A `to_mesh()`-generated `(S+1)x(S+1)` grid of node ids for one face attribute,
-         * indexed in the face's own local `(u,v)` frame (see `classify_and_rebuild_face()`), plus
+         * indexed in the face's own local `(u,v)` frame (see `frame_of()`), plus
          * the 4 local corner nodes that frame is anchored to (needed to reconcile this frame against
          * a differently-rotated/reflected view of the same face from an incident block).
          */
@@ -1533,7 +1533,7 @@ namespace gecko {
          *        classifying — a proximity search there would classify a blocking nobody ever asked
          *        to classify, and then bend its edges onto whatever they happen to have drifted near.
          */
-        void refit_edge(Edge AEdge, const Tolerances &ATol, bool AInferOnly = false) {
+        void refit(Edge AEdge, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart d = AEdge->dart();
             const Node n0 = m_cmap.template attribute<0>(d);
             const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
@@ -1909,9 +1909,9 @@ namespace gecko {
          *
          * @param AFace The face to classify and rebuild.
          * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
-         * @param AInferOnly Skips that fallback — see `refit_edge()`'s parameter of the same name.
+         * @param AInferOnly Skips that fallback — see `refit()`'s parameter of the same name.
          */
-        void classify_and_rebuild_face(Face AFace, const Tolerances &ATol, bool AInferOnly = false) {
+        void refit(Face AFace, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart fd = AFace->dart();
             std::array<Node, 4> local_nodes{};
             Dart walk = fd;
@@ -1940,7 +1940,7 @@ namespace gecko {
                                     : nearest_of(inferred, center);
             AFace->info().geom_targets = result.targets;
 
-            rebuild_face_surface(AFace);
+            rebuild_geometry(AFace);
         }
 
         /**
@@ -2072,23 +2072,23 @@ namespace gecko {
                 // Straightened before being refitted, the same 2 steps in the same order
                 // `move_node()` and `snap_node()` use between them — and for the same reason. A
                 // corner that moves leaves every curve through it describing where that corner *was*,
-                // and `refit_edge()` falls back on the stored curve's own midpoint to decide what the
+                // and `refit()` falls back on the stored curve's own midpoint to decide what the
                 // edge is classified on. Fed a stale curve it can classify the edge onto whatever
                 // that curve used to pass through and then project its interior there: collapsing a
                 // grid whose merged plane used to sit on a model surface bent one edge a quarter of
                 // its own length, pulled back onto a face it no longer touches.
                 store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
-                refit_edge(it, ATol, true);
+                refit(it, ATol, true);
             }
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
-                if (face_has_moved_node(it, moved)) classify_and_rebuild_face(it, ATol, true);
+                if (face_has_moved_node(it, moved)) refit(it, ATol, true);
             }
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
-                if (block_has_moved_node(it, moved)) classify_and_rebuild_block(it, ATol, true);
+                if (block_has_moved_node(it, moved)) refit(it, ATol, true);
             }
         }
 
@@ -2136,7 +2136,7 @@ namespace gecko {
          * @param ANode The node to look for.
          * @return true if the face has that corner.
          */
-        bool face_has_node(Face AFace, Node ANode) {
+        bool has_corner(Face AFace, Node ANode) {
             Dart walk = AFace->dart();
             for (std::size_t c = 0; c < 4; ++c) {
                 if (m_cmap.template attribute<0>(walk) == ANode) return true;
@@ -2151,7 +2151,7 @@ namespace gecko {
          * @param ANode The node to look for.
          * @return true if the block has that corner.
          */
-        bool block_has_node(Block ABlock, Node ANode) {
+        bool has_corner(Block ABlock, Node ANode) {
             const Dart bd = ABlock->dart();
             for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).begin(),
                       itend = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).end();
@@ -2166,10 +2166,10 @@ namespace gecko {
          * @brief Rebuilds one face's stored surface from its 4 boundary edges' current curves via
          * `coons_surface_from_edges()`, then pulls its interior onto whatever surface it is already
          * classified on via `refit_face_interior()` — the pure-geometry half of
-         * `classify_and_rebuild_face()`, also used on its own by `move_node()`.
+         * `refit()`, also used on its own by `move_node()`.
          * @param AFace The face to rebuild.
          */
-        void rebuild_face_surface(Face AFace) {
+        void rebuild_geometry(Face AFace) {
             const Dart fd = AFace->dart();
             // The face's own frame, canonical rather than whichever dart happens to name it — see
             // `frame_of()`. Every reader and writer of a face's surface goes through it, or
@@ -2204,7 +2204,7 @@ namespace gecko {
          *
          * Sampled points are pulled onto the geometry and the control points that make the surface
          * pass *through* them are then solved for, rather than the control points being projected —
-         * for the reason spelled out on `refit_edge()`: a Bezier surface does not pass through its
+         * for the reason spelled out on `refit()`: a Bezier surface does not pass through its
          * interior control points, so projecting those would leave the surface itself short of the
          * geometry every time.
          *
@@ -2306,12 +2306,12 @@ namespace gecko {
          *
          * @param ABlock The block to classify and rebuild.
          * @param ATol The per-dimension snapping tolerances.
-         * @param AInferOnly Leaves the block's own classification alone — see `refit_edge()`'s
+         * @param AInferOnly Leaves the block's own classification alone — see `refit()`'s
          *        parameter of the same name. A block has nothing to infer from (its only possible
          *        targets are volumes, which its 6 faces could only ever point back at), so there is
          *        no inference to fall back *to*: it simply keeps what it had.
          */
-        void classify_and_rebuild_block(Block ABlock, const Tolerances &ATol, bool AInferOnly = false) {
+        void refit(Block ABlock, const Tolerances &ATol, bool AInferOnly = false) {
             const Dart bd = ABlock->dart();
             // The frame the block records, not a fresh walk of its darts. Both are valid frames
             // of the same hex, and they are generally *different* ones — so writing the volume
@@ -2330,19 +2330,19 @@ namespace gecko {
                 ABlock->info().geom_targets = classify_position(GroupDim::Dim3, center, ATol).targets;
             }
 
-            rebuild_block_volume(ABlock);
+            rebuild_geometry(ABlock);
         }
 
         /**
          * @brief Rebuilds one block's stored volume via `tfi_volume_from_faces()` from its 6
          * bounding faces' current surfaces, leaving its classification untouched — the pure-geometry
-         * half of `classify_and_rebuild_block()`, also used on its own by `move_node()`.
+         * half of `refit()`, also used on its own by `move_node()`.
          *
          * Callers must have brought those faces up to date first, which `classify()`, `move_node()`
          * and `create_hex_block()` all do by running the faces before the blocks.
          * @param ABlock The block to rebuild.
          */
-        void rebuild_block_volume(Block ABlock) {
+        void rebuild_geometry(Block ABlock) {
             const Dart bd = ABlock->dart();
             // The frame the block records, not a fresh walk of its darts. Both are valid frames
             // of the same hex, and they are generally *different* ones — so writing the volume
@@ -2390,7 +2390,7 @@ namespace gecko {
                 for (std::size_t c = 0; c < 4; ++c) {
                     corner_ab[c] = QUAD_CORNER_IJ[static_cast<std::size_t>(index_of(own_in_block, uv[c]))];
                 }
-                face_surfaces[f] = reframed_surface(face->info().surface, corner_ab);
+                face_surfaces[f] = reframed(face->info().surface, corner_ab);
                 from_face[f] = true;
             }
             for (std::size_t f = 0; f < 6; ++f) {
@@ -3050,24 +3050,30 @@ namespace gecko {
          * block's darts disturbs the vertex orbits of the corners it shared, CGAL rebuilds those
          * attributes, and the rebuilt ones come back with no id at all.
          *
-         * Nodes additionally get their corner key here, and `assign_missing_node_ids()` is called on
+         * Nodes additionally get their corner key here, and `name_new_nodes()` is called on
          * its own between the individual insertions of a cut: a key must exist before any frame is
          * read from one.
          */
         void assign_missing_ids() {
-            assign_missing_node_ids();
+            name_new_nodes();
             assign_missing_ids_of<1>(m_next_edge_id);
             assign_missing_ids_of<2>(m_next_face_id);
             assign_missing_ids_of<3>(m_next_block_id);
         }
 
         /**
-         * @brief Gives a corner key and an id to every node that has neither.
+         * @brief Names every node that has no name yet — a corner key and an id.
          *
-         * The 0-dimensional half of `assign_missing_ids()`, called on its own between the individual
-         * insertions of a cut, where a key must exist before any frame is read from one.
+         * `EditSession` covers the end of an operation, and for most cells that is soon enough. Nodes
+         * are the exception: a cell's local frame is recorded as the corner keys of its own corners,
+         * and an edge's stored curve is oriented by comparing two of them, so a node still unnamed in
+         * the middle of an operation would be *written into* a frame or a curve orientation as -1.
+         *
+         * Called by hand, therefore, straight after each individual insertion that can create one and
+         * before anything reads a frame or stores a curve. That is a precondition rather than a tail
+         * invariant, which is why it cannot be folded into the session the way the rest was.
          */
-        void assign_missing_node_ids() {
+        void name_new_nodes() {
             for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
                  it != itend;
                  ++it) {
@@ -3119,7 +3125,7 @@ namespace gecko {
         /** @brief The blocks incident to one edge.
          * @param AEdge The edge to inspect.
          * @return Its incident blocks (empty for an edge of a standalone quad). */
-        std::vector<Block> blocks_of_edge(Edge AEdge) {
+        std::vector<Block> blocks_of(Edge AEdge) {
             std::vector<Block> blocks;
             const Dart ed = AEdge->dart();
             for (auto it = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).begin(),
@@ -3136,7 +3142,7 @@ namespace gecko {
          * block's own face, a hex's bounding faces being reached through the block instead.
          * @param AEdge The edge to inspect.
          * @return Its incident block-less faces. */
-        std::vector<Face> standalone_faces_of_edge(Edge AEdge) {
+        std::vector<Face> standalone_faces_of(Edge AEdge) {
             std::vector<Face> faces;
             const Dart ed = AEdge->dart();
             for (auto it = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).begin(),
@@ -3244,7 +3250,7 @@ namespace gecko {
          * local frame.
          *
          * Recorded on the face the first time it is asked for and read back by id afterwards, for
-         * the reason `frame_of()` gives one dimension up. A face between 2 blocks carries
+         * the reason the block overload gives one dimension up. A face between 2 blocks carries
          * darts on both sides, and the 2 sides walk its cycle in *opposite* directions: deleting one
          * block erases that side's darts, CGAL re-points the attribute to the surviving side, and a
          * frame derived from it silently mirrors. The surface then reads back reflected, and the
@@ -3488,7 +3494,7 @@ namespace gecko {
          * @param AAxis 0 for the `u=1` boundary (parameterized by `v`), 1 for `v=1` (by `u`).
          * @return The boundary curve, exactly (it is a row/column of the control grid).
          */
-        static TEdgeCurve surface_boundary_curve(const FaceSurfaceT &ASurface, int AAxis) {
+        static TEdgeCurve boundary_of(const FaceSurfaceT &ASurface, int AAxis) {
             const std::size_t n = ASurface.degree();
             std::vector<Point3d> points(n + 1);
             for (std::size_t a = 0; a <= n; ++a) {
@@ -3505,7 +3511,7 @@ namespace gecko {
          * @return The boundary surface, exactly (it is a slice of the control grid), parameterized by
          *         the 2 remaining axes in increasing order.
          */
-        static FaceSurfaceT volume_boundary_surface(const BlockVolumeT &AVolume, int AAxis) {
+        static FaceSurfaceT boundary_of(const BlockVolumeT &AVolume, int AAxis) {
             const std::size_t n = AVolume.degree();
             auto grid = FaceSurfaceT::make_grid(n);
             for (std::size_t a = 0; a <= n; ++a) {
@@ -3528,7 +3534,7 @@ namespace gecko {
          *
          * A cut produces sub-surfaces in the frame of whatever they were cut out of, but the face
          * attribute they land on has its own frame — and everything downstream (`to_mesh()`,
-         * `rebuild_face_surface()`) reads a face's surface in that own frame. Same reason a block
+         * `rebuild_geometry()`) reads a face's surface in that own frame. Same reason a block
          * reads its bounding faces through this. Since both frames have the same 4 corners, the
          * permutation is read straight off where those corners sit, with no geometry involved.
          *
@@ -3537,8 +3543,7 @@ namespace gecko {
          *        coordinate 0 or 1, in the target's own dart-cycle order.
          * @return The same surface, re-indexed into the target frame.
          */
-        static FaceSurfaceT reframed_surface(const FaceSurfaceT &ASource,
-                                             const std::array<std::array<int, 2>, 4> &ACornerAB) {
+        static FaceSurfaceT reframed(const FaceSurfaceT &ASource, const std::array<std::array<int, 2>, 4> &ACornerAB) {
             const std::size_t n = ASource.degree();
             // Corner 0 -> corner 1 is the target's own u; whichever source axis moves along it is the
             // one the target's u maps to, and the remaining source axis takes the target's v.
@@ -3599,7 +3604,7 @@ namespace gecko {
                 // Before anything reads a frame: the insertion can have rebuilt corner attributes,
                 // and a node still carrying id -1 sorts ahead of every real one — so a frame worked
                 // out now would not be the frame this cell has a moment later.
-                assign_missing_node_ids();
+                name_new_nodes();
 
                 // `d` now spans [src, mid] and `nd` the [mid, dst] half; both inherit the parent's
                 // classification through CellData.h's SplitFunctor, and only the geometry needs
@@ -3660,7 +3665,7 @@ namespace gecko {
                 assert(mid_darts.size() == 2 && "Blocking::split_sheet_faces: face must carry exactly 2 cut nodes");
 
                 const Dart nd = m_cmap.insert_cell_1_in_cell_2(mid_darts[0], mid_darts[1]);
-                assign_missing_node_ids();
+                name_new_nodes();
 
                 Edge new_edge = m_cmap.template attribute<1>(nd);
                 if (new_edge == nullptr) {
@@ -3668,7 +3673,7 @@ namespace gecko {
                     m_cmap.template set_attribute<1>(nd, new_edge);
                 }
                 // The cut runs along the low half's far isoparametric curve, exactly.
-                // surface_boundary_curve() always runs along the axis the cut left alone, from its 0
+                // boundary_of() always runs along the axis the cut left alone, from its 0
                 // end to its 1 end, so which of the 2 cut nodes it starts at is known outright — the
                 // one born on the edge whose parent corners sit at 0 along that axis.
                 const Node mid_a = m_cmap.template attribute<0>(mid_darts[0]);
@@ -3680,9 +3685,7 @@ namespace gecko {
                 // Pinned onto those 2 nodes: read off a surface, the curve reaches them only to
                 // rounding, and an edge's curve has to pass through its own endpoints exactly.
                 store_curve(new_edge,
-                            pinned_curve(surface_boundary_curve(low, sf.axis),
-                                         curve_start->info().point,
-                                         curve_end->info().point),
+                            pinned_curve(boundary_of(low, sf.axis), curve_start->info().point, curve_end->info().point),
                             curve_start);
                 // An edge born inside a face lies on whatever that face lies on.
                 new_edge->info().geom_targets = sf.face->info().geom_targets;
@@ -3694,7 +3697,7 @@ namespace gecko {
                 for (std::size_t c = 0; c < 4; ++c) {
                     if (QUAD_CORNER_IJ[c][axis] == 0) low_corner = c;
                 }
-                const bool a_is_low = face_has_node(half_a, sf.corners[low_corner]);
+                const bool a_is_low = has_corner(half_a, sf.corners[low_corner]);
                 const Face low_face = a_is_low ? half_a : half_b;
                 const Face high_face = a_is_low ? half_b : half_a;
 
@@ -3735,18 +3738,18 @@ namespace gecko {
                     corner_ab[c] = QUAD_CORNER_IJ[static_cast<std::size_t>(idx)];
                 }
             }
-            AHalf->info().surface = reframed_surface(ASurface, corner_ab);
+            AHalf->info().surface = reframed(ASurface, corner_ab);
         }
 
         /**
          * @brief Re-expresses a volume given in some source frame into a target frame that differs
          * from it by one of the 48 cube symmetries.
          *
-         * The 3D counterpart of `reframed_surface()`, and needed for the same reason: a cut produces
+         * The 3D counterpart of the overload above, and needed for the same reason: a cut produces
          * sub-volumes in the frame of the block they were cut out of, but each half is a *new* 3-cell
          * whose own frame comes from its own dart cycle — which CGAL builds, not us, and which is
          * generally some rotation or reflection of the parent's. Everything that later reads a
-         * block's volume (`emit_hex_cells()`, `rebuild_block_volume()`) anchors `(u,v,w)` to that own
+         * block's volume (`emit_hex_cells()`, `rebuild_geometry()`) anchors `(u,v,w)` to that own
          * cycle, so the sub-volume has to be re-indexed into it.
          *
          * @param ASource The volume, in the source frame.
@@ -3754,8 +3757,7 @@ namespace gecko {
          *        coordinate 0 or 1, in `HEX_CORNER_UVW` order.
          * @return The same volume, re-indexed into the target frame.
          */
-        static BlockVolumeT reframed_volume(const BlockVolumeT &ASource,
-                                            const std::array<std::array<int, 3>, 8> &ACornerUVW) {
+        static BlockVolumeT reframed(const BlockVolumeT &ASource, const std::array<std::array<int, 3>, 8> &ACornerUVW) {
             const std::size_t n = ASource.degree();
             // Corner 0 to corners 1/3/4 walk the target's own u/v/w; whichever source axis moves
             // along each is the one it maps to, and corner 0's own position gives the direction.
@@ -3815,7 +3817,7 @@ namespace gecko {
                     corner_uvw[c] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)];
                 }
             }
-            AHalf->info().volume = reframed_volume(AVolume, corner_uvw);
+            AHalf->info().volume = reframed(AVolume, corner_uvw);
         }
 
         /**
@@ -3869,7 +3871,7 @@ namespace gecko {
 
                 const std::vector<Dart> path = cut_loop(sb.block, mids);
                 const Dart nd = m_cmap.insert_cell_2_in_cell_3(path.begin(), path.end());
-                assign_missing_node_ids();
+                name_new_nodes();
 
                 Face new_face = m_cmap.template attribute<2>(nd);
                 if (new_face == nullptr) {
@@ -3878,7 +3880,7 @@ namespace gecko {
                 }
                 // A face born inside a block lies on whatever that block lies on.
                 new_face->info().geom_targets = sb.block->info().geom_targets;
-                assign_cut_face(new_face, volume_boundary_surface(low, sb.axis), sb, AMids, axis);
+                assign_cut_face(new_face, boundary_of(low, sb.axis), sb, AMids, axis);
 
                 const Block half_a = m_cmap.template attribute<3>(nd);
                 const Block half_b = m_cmap.template attribute<3>(m_cmap.template beta<3>(nd));
@@ -3886,7 +3888,7 @@ namespace gecko {
                 for (std::size_t c = 0; c < 8; ++c) {
                     if (HEX_CORNER_UVW[c][axis] == 0) low_corner = c;
                 }
-                const bool a_is_low = block_has_node(half_a, sb.corners[low_corner]);
+                const bool a_is_low = has_corner(half_a, sb.corners[low_corner]);
                 assign_half_block(a_is_low ? half_a : half_b, low, sb, AMids, true, axis);
                 assign_half_block(a_is_low ? half_b : half_a, high, sb, AMids, false, axis);
             }
@@ -3938,7 +3940,7 @@ namespace gecko {
                              const SheetBlock &ASheetBlock,
                              const std::map<Node, MidNode> &AMids,
                              std::size_t AAxis) {
-            // volume_boundary_surface() parameterizes by the 2 axes the cut left alone, in order.
+            // boundary_of() parameterizes by the 2 axes the cut left alone, in order.
             std::array<std::size_t, 2> kept{};
             std::size_t k = 0;
             for (std::size_t ax = 0; ax < 3; ++ax) {
@@ -3955,7 +3957,7 @@ namespace gecko {
                     corner_ab[c][a] = HEX_CORNER_UVW[static_cast<std::size_t>(idx)][kept[a]];
                 }
             }
-            AFace->info().surface = reframed_surface(ASurface, corner_ab);
+            AFace->info().surface = reframed(ASurface, corner_ab);
         }
 
         /**
