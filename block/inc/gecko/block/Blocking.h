@@ -288,7 +288,6 @@ namespace gecko {
                 // inserts across the wrong axis. Rebuilding here yields the very same Coons patch,
                 // in the frame the rest of the class agrees on.
                 rebuild_face_surface(face);
-                m_hex_faces.push_back(face);
             }
 
             Block b = m_cmap.template create_attribute<3>();
@@ -319,7 +318,13 @@ namespace gecko {
          * `UnstructuredMesh::build_connectivity()`'s "create raw entities, then link them" pattern.
          */
         void build_connectivity() {
-            sew_matching<3>(m_hex_faces, 4);
+            std::vector<Face> block_faces;
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (belongs_to_block(it)) block_faces.push_back(it);
+            }
+            sew_matching<3>(block_faces, 4);
             sew_free_quad_edges();
         }
 
@@ -489,7 +494,7 @@ namespace gecko {
                  it != itend;
                  ++it) {
                 FaceGrid fg = build_face_grid(it, node_ids, edge_chains, mesh, dims, tags, s);
-                if (std::find(m_hex_faces.begin(), m_hex_faces.end(), it) == m_hex_faces.end()) {
+                if (!belongs_to_block(it)) {
                     for (std::size_t i = 0; i < s; ++i) {
                         for (std::size_t j = 0; j < s; ++j) {
                             mesh.add_face(fg.grid[i][j], fg.grid[i + 1][j], fg.grid[i + 1][j + 1], fg.grid[i][j + 1]);
@@ -573,13 +578,7 @@ namespace gecko {
          *
          * @param ABlock The block to delete.
          */
-        void delete_block(Block ABlock) {
-            m_cmap.template remove_cell<3>(ABlock->dart());
-            // The removal may have taken faces with it, and `m_hex_faces` would go on holding
-            // handles to attributes that no longer exist — which `to_mesh()` compares against and
-            // `build_connectivity()` dereferences.
-            refresh_hex_faces();
-        }
+        void delete_block(Block ABlock) { m_cmap.template remove_cell<3>(ABlock->dart()); }
 
         // ---------------------------------------------------------------------
         // Sheet cut
@@ -867,9 +866,6 @@ namespace gecko {
             split_sheet_edges(*sheet, AParam, mids);
             split_sheet_faces(*sheet, AParam, mids);
             split_sheet_blocks(*sheet, AParam, mids);
-            // A cut both splits faces in 2 and creates one per block, so which faces belong to a
-            // block has changed; re-derived rather than tracked through each of those steps.
-            refresh_hex_faces();
             return true;
         }
 
@@ -977,7 +973,6 @@ namespace gecko {
             }
 
             assign_missing_node_ids();
-            refresh_hex_faces();
             refit_around(merged_at, tol);
             return true;
         }
@@ -3839,30 +3834,23 @@ namespace gecko {
         }
 
         /**
-         * @brief Rebuilds `m_hex_faces` from the blocks that currently exist.
+         * @brief Whether @p AFace bounds a block, rather than being a standalone 2D block's own face.
          *
-         * `m_hex_faces` means "every face belonging to some block": those are the candidates
-         * `build_connectivity()` may sew at dimension 3, and the ones `to_mesh()` must *not* emit a
-         * quad for, a quad being what a standalone 2D block is made of. Derived rather than
-         * maintained by hand, because the operations that change it — a cut splitting a face in 2, a
-         * deletion taking faces away with the block that owned them — would otherwise each have to
-         * remember to, and a deletion cannot: once CGAL has garbage-collected a face attribute there
-         * is no handle left to look up and drop.
+         * The 2 are told apart by the map itself: every dart of a block carries that block's 3-cell,
+         * so a face bounding one has a 3-attribute and a lone quad has none. That distinction decides
+         * which faces `build_connectivity()` may sew at dimension 3, and which ones `to_mesh()` emits
+         * a quad for — a quad being what a standalone 2D block is made of.
+         *
+         * Asked of the map each time rather than kept in a list alongside it. A list has to be
+         * refreshed by every operation that changes which faces belong to a block — a cut splitting
+         * a face in 2, a deletion taking faces away with the block that owned them — and forgetting
+         * one leaves it holding handles to attributes CGAL has already collected. It also cannot
+         * survive the blocking being copied, which snapshot-based undo needs it to.
+         *
+         * @param AFace The face to inspect.
+         * @return true if some block has it on its boundary.
          */
-        void refresh_hex_faces() {
-            std::set<Face> faces;
-            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
-                 it != itend;
-                 ++it) {
-                for (auto fit = m_cmap.template one_dart_per_incident_cell<2, 3>(it->dart()).begin(),
-                          fend = m_cmap.template one_dart_per_incident_cell<2, 3>(it->dart()).end();
-                     fit != fend;
-                     ++fit) {
-                    faces.insert(m_cmap.template attribute<2>(fit));
-                }
-            }
-            m_hex_faces.assign(faces.begin(), faces.end());
-        }
+        bool belongs_to_block(Face AFace) const { return m_cmap.template attribute<3>(AFace->dart()) != nullptr; }
 
         /** @brief The degree every cell's geometry is built at — see `set_degree()`. */
         std::size_t m_degree = 1;
@@ -3873,8 +3861,6 @@ namespace gecko {
         const TGeomModel *m_geom_model;
         /** @brief The underlying (always dimension-3) combinatorial map. */
         Map m_cmap;
-        /** @brief Every face created as one of a hex block's 6 boundary faces (dim-3 sew candidates). */
-        std::vector<Face> m_hex_faces;
     };
 
 } // namespace gecko

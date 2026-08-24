@@ -4,7 +4,9 @@
 #include <gecko/block/Blocking.h>
 #include <gecko/geom/FacetedGeometry.h>
 #include <gecko/io/GmshMeshWriter.h>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+using Catch::Approx;
 
 using namespace gecko;
 
@@ -158,4 +160,75 @@ TEST_CASE("delete_face_between_3_faces", "[BlockTestSuite]") {
     REQUIRE(blocking.nb_cells<0>() == 8);
     REQUIRE(blocking.nb_cells<1>() == 8);
     REQUIRE(blocking.nb_cells<2>() == 2);
+}
+
+TEST_CASE("a_blocking_can_be_copied_and_the_copy_edited_on_its_own", "[BlockTestSuite]") {
+    // The prerequisite for snapshot-based undo (see issue #39): taking a copy before an operation
+    // and putting it back is only sound if a copy is genuinely independent of its original.
+    //
+    // It was not, until the class stopped keeping a list of face handles alongside its own map: the
+    // implicit copy constructor duplicated the map *and* the list, leaving the copy's handles
+    // pointing into the original's map. Nothing copied a Blocking, so nothing caught it — this test
+    // is what makes that stay true.
+    const FacetedGeometry geom = make_minimal_geom_model();
+    Blocking<FacetedGeometry> original(geom, 3);
+    original.create_hex_block({Point3d(0, 0, 0),
+                               Point3d(1, 0, 0),
+                               Point3d(1, 1, 0),
+                               Point3d(0, 1, 0),
+                               Point3d(0, 0, 1),
+                               Point3d(1, 0, 1),
+                               Point3d(1, 1, 1),
+                               Point3d(0, 1, 1)});
+    original.create_hex_block({Point3d(1, 0, 0),
+                               Point3d(2, 0, 0),
+                               Point3d(2, 1, 0),
+                               Point3d(1, 1, 0),
+                               Point3d(1, 0, 1),
+                               Point3d(2, 0, 1),
+                               Point3d(2, 1, 1),
+                               Point3d(1, 1, 1)});
+    original.build_connectivity();
+    REQUIRE(original.template nb_cells<3>() == 2);
+
+    Blocking<FacetedGeometry> snapshot = original;
+    REQUIRE(snapshot.is_valid_topology());
+    REQUIRE(snapshot.template nb_cells<3>() == 2);
+    REQUIRE(snapshot.template nb_cells<0>() == 12);
+    // Face count as well as node count: a copy whose bookkeeping still pointed at the original's
+    // map would fail to recognise its own faces as belonging to a block and emit a surface quad for
+    // every one of them, which the node count alone does not see.
+    REQUIRE(snapshot.to_mesh(2).nb_nodes() == original.to_mesh(2).nb_nodes());
+    REQUIRE(snapshot.to_mesh(2).nb_faces() == 0);
+    REQUIRE(snapshot.to_mesh(2).nb_cells() == original.to_mesh(2).nb_cells());
+
+    // Editing the original must leave the snapshot exactly as it was — cutting it, which creates
+    // cells, and deleting from it, which destroys them.
+    auto edge = original.cmap().attributes<1>().begin();
+    REQUIRE(original.cut_sheet(edge, 0.5));
+    original.delete_block(original.cmap().attributes<3>().begin());
+
+    REQUIRE(snapshot.is_valid_topology());
+    REQUIRE(snapshot.template nb_cells<3>() == 2);
+    REQUIRE(snapshot.template nb_cells<2>() == 11);
+    REQUIRE(snapshot.template nb_cells<0>() == 12);
+    double total = 0.0;
+    for (const double v : snapshot.block_volumes(2)) {
+        REQUIRE(v > 0.0);
+        total += v;
+    }
+    REQUIRE(total == Approx(2.0).margin(1e-12));
+
+    // Sewing the snapshot after the original has been edited is the path that used to dereference
+    // handles into a map that had moved on.
+    snapshot.build_connectivity();
+    REQUIRE(snapshot.is_valid_topology());
+    REQUIRE(snapshot.template nb_cells<2>() == 11);
+
+    // And the other way round: the snapshot is editable on its own, without touching the original.
+    const std::size_t original_blocks = original.template nb_cells<3>();
+    REQUIRE(snapshot.cut_sheet(snapshot.cmap().attributes<1>().begin(), 0.25));
+    REQUIRE(snapshot.is_valid_topology());
+    REQUIRE(original.is_valid_topology());
+    REQUIRE(original.template nb_cells<3>() == original_blocks);
 }
