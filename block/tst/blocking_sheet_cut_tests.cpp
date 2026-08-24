@@ -1033,3 +1033,71 @@ TEST_CASE("an_unclassified_grid_can_be_taken_apart_one_sheet_at_a_time", "[Block
     REQUIRE(blocking.template nb_cells<3>() == 0);
     REQUIRE(blocking.template nb_cells<0>() == 0);
 }
+
+TEST_CASE("cutting_a_curved_block_leaves_no_inverted_cell_in_the_generated_mesh", "[BlockTestSuite]") {
+    // A block has more than one valid local frame — the 24 rotations of a cube — and the class used
+    // to have 2 of them in play at once: a cut stored a half's volume against the frame the block
+    // *records*, while to_mesh() read it back against a fresh walk of the block's darts. Those are
+    // generally different frames, so the volume came back permuted.
+    //
+    // On a box that permutation maps the block onto itself and nothing shows, which is why every
+    // straight-edged test passed. On a curved block it samples the interior in the wrong order, and
+    // the cells built from those samples come out inverted — 4 of 54 here, until classify() happened
+    // to rewrite the volume through the other frame and put it right by accident.
+    //
+    // Stated as the property that catches it however it comes back: a cell of the generated mesh
+    // never encloses a negative volume.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                               Point3d(hi[0], lo[1], lo[2]),
+                               Point3d(hi[0], hi[1], lo[2]),
+                               Point3d(lo[0], hi[1], lo[2]),
+                               Point3d(lo[0], lo[1], hi[2]),
+                               Point3d(hi[0], lo[1], hi[2]),
+                               Point3d(hi[0], hi[1], hi[2]),
+                               Point3d(lo[0], hi[1], hi[2])});
+    blocking.classify(0.3);
+
+    // The 6 tetrahedra tiling a hexahedron around its 0-6 diagonal, as block_volume() uses.
+    static constexpr std::array<std::array<std::size_t, 4>, 6> TETS = {
+        std::array<std::size_t, 4>{0, 1, 2, 6}, {0, 2, 3, 6}, {0, 3, 7, 6}, {0, 7, 4, 6}, {0, 4, 5, 6}, {0, 5, 1, 6}};
+    const auto worst_cell = [](const auto &AMesh) {
+        double worst = 1e30;
+        for (UInt c = 0; c < AMesh.nb_cells(); ++c) {
+            const auto nodes = AMesh.cell_nodes(CellId{c});
+            double total = 0.0;
+            for (const auto &tet : TETS) {
+                const Point3d &a = AMesh.node(nodes[tet[0]]);
+                const Vector3d e1(a, AMesh.node(nodes[tet[1]]));
+                const Vector3d e2(a, AMesh.node(nodes[tet[2]]));
+                const Vector3d e3(a, AMesh.node(nodes[tet[3]]));
+                total += e1.dot(e2.cross(e3)) / 6.0;
+            }
+            worst = std::min(worst, total);
+        }
+        return worst;
+    };
+
+    REQUIRE(worst_cell(blocking.to_mesh(3)) > 0.0);
+
+    // The cut is where it went wrong, and only at a subdivision fine enough to have interior nodes
+    // taken from the block's own volume rather than from its boundary.
+    REQUIRE(blocking.cut_sheet(blocking.cmap().attributes<1>().begin(), 1.0 / 3.0));
+    REQUIRE(blocking.is_valid_topology());
+    for (const SizeT subdivisions : {SizeT{1}, SizeT{2}, SizeT{3}, SizeT{4}}) {
+        REQUIRE(worst_cell(blocking.to_mesh(subdivisions)) > 0.0);
+    }
+}
