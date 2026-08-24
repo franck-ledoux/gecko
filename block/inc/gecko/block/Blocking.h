@@ -46,6 +46,7 @@ namespace gecko {
      */
     template<GeomModelConcept TGeomModel, EdgeCurveConcept TEdgeCurve = BezierCurve<Point3d>>
     class Blocking {
+    public:
         /** @brief The face representation paired with `TEdgeCurve` via `CurveSurfaceTraits` (same
          * order per issue #22) — `BezierSurface<N,Point3d>` for a `BezierCurve<N,Point3d>` edge
          * today; a future `NurbsCurve`/`BSplineCurve` brings its own paired surface with it, with no
@@ -56,7 +57,6 @@ namespace gecko {
          * face today. */
         using BlockVolumeT = typename SurfaceVolumeTraits<FaceSurfaceT>::Volume;
 
-    public:
         /** @brief The underlying combinatorial map type (always dimension 3). */
         using Map = CMap<TEdgeCurve, FaceSurfaceT, BlockVolumeT>;
         /** @brief A dart descriptor into the underlying map. */
@@ -1093,6 +1093,1091 @@ namespace gecko {
         /** @brief Checks the topological validity of the underlying map. @return true if valid. */
         bool is_valid_topology() const { return m_cmap.is_valid(); }
 
+        // =====================================================================
+        // Primitives
+        //
+        // The vocabulary the editing operations are written in, and the reason it is public rather
+        // than private: a sheet cut, a sheet collapse and a block deletion are clients of this class,
+        // not privileged parts of it. They call 24 of these names between them — an interface in fact
+        // long before it was one in name, and so undeclared, ungrouped and free to drift.
+        //
+        // Nothing here is a convenience. Each name carries an invariant the operations rely on, said
+        // in its own doc comment, and the six groups are the six questions an operation asks: which
+        // corner is which, what touches what, how a cell is made and named, how geometry is written
+        // onto it, what it is classified on, and how to put things back in agreement after an edit.
+        // =====================================================================
+
+        /// @name Cell frames — which corner is which
+        /// Every cell that carries geometry carries it against a *frame*: an ordering of its own
+        /// corners, which a face's surface and a block's volume are parameterized by. A frame is
+        /// recorded on the cell the first time it is asked for and read back afterwards, never
+        /// re-derived while it still holds — one worked out afresh rests on something CGAL is
+        /// free to change, and geometry stored in a frame that moves reads back rotated.
+        /// @{
+
+        /**
+         * @brief One block's 8 corners in the `HEX_CORNER_UVW` order its volume is stored against —
+         * the block's own local frame.
+         *
+         * The frame is recorded on the block the first time it is asked for, and read back by id
+         * afterwards — never re-derived while it still holds. Deriving it afresh each time is what
+         * bent straight edges: every dart of a hex yields a valid frame (the 24 of them are the
+         * cube's rotations) and which one the attribute names is CGAL's to change, since it
+         * re-points an attribute the moment the dart it named is erased — as deleting the block next
+         * door does. The volume stored in a frame that moves reads back rotated.
+         *
+         * @param ABlock The block to inspect.
+         * @return Its 8 corners.
+         * @pre The block must still be a plain hex when it has no frame recorded yet.
+         */
+        std::array<Node, 8> frame_of(Block ABlock) {
+            std::array<Node, 8> recorded{};
+            if (frame_nodes<3, 8>(ABlock->dart(), ABlock->info().frame, recorded)) return recorded;
+            // Read from whichever of the block's darts gives the lexicographically smallest tuple of
+            // corner handles, never from `ABlock->dart()`. Every dart of a hex yields a valid frame —
+            // the 24 of them are the cube's rotations — and which one the attribute names is CGAL's
+            // to change: it re-points an attribute the moment the dart it named is erased, which a
+            // deletion next door does. A frame that moves silently rotates everything stored in it,
+            // and the block's volume is stored in it. See `frame_of()` for the same trap one
+            // dimension down, and what it does to a straight edge.
+            // Nothing recorded yet: settle on the dart giving the lexicographically smallest tuple
+            // of corners, so a blocking rebuilt from the same input frames its blocks the same way.
+            std::array<Node, 8> best{};
+            std::array<std::tuple<Int, double, double, double>, 8> best_key{};
+            bool have = false;
+            for (auto it = m_cmap.template darts_of_cell<3>(ABlock->dart()).begin(),
+                      itend = m_cmap.template darts_of_cell<3>(ABlock->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Dart bd = it;
+                std::array<Node, 8> n{};
+                n[0] = m_cmap.template attribute<0>(bd);
+                n[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
+                n[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
+                n[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
+                n[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
+                n[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
+                n[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
+                n[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
+                std::array<std::tuple<Int, double, double, double>, 8> key{};
+                for (std::size_t c = 0; c < 8; ++c) {
+                    key[c] = node_order(n[c]);
+                }
+                if (!have || key < best_key) {
+                    best = n;
+                    best_key = key;
+                    have = true;
+                }
+            }
+            for (std::size_t c = 0; c < 8; ++c) {
+                ABlock->info().frame[c] = best[c]->info().corner_key;
+            }
+            return best;
+        }
+
+        /**
+         * @brief One face's 4 corners in the order its surface is stored against — the face's own
+         * local frame.
+         *
+         * Recorded on the face the first time it is asked for and read back by id afterwards, for
+         * the reason the block overload gives one dimension up. A face between 2 blocks carries
+         * darts on both sides, and the 2 sides walk its cycle in *opposite* directions: deleting one
+         * block erases that side's darts, CGAL re-points the attribute to the surviving side, and a
+         * frame derived from it silently mirrors. The surface then reads back reflected, and the
+         * next cut through the face takes its isocurve from the wrong side — both ends still landing
+         * on the right nodes, because they are pinned there, and the middle bulging out to the
+         * mirrored position: a straight edge with a bow in it.
+         *
+         * Reading the recorded frame also outlives the split of one of the face's edges, which
+         * leaves it a pentagon for as long as it takes to insert the edge across it — the surface is
+         * still the one written against these 4 corners, and they are all still there.
+         *
+         * @param AFace The face to inspect.
+         * @return Its 4 corners.
+         * @pre The face must still be a plain quad when it has no frame recorded yet.
+         */
+        std::array<Node, 4> frame_of(Face AFace) {
+            std::array<Node, 4> recorded{};
+            if (frame_nodes<2, 4>(AFace->dart(), AFace->info().frame, recorded)) return recorded;
+
+            std::array<Node, 4> cycle{};
+            Dart walk = AFace->dart();
+            for (std::size_t c = 0; c < 4; ++c) {
+                cycle[c] = m_cmap.template attribute<0>(walk);
+                walk = m_cmap.template beta<1>(walk);
+            }
+
+            // Nothing recorded yet: rotate to start at the lowest-ordered corner and run towards
+            // whichever of its 2 neighbours is lower, which pins down both the rotation and the
+            // reflection that the dart cycle alone leaves free.
+            std::size_t start = 0;
+            for (std::size_t c = 1; c < 4; ++c) {
+                if (node_order(cycle[c]) < node_order(cycle[start])) start = c;
+            }
+            const bool forward = node_order(cycle[(start + 1) % 4]) < node_order(cycle[(start + 3) % 4]);
+
+            std::array<Node, 4> canonical{};
+            for (std::size_t i = 0; i < 4; ++i) {
+                canonical[i] = forward ? cycle[(start + i) % 4] : cycle[(start + 4 - i) % 4];
+                AFace->info().frame[i] = canonical[i]->info().corner_key;
+            }
+            return canonical;
+        }
+
+        /** @brief One block's 12 edges, indexed to match `HEX_EDGES`.
+         * @param ABlock The block to inspect.
+         * @param ACorners Its 8 corners, which must be the block's own frame as `frame_of()` gives
+         *        it — the edge table is indexed against those corner positions and against no others.
+         * @return Its 12 edges in `HEX_EDGES` order. */
+        std::array<Edge, 12> edges_of(Block ABlock, const std::array<Node, 8> &ACorners) {
+            std::array<Edge, 12> edges{};
+            const Dart bd = ABlock->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                const int a = index_in(ACorners, m_cmap.template attribute<0>(it));
+                const int b = index_in(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                edges[find_edge(HEX_EDGES, a, b)] = m_cmap.template attribute<1>(it);
+            }
+            return edges;
+        }
+
+        /** @brief One face's 4 edges, indexed to match `QUAD_EDGES`.
+         * @param AFace The face to inspect.
+         * @param ACorners Its 4 corners, which must be the face's own frame as `frame_of()` gives it
+         *        — the edge table is indexed against those corner positions and against no others.
+         * @return Its 4 edges in `QUAD_EDGES` order. */
+        std::array<Edge, 4> edges_of(Face AFace, const std::array<Node, 4> &ACorners) {
+            std::array<Edge, 4> edges{};
+            const Dart fd = AFace->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                const int a = index_in(ACorners, m_cmap.template attribute<0>(it));
+                const int b = index_in(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                edges[find_edge(QUAD_EDGES, a, b)] = m_cmap.template attribute<1>(it);
+            }
+            return edges;
+        }
+
+        /** @brief Which local axis one of `HEX_EDGES`' 12 entries runs along.
+         * @param AK Index into `HEX_EDGES`.
+         * @return 0/1/2 for `u`/`v`/`w`. */
+        static int hex_edge_axis(std::size_t AK) {
+            const auto a = static_cast<std::size_t>(HEX_EDGES[AK].first);
+            const auto b = static_cast<std::size_t>(HEX_EDGES[AK].second);
+            for (int ax = 0; ax < 3; ++ax) {
+                if (HEX_CORNER_UVW[a][static_cast<std::size_t>(ax)] !=
+                    HEX_CORNER_UVW[b][static_cast<std::size_t>(ax)]) {
+                    return ax;
+                }
+            }
+            assert(false && "Blocking::hex_edge_axis: degenerate edge");
+            return 0;
+        }
+
+        /** @brief Which local axis one of `QUAD_EDGES`' 4 entries runs along.
+         * @param AK Index into `QUAD_EDGES`.
+         * @return 0 for `u`, 1 for `v`. */
+        static int quad_edge_axis(std::size_t AK) {
+            const auto a = static_cast<std::size_t>(QUAD_EDGES[AK].first);
+            const auto b = static_cast<std::size_t>(QUAD_EDGES[AK].second);
+            return (QUAD_CORNER_IJ[a][0] != QUAD_CORNER_IJ[b][0]) ? 0 : 1;
+        }
+
+        /**
+         * @brief Where @p AN sits in @p ANodes — a cell's own frame, or any small table indexed
+         * against it.
+         * @param ANodes The node table to search.
+         * @param AN The node to find.
+         * @return The matching index.
+         * @pre @p AN must be one of @p ANodes.
+         */
+        template<std::size_t TN>
+        static int index_in(const std::array<Node, TN> &ANodes, Node AN) {
+            for (std::size_t i = 0; i < TN; ++i) {
+                if (ANodes[i] == AN) return static_cast<int>(i);
+            }
+            assert(false && "Blocking::index_in: node not found");
+            return -1;
+        }
+
+        /** @brief Where @p AEdge sits in @p ATable — the edge counterpart of the overload above,
+         * for `HEX_EDGES`/`QUAD_EDGES`-indexed tables.
+         * @tparam TN Number of slots.
+         * @param ATable The edge table to search.
+         * @param AEdge The edge to find.
+         * @return Its index.
+         * @pre @p AEdge must be in @p ATable. */
+        template<std::size_t TN>
+        static std::size_t index_in(const std::array<Edge, TN> &ATable, Edge AEdge) {
+            for (std::size_t k = 0; k < TN; ++k) {
+                if (ATable[k] == AEdge) return k;
+            }
+            assert(false && "Blocking::index_in: edge not found");
+            return 0;
+        }
+
+        /** @brief Like `index_in()`, but reports absence instead of asserting.
+         * @tparam TN Number of slots.
+         * @param ANodes The node table to search.
+         * @param AN The node to find.
+         * @return Its index, or -1 when @p AN is not in @p ANodes. */
+        template<std::size_t TN>
+        static int index_in_or_none(const std::array<Node, TN> &ANodes, Node AN) {
+            for (std::size_t i = 0; i < TN; ++i) {
+                if (ANodes[i] == AN) return static_cast<int>(i);
+            }
+            return -1;
+        }
+
+        /// @}
+
+        /// @name Incidence — what touches what
+        /// Straight questions to the map. `blocks_of()` and `standalone_faces_of()` are how a sheet
+        /// walks from cell to cell; `has_corner()` is how an operation finds what an edit reached.
+        /// @{
+
+        /** @brief The blocks incident to one edge.
+         * @param AEdge The edge to inspect.
+         * @return Its incident blocks (empty for an edge of a standalone quad). */
+        std::vector<Block> blocks_of(Edge AEdge) {
+            std::vector<Block> blocks;
+            const Dart ed = AEdge->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).end();
+                 it != itend;
+                 ++it) {
+                const Block b = m_cmap.template attribute<3>(it);
+                if (b != nullptr) blocks.push_back(b);
+            }
+            return blocks;
+        }
+
+        /** @brief The faces incident to one edge that belong to no block — a standalone 2D quad
+         * block's own face, a hex's bounding faces being reached through the block instead.
+         * @param AEdge The edge to inspect.
+         * @return Its incident block-less faces. */
+        std::vector<Face> standalone_faces_of(Edge AEdge) {
+            std::vector<Face> faces;
+            const Dart ed = AEdge->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<3>(it) != nullptr) continue;
+                const Face f = m_cmap.template attribute<2>(it);
+                if (f != nullptr) faces.push_back(f);
+            }
+            return faces;
+        }
+
+        /**
+         * @brief Checks whether @p ANode is one of @p AFace's 4 corners.
+         * @param AFace The face to inspect.
+         * @param ANode The node to look for.
+         * @return true if the face has that corner.
+         */
+        bool has_corner(Face AFace, Node ANode) {
+            Dart walk = AFace->dart();
+            for (std::size_t c = 0; c < 4; ++c) {
+                if (m_cmap.template attribute<0>(walk) == ANode) return true;
+                walk = m_cmap.template beta<1>(walk);
+            }
+            return false;
+        }
+
+        /**
+         * @brief Checks whether @p ANode is one of @p ABlock's 8 corners.
+         * @param ABlock The block to inspect.
+         * @param ANode The node to look for.
+         * @return true if the block has that corner.
+         */
+        bool has_corner(Block ABlock, Node ANode) {
+            const Dart bd = ABlock->dart();
+            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<0>(it) == ANode) return true;
+            }
+            return false;
+        }
+
+        /// @}
+
+        /// @name Creating and naming cells
+        /// A cell arrives unnamed and is given its id by `EditSession`, which every operation that
+        /// changes the map opens. `name_new_nodes()` is the one naming call that cannot wait for
+        /// the end of an operation — see its own note for why.
+        /// @{
+
+        /**
+         * @brief Creates a node attribute at a given position.
+         * @param APoint Spatial location of the node.
+         * @return The created node.
+         */
+        Node create_node(const Point3d &APoint) {
+            Node n = m_cmap.template create_attribute<0>();
+            n->info().point = APoint;
+            n->info().corner_key = m_next_corner_key++;
+            n->info().id = m_next_node_id++;
+            return n;
+        }
+
+        /**
+         * @brief Creates a default (unclassified) edge attribute; its curve is set separately.
+         * @return The created edge.
+         */
+        Edge create_edge() { return m_cmap.template create_attribute<1>(); }
+
+        /**
+         * @brief Creates a default (unclassified) face attribute; its surface is set separately.
+         * @return The created face.
+         */
+        Face create_face() { return m_cmap.template create_attribute<2>(); }
+
+        /**
+         * @brief Names every node that has no name yet — a corner key and an id.
+         *
+         * `EditSession` covers the end of an operation, and for most cells that is soon enough. Nodes
+         * are the exception: a cell's local frame is recorded as the corner keys of its own corners,
+         * and an edge's stored curve is oriented by comparing two of them, so a node still unnamed in
+         * the middle of an operation would be *written into* a frame or a curve orientation as -1.
+         *
+         * Called by hand, therefore, straight after each individual insertion that can create one and
+         * before anything reads a frame or stores a curve. That is a precondition rather than a tail
+         * invariant, which is why it cannot be folded into the session the way the rest was.
+         */
+        void name_new_nodes() {
+            for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
+                 it != itend;
+                 ++it) {
+                if (it->info().corner_key < 0) it->info().corner_key = m_next_corner_key++;
+            }
+            assign_missing_ids_of<0>(m_next_node_id);
+        }
+
+        /**
+         * @brief The key an edge is ordered by, as the corner keys of the 2 nodes it joins, smaller
+         * first.
+         *
+         * Gives the class a run-to-run stable order on edges, which it does not otherwise have —
+         * edges carry no id of their own, and ordering them by attribute handle is ordering them by
+         * address.
+         *
+         * @param AEdge The edge to order.
+         * @return Its ordering key.
+         */
+        std::pair<Int, Int> edge_order(Edge AEdge) {
+            const Dart d = AEdge->dart();
+            const Int a = m_cmap.template attribute<0>(d)->info().corner_key;
+            const Int b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d))->info().corner_key;
+            return {std::min(a, b), std::max(a, b)};
+        }
+
+        /// @}
+
+        /// @name Storing geometry on a cell
+        /// An edge's curve, a face's surface and a block's volume are written against the cell's own
+        /// frame, and `store_curve()` is the single writer that keeps `curve_start_node()` able
+        /// to answer by looking rather than by measuring. `reframed()` moves geometry from one
+        /// frame to another; `boundary_of()` slices a lower-dimensional piece out of it.
+        /// @{
+
+        /**
+         * @brief Stores a curve on an edge, oriented to the class' invariant — reversing @p ACurve
+         * when @p AStart is not the end `curve_start_node()` names.
+         *
+         * Every write of an edge's curve goes through here, which is what lets `curve_start_node()`
+         * answer by looking rather than by measuring.
+         *
+         * @param AEdge The edge to write to.
+         * @param ACurve The curve, running from @p AStart to the edge's other endpoint.
+         * @param AStart The node @p ACurve starts at.
+         */
+        void store_curve(Edge AEdge, const TEdgeCurve &ACurve, Node AStart) {
+            AEdge->info().curve = (curve_start_node(AEdge) == AStart) ? ACurve : reversed_curve(ACurve);
+        }
+
+        /**
+         * @brief The node an edge's stored curve starts at.
+         *
+         * Purely combinatorial, and deliberately anchored to the *lower of the edge's 2 endpoint
+         * handles* rather than to its own dart: an edge carries darts pointing both ways, which of
+         * them the attribute names is CGAL's business, and CGAL does re-point it — during the very
+         * cell insertions a cut is made of. Ordering the 2 endpoints instead depends on nothing that
+         * moves. Attribute handles already order this way elsewhere here (they key the maps in
+         * `to_mesh()` and `find_sheet()`).
+         *
+         * Position is never consulted. Asking geometry which end a curve starts at is what broke
+         * repeated cuts: an edge born inside a face takes its curve from a surface's control grid
+         * while its nodes were placed by evaluating another curve, so the 2 agree as real numbers and
+         * not as doubles, and an equality test on coordinates then answers "the other end".
+         *
+         * @param AEdge The edge to inspect.
+         * @return Its curve's start node.
+         */
+        Node curve_start_node(Edge AEdge) {
+            const Dart d = AEdge->dart();
+            const Node a = m_cmap.template attribute<0>(d);
+            const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+            // Which dart is asked decides only *which pair* comes back, never its order — every dart
+            // of an edge spans the same 2 nodes.
+            //
+            // Ordered by corner key, never by handle and never by id. A handle is an address, and
+            // CGAL hands out a fresh attribute whenever it rebuilds a vertex — which splitting an
+            // edge next door or deleting a block does — so the 2 addresses can come back in the
+            // opposite order later on, and the id is cleared by exactly that rebuild. The key is
+            // what survives it. The stored curve does not move with them, so the edge then names the end it does
+            // not start at, and everything that reads the curve reads it backwards: a sheet cut
+            // lands at `1 - t` on that one edge while its parallels land at `t`, leaving a node
+            // out of line and the edges through it bent.
+            return (a->info().corner_key < b->info().corner_key) ? a : b;
+        }
+
+        /**
+         * @brief Builds a straight `TEdgeCurve` between 2 points: `NumControlPoints` control
+         * points, linearly interpolated.
+         * @param AA Start point (parameter 0).
+         * @param AB End point (parameter 1).
+         * @return The straight curve.
+         */
+        TEdgeCurve straight_curve(const Point3d &AA, const Point3d &AB) const {
+            TEdgeCurve curve(m_degree);
+            const std::size_t n = m_degree + 1;
+            const Vector3d ab(AA, AB);
+            for (std::size_t i = 0; i < n; ++i) {
+                const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
+                curve[i] = AA + ab * t;
+            }
+            return curve;
+        }
+
+        /**
+         * @brief Returns @p AEdge's curve oriented to start at @p AExpectedStart, reversing it when
+         * the edge stores it the other way round — used to orient an already-fitted edge curve
+         * consistently for `coons_surface_from_edges()`/`tfi_volume_from_faces()` regardless of which
+         * of its 2 incident faces/blocks is asking.
+         *
+         * The comparison is on node *identity*, never on position. Which way an edge stores its curve
+         * is a combinatorial fact — `store_curve()` keeps it pinned to the edge's own dart — and
+         * asking geometry about it instead is both slower and wrong: 2 ways of computing the same
+         * corner agree as real numbers and not as doubles, so an equality test on coordinates
+         * silently answers "the other end" for any cell whose curve and nodes were built by different
+         * routes (see `curve_start_node()`).
+         *
+         * @param AEdge The edge whose curve is wanted.
+         * @param AExpectedStart The node its first control point must sit on.
+         * @return That curve, oriented to start at @p AExpectedStart.
+         */
+        TEdgeCurve oriented_curve(Edge AEdge, Node AExpectedStart) {
+            if (curve_start_node(AEdge) == AExpectedStart) return AEdge->info().curve;
+            return reversed_curve(AEdge->info().curve);
+        }
+
+        /**
+         * @brief Re-expresses a surface given in some source frame into a target frame that differs
+         * from it by one of the 8 square symmetries.
+         *
+         * A cut produces sub-surfaces in the frame of whatever they were cut out of, but the face
+         * attribute they land on has its own frame — and everything downstream (`to_mesh()`,
+         * `rebuild_geometry()`) reads a face's surface in that own frame. Same reason a block
+         * reads its bounding faces through this. Since both frames have the same 4 corners, the
+         * permutation is read straight off where those corners sit, with no geometry involved.
+         *
+         * @param ASource The surface, in the source frame.
+         * @param ACornerAB Where the target frame's local corners 0..3 sit in the source frame, each
+         *        coordinate 0 or 1, in the target's own dart-cycle order.
+         * @return The same surface, re-indexed into the target frame.
+         */
+        static FaceSurfaceT reframed(const FaceSurfaceT &ASource, const std::array<std::array<int, 2>, 4> &ACornerAB) {
+            const std::size_t n = ASource.degree();
+            // Corner 0 -> corner 1 is the target's own u; whichever source axis moves along it is the
+            // one the target's u maps to, and the remaining source axis takes the target's v.
+            const bool a_follows_u = (ACornerAB[1][0] != ACornerAB[0][0]);
+            auto grid = FaceSurfaceT::make_grid(n);
+            for (std::size_t p = 0; p <= n; ++p) {
+                for (std::size_t q = 0; q <= n; ++q) {
+                    const std::size_t along_a = a_follows_u ? p : q;
+                    const std::size_t along_b = a_follows_u ? q : p;
+                    const std::size_t r = (ACornerAB[0][0] == 0) ? along_a : (n - along_a);
+                    const std::size_t s = (ACornerAB[0][1] == 0) ? along_b : (n - along_b);
+                    grid[p][q] = ASource.control_points()[r][s];
+                }
+            }
+            return FaceSurfaceT(grid);
+        }
+
+        /**
+         * @brief Re-expresses a volume given in some source frame into a target frame that differs
+         * from it by one of the 48 cube symmetries.
+         *
+         * The 3D counterpart of the overload above, and needed for the same reason: a cut produces
+         * sub-volumes in the frame of the block they were cut out of, but each half is a *new* 3-cell
+         * whose own frame comes from its own dart cycle — which CGAL builds, not us, and which is
+         * generally some rotation or reflection of the parent's. Everything that later reads a
+         * block's volume (`emit_hex_cells()`, `rebuild_geometry()`) anchors `(u,v,w)` to that own
+         * cycle, so the sub-volume has to be re-indexed into it.
+         *
+         * @param ASource The volume, in the source frame.
+         * @param ACornerUVW Where the target frame's 8 local corners sit in the source frame, each
+         *        coordinate 0 or 1, in `HEX_CORNER_UVW` order.
+         * @return The same volume, re-indexed into the target frame.
+         */
+        static BlockVolumeT reframed(const BlockVolumeT &ASource, const std::array<std::array<int, 3>, 8> &ACornerUVW) {
+            const std::size_t n = ASource.degree();
+            // Corner 0 to corners 1/3/4 walk the target's own u/v/w; whichever source axis moves
+            // along each is the one it maps to, and corner 0's own position gives the direction.
+            std::array<std::size_t, 3> axis_of{};
+            for (std::size_t target = 0; target < 3; ++target) {
+                const std::size_t neighbour = (target == 0) ? 1 : (target == 1 ? 3 : 4);
+                for (std::size_t k = 0; k < 3; ++k) {
+                    if (ACornerUVW[neighbour][k] != ACornerUVW[0][k]) axis_of[target] = k;
+                }
+            }
+
+            auto grid = BlockVolumeT::make_grid(n);
+            for (std::size_t p = 0; p <= n; ++p) {
+                for (std::size_t q = 0; q <= n; ++q) {
+                    for (std::size_t r = 0; r <= n; ++r) {
+                        const std::array<std::size_t, 3> along{p, q, r};
+                        std::array<std::size_t, 3> src{};
+                        for (std::size_t target = 0; target < 3; ++target) {
+                            const std::size_t k = axis_of[target];
+                            src[k] = (ACornerUVW[0][k] == 0) ? along[target] : (n - along[target]);
+                        }
+                        grid[p][q][r] = ASource.control_points()[src[0]][src[1]][src[2]];
+                    }
+                }
+            }
+            return BlockVolumeT(grid);
+        }
+
+        /**
+         * @brief The isoparametric boundary curve of a surface at the far end of one axis — for the
+         * low half of a split, that is exactly the curve the cut ran along.
+         * @param ASurface The surface to read the boundary off.
+         * @param AAxis 0 for the `u=1` boundary (parameterized by `v`), 1 for `v=1` (by `u`).
+         * @return The boundary curve, exactly (it is a row/column of the control grid).
+         */
+        static TEdgeCurve boundary_of(const FaceSurfaceT &ASurface, int AAxis) {
+            const std::size_t n = ASurface.degree();
+            std::vector<Point3d> points(n + 1);
+            for (std::size_t a = 0; a <= n; ++a) {
+                points[a] = (AAxis == 0) ? ASurface.control_points()[n][a] : ASurface.control_points()[a][n];
+            }
+            return TEdgeCurve(points);
+        }
+
+        /**
+         * @brief The isoparametric boundary surface of a volume at the far end of one axis — for the
+         * low half of a split, exactly the surface the cut ran along.
+         * @param AVolume The volume to read the boundary off.
+         * @param AAxis 0/1/2 for the `u=1`/`v=1`/`w=1` boundary.
+         * @return The boundary surface, exactly (it is a slice of the control grid), parameterized by
+         *         the 2 remaining axes in increasing order.
+         */
+        static FaceSurfaceT boundary_of(const BlockVolumeT &AVolume, int AAxis) {
+            const std::size_t n = AVolume.degree();
+            auto grid = FaceSurfaceT::make_grid(n);
+            for (std::size_t a = 0; a <= n; ++a) {
+                for (std::size_t b = 0; b <= n; ++b) {
+                    if (AAxis == 0) {
+                        grid[a][b] = AVolume.control_points()[n][a][b];
+                    } else if (AAxis == 1) {
+                        grid[a][b] = AVolume.control_points()[a][n][b];
+                    } else {
+                        grid[a][b] = AVolume.control_points()[a][b][n];
+                    }
+                }
+            }
+            return FaceSurfaceT(grid);
+        }
+
+        /// @}
+
+        /// @name Classification
+        /// What a cell may be classified on, and how a position is pulled onto it. `infer_targets()`
+        /// is the lowest-common-containing-entity rule every cell above dimension 0 is
+        /// classified by; `classify_position()` is the proximity search only corners fall back on.
+        /// @{
+
+        /**
+         * @brief Outcome of searching `m_geom_model` for entities near a query point: every entity
+         * found within tolerance (see `classify_position()`), plus the dimension/tag of the single
+         * nearest one (used to actually snap/project geometry).
+         */
+        struct ClassifyResult {
+            /** @brief Every entity found within tolerance, as (dimension, entity_tag) pairs. */
+            std::vector<std::pair<GroupDim, Int>> targets;
+            /** @brief Dimension of the nearest entity in `targets`, or `Undefined` if `targets` is empty. */
+            GroupDim nearest_dim = GroupDim::Undefined;
+            /** @brief `entity_tag()` of the nearest entity in `targets`. */
+            Int nearest_tag{};
+            /** @brief Checks whether any entity was found. @return true if `targets` is non-empty. */
+            [[nodiscard]] bool any() const { return nearest_dim != GroupDim::Undefined; }
+        };
+
+        /**
+         * @brief Infers what a cell is classified on from the classification of its own boundary:
+         * the lowest-dimensional geometric entities containing *every* boundary cell's own
+         * classification.
+         *
+         * This is what keeps a cell's classification coherent with its boundary's, which proximity
+         * alone cannot guarantee — sampling a single point of an edge can put it on a curve its own
+         * two endpoints have nothing to do with. An edge whose 2 corners sit on the same geometric
+         * curve belongs on that curve; one whose corners sit on 2 different curves bounding a common
+         * surface belongs on that surface. Intersecting the boundary's containing sets (see
+         * `containing_set()`) states exactly that, and the model computes those sets from shared
+         * backing mesh cells, so no tolerance enters here at all.
+         *
+         * Returns *every* candidate at the winning dimension rather than one, matching how
+         * `classify_position()` reports several equally-plausible targets; picking the single
+         * nearest of them for projection is `nearest_of()`'s job.
+         *
+         * @param ABoundary Each boundary cell's `geom_targets`. An empty entry (an unclassified
+         *        boundary cell) makes inference impossible, since it constrains nothing.
+         * @param AMinDim The cell's own topological dimension — it can never be classified below it.
+         * @return The inferred targets, or empty when inference is impossible (an unclassified
+         *         boundary cell, or boundary classifications with nothing in common), in which case
+         *         the caller falls back to a proximity search.
+         */
+        std::vector<std::pair<GroupDim, Int>>
+        infer_targets(const std::vector<const std::vector<std::pair<GroupDim, Int>> *> &ABoundary,
+                      GroupDim AMinDim) const {
+            if (ABoundary.empty()) return {};
+
+            std::set<std::pair<GroupDim, Int>> common;
+            bool first = true;
+            for (const auto *targets : ABoundary) {
+                if (targets->empty()) return {}; // Unclassified boundary: nothing to infer from.
+                const auto candidates = containing_set(*targets);
+                if (first) {
+                    common = candidates;
+                    first = false;
+                } else {
+                    std::set<std::pair<GroupDim, Int>> intersection;
+                    std::ranges::set_intersection(common, candidates, std::inserter(intersection, intersection.end()));
+                    common = std::move(intersection);
+                }
+                if (common.empty()) return {};
+            }
+
+            // `common` is sorted by (dimension, tag), so the first entry at or above the cell's own
+            // dimension already sits at the winning — lowest — dimension.
+            GroupDim best = GroupDim::Undefined;
+            std::vector<std::pair<GroupDim, Int>> result;
+            for (const auto &[dim, tag] : common) {
+                if (dim < AMinDim) continue;
+                if (best == GroupDim::Undefined) best = dim;
+                if (dim != best) break;
+                result.emplace_back(dim, tag);
+            }
+            return result;
+        }
+
+        /**
+         * @brief Gathers every geometric entity containing *any* of @p ATargets — the union of the
+         * model's `containing_entities()` over a cell's classification, which is the set of entities
+         * that cell could still be said to lie on.
+         * @param ATargets One cell's `geom_targets`.
+         * @return The union, as a sorted set.
+         */
+        std::set<std::pair<GroupDim, Int>> containing_set(const std::vector<std::pair<GroupDim, Int>> &ATargets) const {
+            std::set<std::pair<GroupDim, Int>> result;
+            for (const auto &[dim, tag] : ATargets) {
+                for (const auto &entry : m_geom_model->containing_entities(dim, tag)) {
+                    result.insert(entry);
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Picks the entity of @p ATargets closest to @p AP — the geometric tie-break applied
+         * when `infer_targets()` leaves several equally-valid candidates at the winning dimension
+         * (e.g. an edge lying on a curve shared by 2 surfaces), and the entity a cell's geometry is
+         * then projected onto.
+         * @param ATargets Candidate entities.
+         * @param AP Representative point of the cell.
+         * @return The nearest candidate, or `Undefined` if @p ATargets is empty.
+         */
+        ClassifyResult nearest_of(const std::vector<std::pair<GroupDim, Int>> &ATargets, const Point3d &AP) const {
+            ClassifyResult result;
+            result.targets = ATargets;
+            double best = 0.0;
+            for (const auto &[dim, tag] : ATargets) {
+                const double d = distance_to(dim, tag, AP);
+                if (!result.any() || d < best) {
+                    best = d;
+                    result.nearest_dim = dim;
+                    result.nearest_tag = tag;
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Projects @p AP onto the geometric entity identified by (@p ADim, @p ATag), in place.
+         * @param ADim Dimension of the entity to project onto (see `GeomModelConcept`'s `*_by_tag()`).
+         * @param ATag `entity_tag()` of the entity to project onto.
+         * @param AP The point to snap, modified in place. Left unchanged if no such entity exists.
+         */
+        void project_onto(GroupDim ADim, Int ATag, Point3d &AP) const {
+            if (ADim == GroupDim::Dim0) {
+                if (const auto *v = m_geom_model->vertex_by_tag(ATag)) v->project(AP);
+            } else if (ADim == GroupDim::Dim1) {
+                if (const auto *c = m_geom_model->curve_by_tag(ATag)) c->project(AP);
+            } else if (ADim == GroupDim::Dim2) {
+                if (const auto *s = m_geom_model->surface_by_tag(ATag)) s->project(AP);
+            } else if (ADim == GroupDim::Dim3) {
+                if (const auto *vol = m_geom_model->volume_by_tag(ATag)) vol->project(AP);
+            }
+        }
+
+        /**
+         * @brief Resolves `classify()`/`snap_node()`'s defaulted tolerance arguments: an omitted
+         * (negative) curve tolerance falls back to the vertex one, and an omitted surface tolerance
+         * to the curve one.
+         * @param ATolVertex Vertex tolerance.
+         * @param ATolCurve Curve tolerance, or negative to reuse @p ATolVertex.
+         * @param ATolSurface Surface tolerance, or negative to reuse the resolved curve tolerance.
+         * @return The resolved tolerances.
+         */
+        static Tolerances resolve_tolerances(double ATolVertex, double ATolCurve, double ATolSurface) {
+            const double curve = (ATolCurve < 0.0) ? ATolVertex : ATolCurve;
+            const double surface = (ATolSurface < 0.0) ? curve : ATolSurface;
+            return Tolerances{ATolVertex, curve, surface};
+        }
+
+        /**
+         * @brief Searches `m_geom_model` for entities of dimension `>= AMinDim` near @p AP, dimension
+         * by dimension, stopping at the lowest dimension with any match — see `classify()`.
+         * @param AMinDim Lowest entity dimension to consider (the classified cell's own topological
+         *        dimension).
+         * @param AP The query point.
+         * @param ATol The per-dimension snapping tolerances.
+         * @return The classification outcome (possibly empty, if nothing is within tolerance anywhere).
+         */
+        ClassifyResult classify_position(GroupDim AMinDim, const Point3d &AP, const Tolerances &ATol) const {
+            ClassifyResult result;
+            double best = 0.0;
+            if (AMinDim <= GroupDim::Dim0) {
+                scan_dimension(m_geom_model->vertices(), GroupDim::Dim0, AP, ATol.vertex, result, best);
+                if (result.any()) return result;
+            }
+            if (AMinDim <= GroupDim::Dim1) {
+                scan_dimension(m_geom_model->curves(), GroupDim::Dim1, AP, ATol.curve, result, best);
+                if (result.any()) return result;
+            }
+            if (AMinDim <= GroupDim::Dim2) {
+                scan_dimension(m_geom_model->surfaces(), GroupDim::Dim2, AP, ATol.surface, result, best);
+                if (result.any()) return result;
+            }
+            if (AMinDim <= GroupDim::Dim3) {
+                // Volumes reuse the surface tolerance: a `GeomModelConcept` volume's `distance()` is
+                // free to report 0 everywhere (as `FacetedVolume`'s stub does), which makes any
+                // threshold inert here — so there is nothing a 4th tolerance could usefully control.
+                scan_dimension(m_geom_model->volumes(), GroupDim::Dim3, AP, ATol.surface, result, best);
+            }
+            return result;
+        }
+
+        /// @}
+
+        /// @name Bringing cells back into agreement
+        /// After an edit has moved corners about, the cells around them still describe where those
+        /// corners *were*. `refit()` reclassifies a cell from its own boundary and rebuilds its
+        /// geometry; `rebuild_geometry()` is that second half on its own, for a caller that has
+        /// already settled the classification.
+        /// @{
+
+        /**
+         * @brief Classifies one edge and refits its curve so that the curve itself lies on what it
+         * is classified on, its 2 endpoints pinned to their (already-classified) nodes.
+         *
+         * Classification is inferred from the edge's own 2 corner nodes via `infer_targets()`,
+         * falling back to a proximity search at its midpoint when they can't decide (an
+         * unclassified corner, or corners with no common containing entity).
+         *
+         * The fit **interpolates points sampled on the geometry** rather than projecting the control
+         * points onto it. Projecting the control points is the tempting shortcut, and it is wrong: a
+         * Bezier curve passes through its 2 endpoints but *not* through its interior control points,
+         * staying strictly inside their convex hull — so control points sitting exactly on a curved
+         * geometric curve leave the actual edge bowed off it, always falling short of the geometry
+         * it is supposed to follow. Instead, points on the geometry are obtained first (by projecting
+         * a straight-line guess), and the control points that make the curve pass *through* those
+         * points are then solved for — see `interpolating_curve()`.
+         *
+         * @param AEdge The edge to classify and refit.
+         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
+         * @param AInferOnly Skips that fallback: the edge takes what its 2 corners agree on, or
+         *        nothing at all. For callers restoring consistency after an edit rather than
+         *        classifying — a proximity search there would classify a blocking nobody ever asked
+         *        to classify, and then bend its edges onto whatever they happen to have drifted near.
+         */
+        void refit(Edge AEdge, const Tolerances &ATol, bool AInferOnly = false) {
+            const Dart d = AEdge->dart();
+            const Node n0 = m_cmap.template attribute<0>(d);
+            const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+            const Point3d &p0 = n0->info().point;
+            const Point3d &p1 = n1->info().point;
+
+            const Point3d midpoint = AEdge->info().curve.value(0.5);
+            const auto inferred = infer_targets({&n0->info().geom_targets, &n1->info().geom_targets}, GroupDim::Dim1);
+            const auto result =
+                inferred.empty() ? (AInferOnly ? ClassifyResult{} : classify_position(GroupDim::Dim1, midpoint, ATol))
+                                 : nearest_of(inferred, midpoint);
+            AEdge->info().geom_targets = result.targets;
+
+            const std::size_t n = m_degree + 1;
+            const Vector3d chord(p0, p1);
+
+            // The points the fitted curve must pass through: its 2 endpoints, plus interior samples
+            // pulled onto the geometry. Without a classification there is nothing to pull them onto,
+            // so they stay on the chord and the fit collapses to the straight edge.
+            std::vector<Point3d> samples(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
+                Point3d s = p0 + chord * t;
+                if (result.any() && i > 0 && i + 1 < n) {
+                    project_onto(result.nearest_dim, result.nearest_tag, s);
+                }
+                samples[i] = s;
+            }
+            samples[0] = p0;
+            samples[n - 1] = p1;
+
+            // On a curve the geometry also dictates which *direction* the edge must leave its ends
+            // in, and honouring that matters as much as passing through the right points — a fit
+            // free to choose its end tangents picks badly wrong ones (~30 degrees out on a plain
+            // circular arc). On a surface there is no single such direction, so plain interpolation
+            // stands.
+            if (result.nearest_dim == GroupDim::Dim1) {
+                const auto *curve = m_geom_model->curve_by_tag(result.nearest_tag);
+                if (curve != nullptr) {
+                    // Far more samples than there are unknowns, and parameterized by their own
+                    // spacing rather than uniformly: a point projected from the chord at parameter
+                    // `t` does not sit at parameter `t` along the geometry, and assuming it does
+                    // biases the fit (it leaves the tangents pointing the right way but too short).
+                    std::vector<Point3d> dense;
+                    dense.reserve(4 * n);
+                    for (std::size_t i = 0; i < 4 * n; ++i) {
+                        const double t = static_cast<double>(i) / static_cast<double>(4 * n - 1);
+                        Point3d s = p0 + chord * t;
+                        project_onto(result.nearest_dim, result.nearest_tag, s);
+                        dense.push_back(s);
+                    }
+                    dense.front() = p0;
+                    dense.back() = p1;
+
+                    store_curve(AEdge,
+                                tangent_constrained_curve(m_degree,
+                                                          dense,
+                                                          chord_length_parameters(dense),
+                                                          oriented_tangent(curve->tangent(p0), chord),
+                                                          oriented_tangent(curve->tangent(p1), chord)),
+                                n0);
+                    return;
+                }
+            }
+            store_curve(AEdge, interpolating_curve(samples), n0);
+        }
+
+        /**
+         * @brief Classifies one face and rebuilds its stored surface via `coons_surface_from_edges()`
+         * from its 4 (now possibly refitted) boundary edges. Applies uniformly to a standalone 2D
+         * (quad) block's own face and to one of a 3D (hex) block's 6 bounding faces — both are
+         * ordinary 2-cells with exactly 4 boundary edges.
+         *
+         * Classification is inferred from those 4 edges' own classifications via `infer_targets()`
+         * (so a face all of whose edges lie on one surface lands on that surface), falling back to a
+         * proximity search at the face's corner centroid when they can't decide. Edges must
+         * therefore already be classified — `classify()` and `snap_node()` both do faces after
+         * edges for that reason.
+         *
+         * @param AFace The face to classify and rebuild.
+         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
+         * @param AInferOnly Skips that fallback — see `refit()`'s parameter of the same name.
+         */
+        void refit(Face AFace, const Tolerances &ATol, bool AInferOnly = false) {
+            const Dart fd = AFace->dart();
+            std::array<Node, 4> local_nodes{};
+            Dart walk = fd;
+            for (std::size_t c = 0; c < 4; ++c) {
+                local_nodes[c] = m_cmap.template attribute<0>(walk);
+                walk = m_cmap.template beta<1>(walk);
+            }
+
+            Vector3d acc(0.0, 0.0, 0.0);
+            for (const Node &node : local_nodes) {
+                acc += Vector3d(local_nodes[0]->info().point, node->info().point);
+            }
+            const Point3d center = local_nodes[0]->info().point + acc * 0.25;
+
+            std::vector<const std::vector<std::pair<GroupDim, Int>> *> boundary;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                boundary.push_back(&m_cmap.template attribute<1>(it)->info().geom_targets);
+            }
+
+            const auto inferred = infer_targets(boundary, GroupDim::Dim2);
+            const auto result = inferred.empty()
+                                    ? (AInferOnly ? ClassifyResult{} : classify_position(GroupDim::Dim2, center, ATol))
+                                    : nearest_of(inferred, center);
+            AFace->info().geom_targets = result.targets;
+
+            rebuild_geometry(AFace);
+        }
+
+        /**
+         * @brief Classifies one block against `m_geom_model` (dimension >= 3 only, using the block's
+         * own corner centroid) and rebuilds its stored volume via `tfi_volume_from_faces()`. The 6
+         * bounding face surfaces it needs are read from the block's own 6 boundary `Face`
+         * attributes and re-indexed into the block's local frame, so that a block agrees with its own
+         * boundary even where that boundary has been pulled onto a curved geometric surface.
+         * Classification stays a plain proximity search here, unlike edges' and faces': the only
+         * entities at dimension 3 are volumes, and inferring from the block's 6 faces could only
+         * ever return those same volumes.
+         *
+         * @param ABlock The block to classify and rebuild.
+         * @param ATol The per-dimension snapping tolerances.
+         * @param AInferOnly Leaves the block's own classification alone — see `refit()`'s
+         *        parameter of the same name. A block has nothing to infer from (its only possible
+         *        targets are volumes, which its 6 faces could only ever point back at), so there is
+         *        no inference to fall back *to*: it simply keeps what it had.
+         */
+        void refit(Block ABlock, const Tolerances &ATol, bool AInferOnly = false) {
+            const Dart bd = ABlock->dart();
+            // The frame the block records, not a fresh walk of its darts. Both are valid frames
+            // of the same hex, and they are generally *different* ones — so writing the volume
+            // through one and reading it back through the other permutes it. On a box that
+            // permutation maps the block onto itself and nothing shows; on a curved block it
+            // samples the interior in the wrong order, and a cut used to leave inverted cells in
+            // the generated mesh because of it.
+            const std::array<Node, 8> local_nodes = frame_of(ABlock);
+
+            Vector3d acc(0.0, 0.0, 0.0);
+            for (const Node &node : local_nodes) {
+                acc += Vector3d(local_nodes[0]->info().point, node->info().point);
+            }
+            const Point3d center = local_nodes[0]->info().point + acc * (1.0 / 8.0);
+            if (!AInferOnly) {
+                ABlock->info().geom_targets = classify_position(GroupDim::Dim3, center, ATol).targets;
+            }
+
+            rebuild_geometry(ABlock);
+        }
+
+        /**
+         * @brief Rebuilds one face's stored surface from its 4 boundary edges' current curves via
+         * `coons_surface_from_edges()`, then pulls its interior onto whatever surface it is already
+         * classified on via `refit_face_interior()` — the pure-geometry half of
+         * `refit()`, also used on its own by `move_node()`.
+         * @param AFace The face to rebuild.
+         */
+        void rebuild_geometry(Face AFace) {
+            const Dart fd = AFace->dart();
+            // The face's own frame, canonical rather than whichever dart happens to name it — see
+            // `frame_of()`. Every reader and writer of a face's surface goes through it, or
+            // one of them ends up reading in a frame another one did not write.
+            const std::array<Node, 4> local_nodes = frame_of(AFace);
+
+            std::array<TEdgeCurve, 4> curves{};
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
+                 it != itend;
+                 ++it) {
+                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const std::size_t k = find_edge(QUAD_EDGES, a, b);
+                const Edge e = m_cmap.template attribute<1>(it);
+                curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]);
+            }
+            AFace->info().surface = coons_surface_from_edges(curves[0], curves[2], curves[3], curves[1]);
+            refit_face_interior(AFace);
+        }
+
+        /**
+         * @brief Rebuilds one block's stored volume via `tfi_volume_from_faces()` from its 6
+         * bounding faces' current surfaces, leaving its classification untouched — the pure-geometry
+         * half of `refit()`, also used on its own by `move_node()`.
+         *
+         * Callers must have brought those faces up to date first, which `classify()`, `move_node()`
+         * and `create_hex_block()` all do by running the faces before the blocks.
+         * @param ABlock The block to rebuild.
+         */
+        void rebuild_geometry(Block ABlock) {
+            const Dart bd = ABlock->dart();
+            // The frame the block records, not a fresh walk of its darts. Both are valid frames
+            // of the same hex, and they are generally *different* ones — so writing the volume
+            // through one and reading it back through the other permutes it. On a box that
+            // permutation maps the block onto itself and nothing shows; on a curved block it
+            // samples the interior in the wrong order, and a cut used to leave inverted cells in
+            // the generated mesh because of it.
+            const std::array<Node, 8> local_nodes = frame_of(ABlock);
+
+            std::array<TEdgeCurve, 12> curves{};
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
+                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
+                const std::size_t k = find_edge(HEX_EDGES, a, b);
+                const Edge e = m_cmap.template attribute<1>(it);
+                curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(HEX_EDGES[k].first)]);
+            }
+
+            // The 6 bounding surfaces are taken from the block's own bounding *faces*, re-indexed
+            // into the block's frame, and only rebuilt from the 12 edges for a side that has no face
+            // attribute to read. Rebuilding all 6 from the edges is a Coons patch of the boundary,
+            // which is what a face holds until it is classified on a curved surface and pulled onto
+            // it by `refit_face_interior()` — after which the 2 differ by as much as a fifth of a
+            // sphere's radius, and a block that went on rebuilding its own would put its boundary
+            // somewhere its faces are not.
+            std::array<FaceSurfaceT, 6> face_surfaces{};
+            std::array<bool, 6> from_face{};
+            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(bd).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<2, 3>(bd).end();
+                 it != itend;
+                 ++it) {
+                const Face face = m_cmap.template attribute<2>(it);
+                if (face == nullptr) continue;
+                const std::array<Node, 4> own = frame_of(face);
+                std::array<int, 4> own_in_block{};
+                for (std::size_t c = 0; c < 4; ++c) {
+                    own_in_block[c] = index_in(local_nodes, own[c]);
+                }
+                const std::size_t f = find_face(own_in_block);
+                const std::array<int, 4> uv = hex_face_uv_corners(f);
+                std::array<std::array<int, 2>, 4> corner_ab{};
+                for (std::size_t c = 0; c < 4; ++c) {
+                    corner_ab[c] = QUAD_CORNER_IJ[static_cast<std::size_t>(index_of(own_in_block, uv[c]))];
+                }
+                face_surfaces[f] = reframed(face->info().surface, corner_ab);
+                from_face[f] = true;
+            }
+            for (std::size_t f = 0; f < 6; ++f) {
+                if (from_face[f]) continue;
+                const auto &spec = HEX_FACES[f];
+                face_surfaces[f] = coons_surface_from_edges(
+                    curves[spec.edge_u0], curves[spec.edge_u1], curves[spec.edge_v0], curves[spec.edge_v1]);
+            }
+            ABlock->info().volume = tfi_volume_from_faces(face_surfaces[0],
+                                                          face_surfaces[1],
+                                                          face_surfaces[2],
+                                                          face_surfaces[3],
+                                                          face_surfaces[4],
+                                                          face_surfaces[5]);
+        }
+
+        /// @}
     private:
         /** @brief The (u,v) grid coordinates (unscaled, in `{0,1}`) of a quad's 4 local corners
          * 0..3, matching `QUAD_EDGES`' `u` along corner 0->1 and `v` along corner 0->3. */
@@ -1264,37 +2349,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Resolves `classify()`/`snap_node()`'s defaulted tolerance arguments: an omitted
-         * (negative) curve tolerance falls back to the vertex one, and an omitted surface tolerance
-         * to the curve one.
-         * @param ATolVertex Vertex tolerance.
-         * @param ATolCurve Curve tolerance, or negative to reuse @p ATolVertex.
-         * @param ATolSurface Surface tolerance, or negative to reuse the resolved curve tolerance.
-         * @return The resolved tolerances.
-         */
-        static Tolerances resolve_tolerances(double ATolVertex, double ATolCurve, double ATolSurface) {
-            const double curve = (ATolCurve < 0.0) ? ATolVertex : ATolCurve;
-            const double surface = (ATolSurface < 0.0) ? curve : ATolSurface;
-            return Tolerances{ATolVertex, curve, surface};
-        }
-
-        /**
-         * @brief Outcome of searching `m_geom_model` for entities near a query point: every entity
-         * found within tolerance (see `classify_position()`), plus the dimension/tag of the single
-         * nearest one (used to actually snap/project geometry).
-         */
-        struct ClassifyResult {
-            /** @brief Every entity found within tolerance, as (dimension, entity_tag) pairs. */
-            std::vector<std::pair<GroupDim, Int>> targets;
-            /** @brief Dimension of the nearest entity in `targets`, or `Undefined` if `targets` is empty. */
-            GroupDim nearest_dim = GroupDim::Undefined;
-            /** @brief `entity_tag()` of the nearest entity in `targets`. */
-            Int nearest_tag{};
-            /** @brief Checks whether any entity was found. @return true if `targets` is non-empty. */
-            [[nodiscard]] bool any() const { return nearest_dim != GroupDim::Undefined; }
-        };
-
-        /**
          * @brief Scans one dimension's worth of `m_geom_model` entities, collecting every one within
          * @p ATol of @p AP into @p AResult and updating its nearest-entity bookkeeping.
          * @tparam TEntityRange A range of `GeomEntityConcept`-conforming entities.
@@ -1326,39 +2380,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Searches `m_geom_model` for entities of dimension `>= AMinDim` near @p AP, dimension
-         * by dimension, stopping at the lowest dimension with any match — see `classify()`.
-         * @param AMinDim Lowest entity dimension to consider (the classified cell's own topological
-         *        dimension).
-         * @param AP The query point.
-         * @param ATol The per-dimension snapping tolerances.
-         * @return The classification outcome (possibly empty, if nothing is within tolerance anywhere).
-         */
-        ClassifyResult classify_position(GroupDim AMinDim, const Point3d &AP, const Tolerances &ATol) const {
-            ClassifyResult result;
-            double best = 0.0;
-            if (AMinDim <= GroupDim::Dim0) {
-                scan_dimension(m_geom_model->vertices(), GroupDim::Dim0, AP, ATol.vertex, result, best);
-                if (result.any()) return result;
-            }
-            if (AMinDim <= GroupDim::Dim1) {
-                scan_dimension(m_geom_model->curves(), GroupDim::Dim1, AP, ATol.curve, result, best);
-                if (result.any()) return result;
-            }
-            if (AMinDim <= GroupDim::Dim2) {
-                scan_dimension(m_geom_model->surfaces(), GroupDim::Dim2, AP, ATol.surface, result, best);
-                if (result.any()) return result;
-            }
-            if (AMinDim <= GroupDim::Dim3) {
-                // Volumes reuse the surface tolerance: a `GeomModelConcept` volume's `distance()` is
-                // free to report 0 everywhere (as `FacetedVolume`'s stub does), which makes any
-                // threshold inert here — so there is nothing a 4th tolerance could usefully control.
-                scan_dimension(m_geom_model->volumes(), GroupDim::Dim3, AP, ATol.surface, result, best);
-            }
-            return result;
-        }
-
-        /**
          * @brief Classifies one node by proximity and projects it onto its nearest target, leaving
          * it where it is when nothing is within tolerance.
          * @param ANode The node to classify.
@@ -1370,105 +2391,6 @@ namespace gecko {
             if (result.any()) {
                 project_onto(result.nearest_dim, result.nearest_tag, ANode->info().point);
             }
-        }
-
-        /**
-         * @brief Gathers every geometric entity containing *any* of @p ATargets — the union of the
-         * model's `containing_entities()` over a cell's classification, which is the set of entities
-         * that cell could still be said to lie on.
-         * @param ATargets One cell's `geom_targets`.
-         * @return The union, as a sorted set.
-         */
-        std::set<std::pair<GroupDim, Int>> containing_set(const std::vector<std::pair<GroupDim, Int>> &ATargets) const {
-            std::set<std::pair<GroupDim, Int>> result;
-            for (const auto &[dim, tag] : ATargets) {
-                for (const auto &entry : m_geom_model->containing_entities(dim, tag)) {
-                    result.insert(entry);
-                }
-            }
-            return result;
-        }
-
-        /**
-         * @brief Infers what a cell is classified on from the classification of its own boundary:
-         * the lowest-dimensional geometric entities containing *every* boundary cell's own
-         * classification.
-         *
-         * This is what keeps a cell's classification coherent with its boundary's, which proximity
-         * alone cannot guarantee — sampling a single point of an edge can put it on a curve its own
-         * two endpoints have nothing to do with. An edge whose 2 corners sit on the same geometric
-         * curve belongs on that curve; one whose corners sit on 2 different curves bounding a common
-         * surface belongs on that surface. Intersecting the boundary's containing sets (see
-         * `containing_set()`) states exactly that, and the model computes those sets from shared
-         * backing mesh cells, so no tolerance enters here at all.
-         *
-         * Returns *every* candidate at the winning dimension rather than one, matching how
-         * `classify_position()` reports several equally-plausible targets; picking the single
-         * nearest of them for projection is `nearest_of()`'s job.
-         *
-         * @param ABoundary Each boundary cell's `geom_targets`. An empty entry (an unclassified
-         *        boundary cell) makes inference impossible, since it constrains nothing.
-         * @param AMinDim The cell's own topological dimension — it can never be classified below it.
-         * @return The inferred targets, or empty when inference is impossible (an unclassified
-         *         boundary cell, or boundary classifications with nothing in common), in which case
-         *         the caller falls back to a proximity search.
-         */
-        std::vector<std::pair<GroupDim, Int>>
-        infer_targets(const std::vector<const std::vector<std::pair<GroupDim, Int>> *> &ABoundary,
-                      GroupDim AMinDim) const {
-            if (ABoundary.empty()) return {};
-
-            std::set<std::pair<GroupDim, Int>> common;
-            bool first = true;
-            for (const auto *targets : ABoundary) {
-                if (targets->empty()) return {}; // Unclassified boundary: nothing to infer from.
-                const auto candidates = containing_set(*targets);
-                if (first) {
-                    common = candidates;
-                    first = false;
-                } else {
-                    std::set<std::pair<GroupDim, Int>> intersection;
-                    std::ranges::set_intersection(common, candidates, std::inserter(intersection, intersection.end()));
-                    common = std::move(intersection);
-                }
-                if (common.empty()) return {};
-            }
-
-            // `common` is sorted by (dimension, tag), so the first entry at or above the cell's own
-            // dimension already sits at the winning — lowest — dimension.
-            GroupDim best = GroupDim::Undefined;
-            std::vector<std::pair<GroupDim, Int>> result;
-            for (const auto &[dim, tag] : common) {
-                if (dim < AMinDim) continue;
-                if (best == GroupDim::Undefined) best = dim;
-                if (dim != best) break;
-                result.emplace_back(dim, tag);
-            }
-            return result;
-        }
-
-        /**
-         * @brief Picks the entity of @p ATargets closest to @p AP — the geometric tie-break applied
-         * when `infer_targets()` leaves several equally-valid candidates at the winning dimension
-         * (e.g. an edge lying on a curve shared by 2 surfaces), and the entity a cell's geometry is
-         * then projected onto.
-         * @param ATargets Candidate entities.
-         * @param AP Representative point of the cell.
-         * @return The nearest candidate, or `Undefined` if @p ATargets is empty.
-         */
-        ClassifyResult nearest_of(const std::vector<std::pair<GroupDim, Int>> &ATargets, const Point3d &AP) const {
-            ClassifyResult result;
-            result.targets = ATargets;
-            double best = 0.0;
-            for (const auto &[dim, tag] : ATargets) {
-                const double d = distance_to(dim, tag, AP);
-                if (!result.any() || d < best) {
-                    best = d;
-                    result.nearest_dim = dim;
-                    result.nearest_tag = tag;
-                }
-            }
-            return result;
         }
 
         /**
@@ -1489,116 +2411,6 @@ namespace gecko {
                 if (const auto *vol = m_geom_model->volume_by_tag(ATag)) return vol->distance(AP);
             }
             return std::numeric_limits<double>::infinity();
-        }
-
-        /**
-         * @brief Projects @p AP onto the geometric entity identified by (@p ADim, @p ATag), in place.
-         * @param ADim Dimension of the entity to project onto (see `GeomModelConcept`'s `*_by_tag()`).
-         * @param ATag `entity_tag()` of the entity to project onto.
-         * @param AP The point to snap, modified in place. Left unchanged if no such entity exists.
-         */
-        void project_onto(GroupDim ADim, Int ATag, Point3d &AP) const {
-            if (ADim == GroupDim::Dim0) {
-                if (const auto *v = m_geom_model->vertex_by_tag(ATag)) v->project(AP);
-            } else if (ADim == GroupDim::Dim1) {
-                if (const auto *c = m_geom_model->curve_by_tag(ATag)) c->project(AP);
-            } else if (ADim == GroupDim::Dim2) {
-                if (const auto *s = m_geom_model->surface_by_tag(ATag)) s->project(AP);
-            } else if (ADim == GroupDim::Dim3) {
-                if (const auto *vol = m_geom_model->volume_by_tag(ATag)) vol->project(AP);
-            }
-        }
-
-        /**
-         * @brief Classifies one edge and refits its curve so that the curve itself lies on what it
-         * is classified on, its 2 endpoints pinned to their (already-classified) nodes.
-         *
-         * Classification is inferred from the edge's own 2 corner nodes via `infer_targets()`,
-         * falling back to a proximity search at its midpoint when they can't decide (an
-         * unclassified corner, or corners with no common containing entity).
-         *
-         * The fit **interpolates points sampled on the geometry** rather than projecting the control
-         * points onto it. Projecting the control points is the tempting shortcut, and it is wrong: a
-         * Bezier curve passes through its 2 endpoints but *not* through its interior control points,
-         * staying strictly inside their convex hull — so control points sitting exactly on a curved
-         * geometric curve leave the actual edge bowed off it, always falling short of the geometry
-         * it is supposed to follow. Instead, points on the geometry are obtained first (by projecting
-         * a straight-line guess), and the control points that make the curve pass *through* those
-         * points are then solved for — see `interpolating_curve()`.
-         *
-         * @param AEdge The edge to classify and refit.
-         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
-         * @param AInferOnly Skips that fallback: the edge takes what its 2 corners agree on, or
-         *        nothing at all. For callers restoring consistency after an edit rather than
-         *        classifying — a proximity search there would classify a blocking nobody ever asked
-         *        to classify, and then bend its edges onto whatever they happen to have drifted near.
-         */
-        void refit(Edge AEdge, const Tolerances &ATol, bool AInferOnly = false) {
-            const Dart d = AEdge->dart();
-            const Node n0 = m_cmap.template attribute<0>(d);
-            const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-            const Point3d &p0 = n0->info().point;
-            const Point3d &p1 = n1->info().point;
-
-            const Point3d midpoint = AEdge->info().curve.value(0.5);
-            const auto inferred = infer_targets({&n0->info().geom_targets, &n1->info().geom_targets}, GroupDim::Dim1);
-            const auto result =
-                inferred.empty() ? (AInferOnly ? ClassifyResult{} : classify_position(GroupDim::Dim1, midpoint, ATol))
-                                 : nearest_of(inferred, midpoint);
-            AEdge->info().geom_targets = result.targets;
-
-            const std::size_t n = m_degree + 1;
-            const Vector3d chord(p0, p1);
-
-            // The points the fitted curve must pass through: its 2 endpoints, plus interior samples
-            // pulled onto the geometry. Without a classification there is nothing to pull them onto,
-            // so they stay on the chord and the fit collapses to the straight edge.
-            std::vector<Point3d> samples(n);
-            for (std::size_t i = 0; i < n; ++i) {
-                const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
-                Point3d s = p0 + chord * t;
-                if (result.any() && i > 0 && i + 1 < n) {
-                    project_onto(result.nearest_dim, result.nearest_tag, s);
-                }
-                samples[i] = s;
-            }
-            samples[0] = p0;
-            samples[n - 1] = p1;
-
-            // On a curve the geometry also dictates which *direction* the edge must leave its ends
-            // in, and honouring that matters as much as passing through the right points — a fit
-            // free to choose its end tangents picks badly wrong ones (~30 degrees out on a plain
-            // circular arc). On a surface there is no single such direction, so plain interpolation
-            // stands.
-            if (result.nearest_dim == GroupDim::Dim1) {
-                const auto *curve = m_geom_model->curve_by_tag(result.nearest_tag);
-                if (curve != nullptr) {
-                    // Far more samples than there are unknowns, and parameterized by their own
-                    // spacing rather than uniformly: a point projected from the chord at parameter
-                    // `t` does not sit at parameter `t` along the geometry, and assuming it does
-                    // biases the fit (it leaves the tangents pointing the right way but too short).
-                    std::vector<Point3d> dense;
-                    dense.reserve(4 * n);
-                    for (std::size_t i = 0; i < 4 * n; ++i) {
-                        const double t = static_cast<double>(i) / static_cast<double>(4 * n - 1);
-                        Point3d s = p0 + chord * t;
-                        project_onto(result.nearest_dim, result.nearest_tag, s);
-                        dense.push_back(s);
-                    }
-                    dense.front() = p0;
-                    dense.back() = p1;
-
-                    store_curve(AEdge,
-                                tangent_constrained_curve(m_degree,
-                                                          dense,
-                                                          chord_length_parameters(dense),
-                                                          oriented_tangent(curve->tangent(p0), chord),
-                                                          oriented_tangent(curve->tangent(p1), chord)),
-                                n0);
-                    return;
-                }
-            }
-            store_curve(AEdge, interpolating_curve(samples), n0);
         }
 
         /**
@@ -1823,127 +2635,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Returns @p AEdge's curve oriented to start at @p AExpectedStart, reversing it when
-         * the edge stores it the other way round — used to orient an already-fitted edge curve
-         * consistently for `coons_surface_from_edges()`/`tfi_volume_from_faces()` regardless of which
-         * of its 2 incident faces/blocks is asking.
-         *
-         * The comparison is on node *identity*, never on position. Which way an edge stores its curve
-         * is a combinatorial fact — `store_curve()` keeps it pinned to the edge's own dart — and
-         * asking geometry about it instead is both slower and wrong: 2 ways of computing the same
-         * corner agree as real numbers and not as doubles, so an equality test on coordinates
-         * silently answers "the other end" for any cell whose curve and nodes were built by different
-         * routes (see `curve_start_node()`).
-         *
-         * @param AEdge The edge whose curve is wanted.
-         * @param AExpectedStart The node its first control point must sit on.
-         * @return That curve, oriented to start at @p AExpectedStart.
-         */
-        TEdgeCurve oriented_curve(Edge AEdge, Node AExpectedStart) {
-            if (curve_start_node(AEdge) == AExpectedStart) return AEdge->info().curve;
-            return reversed_curve(AEdge->info().curve);
-        }
-
-        /**
-         * @brief The node an edge's stored curve starts at.
-         *
-         * Purely combinatorial, and deliberately anchored to the *lower of the edge's 2 endpoint
-         * handles* rather than to its own dart: an edge carries darts pointing both ways, which of
-         * them the attribute names is CGAL's business, and CGAL does re-point it — during the very
-         * cell insertions a cut is made of. Ordering the 2 endpoints instead depends on nothing that
-         * moves. Attribute handles already order this way elsewhere here (they key the maps in
-         * `to_mesh()` and `find_sheet()`).
-         *
-         * Position is never consulted. Asking geometry which end a curve starts at is what broke
-         * repeated cuts: an edge born inside a face takes its curve from a surface's control grid
-         * while its nodes were placed by evaluating another curve, so the 2 agree as real numbers and
-         * not as doubles, and an equality test on coordinates then answers "the other end".
-         *
-         * @param AEdge The edge to inspect.
-         * @return Its curve's start node.
-         */
-        Node curve_start_node(Edge AEdge) {
-            const Dart d = AEdge->dart();
-            const Node a = m_cmap.template attribute<0>(d);
-            const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-            // Which dart is asked decides only *which pair* comes back, never its order — every dart
-            // of an edge spans the same 2 nodes.
-            //
-            // Ordered by corner key, never by handle and never by id. A handle is an address, and
-            // CGAL hands out a fresh attribute whenever it rebuilds a vertex — which splitting an
-            // edge next door or deleting a block does — so the 2 addresses can come back in the
-            // opposite order later on, and the id is cleared by exactly that rebuild. The key is
-            // what survives it. The stored curve does not move with them, so the edge then names the end it does
-            // not start at, and everything that reads the curve reads it backwards: a sheet cut
-            // lands at `1 - t` on that one edge while its parallels land at `t`, leaving a node
-            // out of line and the edges through it bent.
-            return (a->info().corner_key < b->info().corner_key) ? a : b;
-        }
-
-        /**
-         * @brief Stores a curve on an edge, oriented to the class' invariant — reversing @p ACurve
-         * when @p AStart is not the end `curve_start_node()` names.
-         *
-         * Every write of an edge's curve goes through here, which is what lets `curve_start_node()`
-         * answer by looking rather than by measuring.
-         *
-         * @param AEdge The edge to write to.
-         * @param ACurve The curve, running from @p AStart to the edge's other endpoint.
-         * @param AStart The node @p ACurve starts at.
-         */
-        void store_curve(Edge AEdge, const TEdgeCurve &ACurve, Node AStart) {
-            AEdge->info().curve = (curve_start_node(AEdge) == AStart) ? ACurve : reversed_curve(ACurve);
-        }
-
-        /**
-         * @brief Classifies one face and rebuilds its stored surface via `coons_surface_from_edges()`
-         * from its 4 (now possibly refitted) boundary edges. Applies uniformly to a standalone 2D
-         * (quad) block's own face and to one of a 3D (hex) block's 6 bounding faces — both are
-         * ordinary 2-cells with exactly 4 boundary edges.
-         *
-         * Classification is inferred from those 4 edges' own classifications via `infer_targets()`
-         * (so a face all of whose edges lie on one surface lands on that surface), falling back to a
-         * proximity search at the face's corner centroid when they can't decide. Edges must
-         * therefore already be classified — `classify()` and `snap_node()` both do faces after
-         * edges for that reason.
-         *
-         * @param AFace The face to classify and rebuild.
-         * @param ATol The per-dimension snapping tolerances, used only by the fallback search.
-         * @param AInferOnly Skips that fallback — see `refit()`'s parameter of the same name.
-         */
-        void refit(Face AFace, const Tolerances &ATol, bool AInferOnly = false) {
-            const Dart fd = AFace->dart();
-            std::array<Node, 4> local_nodes{};
-            Dart walk = fd;
-            for (std::size_t c = 0; c < 4; ++c) {
-                local_nodes[c] = m_cmap.template attribute<0>(walk);
-                walk = m_cmap.template beta<1>(walk);
-            }
-
-            Vector3d acc(0.0, 0.0, 0.0);
-            for (const Node &node : local_nodes) {
-                acc += Vector3d(local_nodes[0]->info().point, node->info().point);
-            }
-            const Point3d center = local_nodes[0]->info().point + acc * 0.25;
-
-            std::vector<const std::vector<std::pair<GroupDim, Int>> *> boundary;
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
-                 it != itend;
-                 ++it) {
-                boundary.push_back(&m_cmap.template attribute<1>(it)->info().geom_targets);
-            }
-
-            const auto inferred = infer_targets(boundary, GroupDim::Dim2);
-            const auto result = inferred.empty()
-                                    ? (AInferOnly ? ClassifyResult{} : classify_position(GroupDim::Dim2, center, ATol))
-                                    : nearest_of(inferred, center);
-            AFace->info().geom_targets = result.targets;
-
-            rebuild_geometry(AFace);
-        }
-
-        /**
          * @brief Whether 2 corners sit on 2 *different* vertices of the model.
          *
          * The one classification conflict a collapse cannot resolve. Merging these 2 corners would
@@ -2131,67 +2822,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Checks whether @p ANode is one of @p AFace's 4 corners.
-         * @param AFace The face to inspect.
-         * @param ANode The node to look for.
-         * @return true if the face has that corner.
-         */
-        bool has_corner(Face AFace, Node ANode) {
-            Dart walk = AFace->dart();
-            for (std::size_t c = 0; c < 4; ++c) {
-                if (m_cmap.template attribute<0>(walk) == ANode) return true;
-                walk = m_cmap.template beta<1>(walk);
-            }
-            return false;
-        }
-
-        /**
-         * @brief Checks whether @p ANode is one of @p ABlock's 8 corners.
-         * @param ABlock The block to inspect.
-         * @param ANode The node to look for.
-         * @return true if the block has that corner.
-         */
-        bool has_corner(Block ABlock, Node ANode) {
-            const Dart bd = ABlock->dart();
-            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<0, 3>(bd).end();
-                 it != itend;
-                 ++it) {
-                if (m_cmap.template attribute<0>(it) == ANode) return true;
-            }
-            return false;
-        }
-
-        /**
-         * @brief Rebuilds one face's stored surface from its 4 boundary edges' current curves via
-         * `coons_surface_from_edges()`, then pulls its interior onto whatever surface it is already
-         * classified on via `refit_face_interior()` — the pure-geometry half of
-         * `refit()`, also used on its own by `move_node()`.
-         * @param AFace The face to rebuild.
-         */
-        void rebuild_geometry(Face AFace) {
-            const Dart fd = AFace->dart();
-            // The face's own frame, canonical rather than whichever dart happens to name it — see
-            // `frame_of()`. Every reader and writer of a face's surface goes through it, or
-            // one of them ends up reading in a frame another one did not write.
-            const std::array<Node, 4> local_nodes = frame_of(AFace);
-
-            std::array<TEdgeCurve, 4> curves{};
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
-                 it != itend;
-                 ++it) {
-                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
-                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
-                const std::size_t k = find_edge(QUAD_EDGES, a, b);
-                const Edge e = m_cmap.template attribute<1>(it);
-                curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(QUAD_EDGES[k].first)]);
-            }
-            AFace->info().surface = coons_surface_from_edges(curves[0], curves[2], curves[3], curves[1]);
-            refit_face_interior(AFace);
-        }
-
-        /**
          * @brief Pulls the interior of a face's surface onto the geometric surface it is classified
          * on, leaving its 4 boundary curves exactly where they are.
          *
@@ -2292,119 +2922,6 @@ namespace gecko {
                     HEX_EDGES[spec.edge_u0].second,
                     HEX_EDGES[spec.edge_u1].second,
                     HEX_EDGES[spec.edge_u1].first};
-        }
-
-        /**
-         * @brief Classifies one block against `m_geom_model` (dimension >= 3 only, using the block's
-         * own corner centroid) and rebuilds its stored volume via `tfi_volume_from_faces()`. The 6
-         * bounding face surfaces it needs are read from the block's own 6 boundary `Face`
-         * attributes and re-indexed into the block's local frame, so that a block agrees with its own
-         * boundary even where that boundary has been pulled onto a curved geometric surface.
-         * Classification stays a plain proximity search here, unlike edges' and faces': the only
-         * entities at dimension 3 are volumes, and inferring from the block's 6 faces could only
-         * ever return those same volumes.
-         *
-         * @param ABlock The block to classify and rebuild.
-         * @param ATol The per-dimension snapping tolerances.
-         * @param AInferOnly Leaves the block's own classification alone — see `refit()`'s
-         *        parameter of the same name. A block has nothing to infer from (its only possible
-         *        targets are volumes, which its 6 faces could only ever point back at), so there is
-         *        no inference to fall back *to*: it simply keeps what it had.
-         */
-        void refit(Block ABlock, const Tolerances &ATol, bool AInferOnly = false) {
-            const Dart bd = ABlock->dart();
-            // The frame the block records, not a fresh walk of its darts. Both are valid frames
-            // of the same hex, and they are generally *different* ones — so writing the volume
-            // through one and reading it back through the other permutes it. On a box that
-            // permutation maps the block onto itself and nothing shows; on a curved block it
-            // samples the interior in the wrong order, and a cut used to leave inverted cells in
-            // the generated mesh because of it.
-            const std::array<Node, 8> local_nodes = frame_of(ABlock);
-
-            Vector3d acc(0.0, 0.0, 0.0);
-            for (const Node &node : local_nodes) {
-                acc += Vector3d(local_nodes[0]->info().point, node->info().point);
-            }
-            const Point3d center = local_nodes[0]->info().point + acc * (1.0 / 8.0);
-            if (!AInferOnly) {
-                ABlock->info().geom_targets = classify_position(GroupDim::Dim3, center, ATol).targets;
-            }
-
-            rebuild_geometry(ABlock);
-        }
-
-        /**
-         * @brief Rebuilds one block's stored volume via `tfi_volume_from_faces()` from its 6
-         * bounding faces' current surfaces, leaving its classification untouched — the pure-geometry
-         * half of `refit()`, also used on its own by `move_node()`.
-         *
-         * Callers must have brought those faces up to date first, which `classify()`, `move_node()`
-         * and `create_hex_block()` all do by running the faces before the blocks.
-         * @param ABlock The block to rebuild.
-         */
-        void rebuild_geometry(Block ABlock) {
-            const Dart bd = ABlock->dart();
-            // The frame the block records, not a fresh walk of its darts. Both are valid frames
-            // of the same hex, and they are generally *different* ones — so writing the volume
-            // through one and reading it back through the other permutes it. On a box that
-            // permutation maps the block onto itself and nothing shows; on a curved block it
-            // samples the interior in the wrong order, and a cut used to leave inverted cells in
-            // the generated mesh because of it.
-            const std::array<Node, 8> local_nodes = frame_of(ABlock);
-
-            std::array<TEdgeCurve, 12> curves{};
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
-                 it != itend;
-                 ++it) {
-                const int a = index_in(local_nodes, m_cmap.template attribute<0>(it));
-                const int b = index_in(local_nodes, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
-                const std::size_t k = find_edge(HEX_EDGES, a, b);
-                const Edge e = m_cmap.template attribute<1>(it);
-                curves[k] = oriented_curve(e, local_nodes[static_cast<std::size_t>(HEX_EDGES[k].first)]);
-            }
-
-            // The 6 bounding surfaces are taken from the block's own bounding *faces*, re-indexed
-            // into the block's frame, and only rebuilt from the 12 edges for a side that has no face
-            // attribute to read. Rebuilding all 6 from the edges is a Coons patch of the boundary,
-            // which is what a face holds until it is classified on a curved surface and pulled onto
-            // it by `refit_face_interior()` — after which the 2 differ by as much as a fifth of a
-            // sphere's radius, and a block that went on rebuilding its own would put its boundary
-            // somewhere its faces are not.
-            std::array<FaceSurfaceT, 6> face_surfaces{};
-            std::array<bool, 6> from_face{};
-            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(bd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<2, 3>(bd).end();
-                 it != itend;
-                 ++it) {
-                const Face face = m_cmap.template attribute<2>(it);
-                if (face == nullptr) continue;
-                const std::array<Node, 4> own = frame_of(face);
-                std::array<int, 4> own_in_block{};
-                for (std::size_t c = 0; c < 4; ++c) {
-                    own_in_block[c] = index_in(local_nodes, own[c]);
-                }
-                const std::size_t f = find_face(own_in_block);
-                const std::array<int, 4> uv = hex_face_uv_corners(f);
-                std::array<std::array<int, 2>, 4> corner_ab{};
-                for (std::size_t c = 0; c < 4; ++c) {
-                    corner_ab[c] = QUAD_CORNER_IJ[static_cast<std::size_t>(index_of(own_in_block, uv[c]))];
-                }
-                face_surfaces[f] = reframed(face->info().surface, corner_ab);
-                from_face[f] = true;
-            }
-            for (std::size_t f = 0; f < 6; ++f) {
-                if (from_face[f]) continue;
-                const auto &spec = HEX_FACES[f];
-                face_surfaces[f] = coons_surface_from_edges(
-                    curves[spec.edge_u0], curves[spec.edge_u1], curves[spec.edge_v0], curves[spec.edge_v1]);
-            }
-            ABlock->info().volume = tfi_volume_from_faces(face_surfaces[0],
-                                                          face_surfaces[1],
-                                                          face_surfaces[2],
-                                                          face_surfaces[3],
-                                                          face_surfaces[4],
-                                                          face_surfaces[5]);
         }
 
         /**
@@ -2790,49 +3307,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Creates a node attribute at a given position.
-         * @param APoint Spatial location of the node.
-         * @return The created node.
-         */
-        Node create_node(const Point3d &APoint) {
-            Node n = m_cmap.template create_attribute<0>();
-            n->info().point = APoint;
-            n->info().corner_key = m_next_corner_key++;
-            n->info().id = m_next_node_id++;
-            return n;
-        }
-
-        /**
-         * @brief Creates a default (unclassified) edge attribute; its curve is set separately.
-         * @return The created edge.
-         */
-        Edge create_edge() { return m_cmap.template create_attribute<1>(); }
-
-        /**
-         * @brief Creates a default (unclassified) face attribute; its surface is set separately.
-         * @return The created face.
-         */
-        Face create_face() { return m_cmap.template create_attribute<2>(); }
-
-        /**
-         * @brief Builds a straight `TEdgeCurve` between 2 points: `NumControlPoints` control
-         * points, linearly interpolated.
-         * @param AA Start point (parameter 0).
-         * @param AB End point (parameter 1).
-         * @return The straight curve.
-         */
-        TEdgeCurve straight_curve(const Point3d &AA, const Point3d &AB) const {
-            TEdgeCurve curve(m_degree);
-            const std::size_t n = m_degree + 1;
-            const Vector3d ab(AA, AB);
-            for (std::size_t i = 0; i < n; ++i) {
-                const double t = (n > 1) ? static_cast<double>(i) / static_cast<double>(n - 1) : 0.0;
-                curve[i] = AA + ab * t;
-            }
-            return curve;
-        }
-
-        /**
          * @brief Finds the index of the entry in @p AEdges whose (from,to) pair matches
          * `{a,b}`, in either order.
          * @tparam TN Number of entries in @p AEdges.
@@ -2900,23 +3374,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Where @p AN sits in @p ANodes — a cell's own frame, or any small table indexed
-         * against it.
-         * @param ANodes The node table to search.
-         * @param AN The node to find.
-         * @return The matching index.
-         * @pre @p AN must be one of @p ANodes.
-         */
-        template<std::size_t TN>
-        static int index_in(const std::array<Node, TN> &ANodes, Node AN) {
-            for (std::size_t i = 0; i < TN; ++i) {
-                if (ANodes[i] == AN) return static_cast<int>(i);
-            }
-            assert(false && "Blocking::index_in: node not found");
-            return -1;
-        }
-
-        /**
          * @brief One entry per bounding face of a hex block: which 4 nodes it spans (for matching
          * a CGAL face-dart to this table, order-independent), and which 4 of `HEX_EDGES` form its
          * `EdgeU0`/`EdgeU1`/`EdgeV0`/`EdgeV1` boundary for `coons_surface_from_edges` (see
@@ -2978,24 +3435,6 @@ namespace gecko {
         // ---------------------------------------------------------------------
         // Sheet cut: collecting the sheet
         // ---------------------------------------------------------------------
-
-        /**
-         * @brief The key an edge is ordered by, as the corner keys of the 2 nodes it joins, smaller
-         * first.
-         *
-         * Gives the class a run-to-run stable order on edges, which it does not otherwise have —
-         * edges carry no id of their own, and ordering them by attribute handle is ordering them by
-         * address.
-         *
-         * @param AEdge The edge to order.
-         * @return Its ordering key.
-         */
-        std::pair<Int, Int> edge_order(Edge AEdge) {
-            const Dart d = AEdge->dart();
-            const Int a = m_cmap.template attribute<0>(d)->info().corner_key;
-            const Int b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d))->info().corner_key;
-            return {std::min(a, b), std::max(a, b)};
-        }
 
         /**
          * @brief Scope guard for one edit of the map: names whatever the edit left unnamed, when it
@@ -3062,27 +3501,6 @@ namespace gecko {
         }
 
         /**
-         * @brief Names every node that has no name yet — a corner key and an id.
-         *
-         * `EditSession` covers the end of an operation, and for most cells that is soon enough. Nodes
-         * are the exception: a cell's local frame is recorded as the corner keys of its own corners,
-         * and an edge's stored curve is oriented by comparing two of them, so a node still unnamed in
-         * the middle of an operation would be *written into* a frame or a curve orientation as -1.
-         *
-         * Called by hand, therefore, straight after each individual insertion that can create one and
-         * before anything reads a frame or stores a curve. That is a precondition rather than a tail
-         * invariant, which is why it cannot be folded into the session the way the rest was.
-         */
-        void name_new_nodes() {
-            for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
-                 it != itend;
-                 ++it) {
-                if (it->info().corner_key < 0) it->info().corner_key = m_next_corner_key++;
-            }
-            assign_missing_ids_of<0>(m_next_node_id);
-        }
-
-        /**
          * @brief The key a node is ordered by when a canonical frame has to choose a starting corner.
          *
          * `NodeInfo::id` first, which survives CGAL rebuilding the attribute behind a node; then the
@@ -3122,40 +3540,6 @@ namespace gecko {
             return it->second == AFrom;
         }
 
-        /** @brief The blocks incident to one edge.
-         * @param AEdge The edge to inspect.
-         * @return Its incident blocks (empty for an edge of a standalone quad). */
-        std::vector<Block> blocks_of(Edge AEdge) {
-            std::vector<Block> blocks;
-            const Dart ed = AEdge->dart();
-            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<3, 1>(ed).end();
-                 it != itend;
-                 ++it) {
-                const Block b = m_cmap.template attribute<3>(it);
-                if (b != nullptr) blocks.push_back(b);
-            }
-            return blocks;
-        }
-
-        /** @brief The faces incident to one edge that belong to no block — a standalone 2D quad
-         * block's own face, a hex's bounding faces being reached through the block instead.
-         * @param AEdge The edge to inspect.
-         * @return Its incident block-less faces. */
-        std::vector<Face> standalone_faces_of(Edge AEdge) {
-            std::vector<Face> faces;
-            const Dart ed = AEdge->dart();
-            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<2, 1>(ed).end();
-                 it != itend;
-                 ++it) {
-                if (m_cmap.template attribute<3>(it) != nullptr) continue;
-                const Face f = m_cmap.template attribute<2>(it);
-                if (f != nullptr) faces.push_back(f);
-            }
-            return faces;
-        }
-
         /**
          * @brief Looks a cell's recorded frame back up among its current corners.
          * @tparam TDim The cell's dimension, 2 or 3.
@@ -3183,194 +3567,6 @@ namespace gecko {
                 AOut[c] = *hit;
             }
             return true;
-        }
-
-        /**
-         * @brief One block's 8 corners in the `HEX_CORNER_UVW` order its volume is stored against —
-         * the block's own local frame.
-         *
-         * The frame is recorded on the block the first time it is asked for, and read back by id
-         * afterwards — never re-derived while it still holds. Deriving it afresh each time is what
-         * bent straight edges: every dart of a hex yields a valid frame (the 24 of them are the
-         * cube's rotations) and which one the attribute names is CGAL's to change, since it
-         * re-points an attribute the moment the dart it named is erased — as deleting the block next
-         * door does. The volume stored in a frame that moves reads back rotated.
-         *
-         * @param ABlock The block to inspect.
-         * @return Its 8 corners.
-         * @pre The block must still be a plain hex when it has no frame recorded yet.
-         */
-        std::array<Node, 8> frame_of(Block ABlock) {
-            std::array<Node, 8> recorded{};
-            if (frame_nodes<3, 8>(ABlock->dart(), ABlock->info().frame, recorded)) return recorded;
-            // Read from whichever of the block's darts gives the lexicographically smallest tuple of
-            // corner handles, never from `ABlock->dart()`. Every dart of a hex yields a valid frame —
-            // the 24 of them are the cube's rotations — and which one the attribute names is CGAL's
-            // to change: it re-points an attribute the moment the dart it named is erased, which a
-            // deletion next door does. A frame that moves silently rotates everything stored in it,
-            // and the block's volume is stored in it. See `frame_of()` for the same trap one
-            // dimension down, and what it does to a straight edge.
-            // Nothing recorded yet: settle on the dart giving the lexicographically smallest tuple
-            // of corners, so a blocking rebuilt from the same input frames its blocks the same way.
-            std::array<Node, 8> best{};
-            std::array<std::tuple<Int, double, double, double>, 8> best_key{};
-            bool have = false;
-            for (auto it = m_cmap.template darts_of_cell<3>(ABlock->dart()).begin(),
-                      itend = m_cmap.template darts_of_cell<3>(ABlock->dart()).end();
-                 it != itend;
-                 ++it) {
-                const Dart bd = it;
-                std::array<Node, 8> n{};
-                n[0] = m_cmap.template attribute<0>(bd);
-                n[1] = m_cmap.template attribute<0>(m_cmap.template beta<1>(bd));
-                n[2] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1>(bd));
-                n[3] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1>(bd));
-                n[4] = m_cmap.template attribute<0>(m_cmap.template beta<2, 1, 1>(bd));
-                n[5] = m_cmap.template attribute<0>(m_cmap.template beta<1, 2, 1, 1>(bd));
-                n[6] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 2, 1, 1>(bd));
-                n[7] = m_cmap.template attribute<0>(m_cmap.template beta<1, 1, 1, 2, 1, 1>(bd));
-                std::array<std::tuple<Int, double, double, double>, 8> key{};
-                for (std::size_t c = 0; c < 8; ++c) {
-                    key[c] = node_order(n[c]);
-                }
-                if (!have || key < best_key) {
-                    best = n;
-                    best_key = key;
-                    have = true;
-                }
-            }
-            for (std::size_t c = 0; c < 8; ++c) {
-                ABlock->info().frame[c] = best[c]->info().corner_key;
-            }
-            return best;
-        }
-
-        /**
-         * @brief One face's 4 corners in the order its surface is stored against — the face's own
-         * local frame.
-         *
-         * Recorded on the face the first time it is asked for and read back by id afterwards, for
-         * the reason the block overload gives one dimension up. A face between 2 blocks carries
-         * darts on both sides, and the 2 sides walk its cycle in *opposite* directions: deleting one
-         * block erases that side's darts, CGAL re-points the attribute to the surviving side, and a
-         * frame derived from it silently mirrors. The surface then reads back reflected, and the
-         * next cut through the face takes its isocurve from the wrong side — both ends still landing
-         * on the right nodes, because they are pinned there, and the middle bulging out to the
-         * mirrored position: a straight edge with a bow in it.
-         *
-         * Reading the recorded frame also outlives the split of one of the face's edges, which
-         * leaves it a pentagon for as long as it takes to insert the edge across it — the surface is
-         * still the one written against these 4 corners, and they are all still there.
-         *
-         * @param AFace The face to inspect.
-         * @return Its 4 corners.
-         * @pre The face must still be a plain quad when it has no frame recorded yet.
-         */
-        std::array<Node, 4> frame_of(Face AFace) {
-            std::array<Node, 4> recorded{};
-            if (frame_nodes<2, 4>(AFace->dart(), AFace->info().frame, recorded)) return recorded;
-
-            std::array<Node, 4> cycle{};
-            Dart walk = AFace->dart();
-            for (std::size_t c = 0; c < 4; ++c) {
-                cycle[c] = m_cmap.template attribute<0>(walk);
-                walk = m_cmap.template beta<1>(walk);
-            }
-
-            // Nothing recorded yet: rotate to start at the lowest-ordered corner and run towards
-            // whichever of its 2 neighbours is lower, which pins down both the rotation and the
-            // reflection that the dart cycle alone leaves free.
-            std::size_t start = 0;
-            for (std::size_t c = 1; c < 4; ++c) {
-                if (node_order(cycle[c]) < node_order(cycle[start])) start = c;
-            }
-            const bool forward = node_order(cycle[(start + 1) % 4]) < node_order(cycle[(start + 3) % 4]);
-
-            std::array<Node, 4> canonical{};
-            for (std::size_t i = 0; i < 4; ++i) {
-                canonical[i] = forward ? cycle[(start + i) % 4] : cycle[(start + 4 - i) % 4];
-                AFace->info().frame[i] = canonical[i]->info().corner_key;
-            }
-            return canonical;
-        }
-
-        /** @brief One block's 12 edges, indexed to match `HEX_EDGES`.
-         * @param ABlock The block to inspect.
-         * @param ACorners Its 8 corners, which must be the block's own frame as `frame_of()` gives
-         *        it — the edge table is indexed against those corner positions and against no others.
-         * @return Its 12 edges in `HEX_EDGES` order. */
-        std::array<Edge, 12> edges_of(Block ABlock, const std::array<Node, 8> &ACorners) {
-            std::array<Edge, 12> edges{};
-            const Dart bd = ABlock->dart();
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 3>(bd).end();
-                 it != itend;
-                 ++it) {
-                const int a = index_in(ACorners, m_cmap.template attribute<0>(it));
-                const int b = index_in(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
-                edges[find_edge(HEX_EDGES, a, b)] = m_cmap.template attribute<1>(it);
-            }
-            return edges;
-        }
-
-        /** @brief One face's 4 edges, indexed to match `QUAD_EDGES`.
-         * @param AFace The face to inspect.
-         * @param ACorners Its 4 corners, which must be the face's own frame as `frame_of()` gives it
-         *        — the edge table is indexed against those corner positions and against no others.
-         * @return Its 4 edges in `QUAD_EDGES` order. */
-        std::array<Edge, 4> edges_of(Face AFace, const std::array<Node, 4> &ACorners) {
-            std::array<Edge, 4> edges{};
-            const Dart fd = AFace->dart();
-            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).begin(),
-                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(fd).end();
-                 it != itend;
-                 ++it) {
-                const int a = index_in(ACorners, m_cmap.template attribute<0>(it));
-                const int b = index_in(ACorners, m_cmap.template attribute<0>(m_cmap.template beta<1>(it)));
-                edges[find_edge(QUAD_EDGES, a, b)] = m_cmap.template attribute<1>(it);
-            }
-            return edges;
-        }
-
-        /** @brief Where @p AEdge sits in @p ATable — the edge counterpart of the overload above,
-         * for `HEX_EDGES`/`QUAD_EDGES`-indexed tables.
-         * @tparam TN Number of slots.
-         * @param ATable The edge table to search.
-         * @param AEdge The edge to find.
-         * @return Its index.
-         * @pre @p AEdge must be in @p ATable. */
-        template<std::size_t TN>
-        static std::size_t index_in(const std::array<Edge, TN> &ATable, Edge AEdge) {
-            for (std::size_t k = 0; k < TN; ++k) {
-                if (ATable[k] == AEdge) return k;
-            }
-            assert(false && "Blocking::index_in: edge not found");
-            return 0;
-        }
-
-        /** @brief Which local axis one of `HEX_EDGES`' 12 entries runs along.
-         * @param AK Index into `HEX_EDGES`.
-         * @return 0/1/2 for `u`/`v`/`w`. */
-        static int hex_edge_axis(std::size_t AK) {
-            const auto a = static_cast<std::size_t>(HEX_EDGES[AK].first);
-            const auto b = static_cast<std::size_t>(HEX_EDGES[AK].second);
-            for (int ax = 0; ax < 3; ++ax) {
-                if (HEX_CORNER_UVW[a][static_cast<std::size_t>(ax)] !=
-                    HEX_CORNER_UVW[b][static_cast<std::size_t>(ax)]) {
-                    return ax;
-                }
-            }
-            assert(false && "Blocking::hex_edge_axis: degenerate edge");
-            return 0;
-        }
-
-        /** @brief Which local axis one of `QUAD_EDGES`' 4 entries runs along.
-         * @param AK Index into `QUAD_EDGES`.
-         * @return 0 for `u`, 1 for `v`. */
-        static int quad_edge_axis(std::size_t AK) {
-            const auto a = static_cast<std::size_t>(QUAD_EDGES[AK].first);
-            const auto b = static_cast<std::size_t>(QUAD_EDGES[AK].second);
-            return (QUAD_CORNER_IJ[a][0] != QUAD_CORNER_IJ[b][0]) ? 0 : 1;
         }
 
         /**
@@ -3449,19 +3645,6 @@ namespace gecko {
             Node to{};
         };
 
-        /** @brief Like `index_in()`, but reports absence instead of asserting.
-         * @tparam TN Number of slots.
-         * @param ANodes The node table to search.
-         * @param AN The node to find.
-         * @return Its index, or -1 when @p AN is not in @p ANodes. */
-        template<std::size_t TN>
-        static int index_in_or_none(const std::array<Node, TN> &ANodes, Node AN) {
-            for (std::size_t i = 0; i < TN; ++i) {
-                if (ANodes[i] == AN) return static_cast<int>(i);
-            }
-            return -1;
-        }
-
         /**
          * @brief Moves a curve's 2 end control points exactly onto the 2 nodes it is meant to join.
          *
@@ -3485,80 +3668,6 @@ namespace gecko {
             ACurve[0] = AStart;
             ACurve[last] = AEnd;
             return ACurve;
-        }
-
-        /**
-         * @brief The isoparametric boundary curve of a surface at the far end of one axis — for the
-         * low half of a split, that is exactly the curve the cut ran along.
-         * @param ASurface The surface to read the boundary off.
-         * @param AAxis 0 for the `u=1` boundary (parameterized by `v`), 1 for `v=1` (by `u`).
-         * @return The boundary curve, exactly (it is a row/column of the control grid).
-         */
-        static TEdgeCurve boundary_of(const FaceSurfaceT &ASurface, int AAxis) {
-            const std::size_t n = ASurface.degree();
-            std::vector<Point3d> points(n + 1);
-            for (std::size_t a = 0; a <= n; ++a) {
-                points[a] = (AAxis == 0) ? ASurface.control_points()[n][a] : ASurface.control_points()[a][n];
-            }
-            return TEdgeCurve(points);
-        }
-
-        /**
-         * @brief The isoparametric boundary surface of a volume at the far end of one axis — for the
-         * low half of a split, exactly the surface the cut ran along.
-         * @param AVolume The volume to read the boundary off.
-         * @param AAxis 0/1/2 for the `u=1`/`v=1`/`w=1` boundary.
-         * @return The boundary surface, exactly (it is a slice of the control grid), parameterized by
-         *         the 2 remaining axes in increasing order.
-         */
-        static FaceSurfaceT boundary_of(const BlockVolumeT &AVolume, int AAxis) {
-            const std::size_t n = AVolume.degree();
-            auto grid = FaceSurfaceT::make_grid(n);
-            for (std::size_t a = 0; a <= n; ++a) {
-                for (std::size_t b = 0; b <= n; ++b) {
-                    if (AAxis == 0) {
-                        grid[a][b] = AVolume.control_points()[n][a][b];
-                    } else if (AAxis == 1) {
-                        grid[a][b] = AVolume.control_points()[a][n][b];
-                    } else {
-                        grid[a][b] = AVolume.control_points()[a][b][n];
-                    }
-                }
-            }
-            return FaceSurfaceT(grid);
-        }
-
-        /**
-         * @brief Re-expresses a surface given in some source frame into a target frame that differs
-         * from it by one of the 8 square symmetries.
-         *
-         * A cut produces sub-surfaces in the frame of whatever they were cut out of, but the face
-         * attribute they land on has its own frame — and everything downstream (`to_mesh()`,
-         * `rebuild_geometry()`) reads a face's surface in that own frame. Same reason a block
-         * reads its bounding faces through this. Since both frames have the same 4 corners, the
-         * permutation is read straight off where those corners sit, with no geometry involved.
-         *
-         * @param ASource The surface, in the source frame.
-         * @param ACornerAB Where the target frame's local corners 0..3 sit in the source frame, each
-         *        coordinate 0 or 1, in the target's own dart-cycle order.
-         * @return The same surface, re-indexed into the target frame.
-         */
-        static FaceSurfaceT reframed(const FaceSurfaceT &ASource, const std::array<std::array<int, 2>, 4> &ACornerAB) {
-            const std::size_t n = ASource.degree();
-            // Corner 0 -> corner 1 is the target's own u; whichever source axis moves along it is the
-            // one the target's u maps to, and the remaining source axis takes the target's v.
-            const bool a_follows_u = (ACornerAB[1][0] != ACornerAB[0][0]);
-            auto grid = FaceSurfaceT::make_grid(n);
-            for (std::size_t p = 0; p <= n; ++p) {
-                for (std::size_t q = 0; q <= n; ++q) {
-                    const std::size_t along_a = a_follows_u ? p : q;
-                    const std::size_t along_b = a_follows_u ? q : p;
-                    const std::size_t r = (ACornerAB[0][0] == 0) ? along_a : (n - along_a);
-                    const std::size_t s = (ACornerAB[0][1] == 0) ? along_b : (n - along_b);
-                    grid[p][q] = ASource.control_points()[r][s];
-                }
-            }
-            return FaceSurfaceT(grid);
         }
 
         /**
@@ -3739,51 +3848,6 @@ namespace gecko {
                 }
             }
             AHalf->info().surface = reframed(ASurface, corner_ab);
-        }
-
-        /**
-         * @brief Re-expresses a volume given in some source frame into a target frame that differs
-         * from it by one of the 48 cube symmetries.
-         *
-         * The 3D counterpart of the overload above, and needed for the same reason: a cut produces
-         * sub-volumes in the frame of the block they were cut out of, but each half is a *new* 3-cell
-         * whose own frame comes from its own dart cycle — which CGAL builds, not us, and which is
-         * generally some rotation or reflection of the parent's. Everything that later reads a
-         * block's volume (`emit_hex_cells()`, `rebuild_geometry()`) anchors `(u,v,w)` to that own
-         * cycle, so the sub-volume has to be re-indexed into it.
-         *
-         * @param ASource The volume, in the source frame.
-         * @param ACornerUVW Where the target frame's 8 local corners sit in the source frame, each
-         *        coordinate 0 or 1, in `HEX_CORNER_UVW` order.
-         * @return The same volume, re-indexed into the target frame.
-         */
-        static BlockVolumeT reframed(const BlockVolumeT &ASource, const std::array<std::array<int, 3>, 8> &ACornerUVW) {
-            const std::size_t n = ASource.degree();
-            // Corner 0 to corners 1/3/4 walk the target's own u/v/w; whichever source axis moves
-            // along each is the one it maps to, and corner 0's own position gives the direction.
-            std::array<std::size_t, 3> axis_of{};
-            for (std::size_t target = 0; target < 3; ++target) {
-                const std::size_t neighbour = (target == 0) ? 1 : (target == 1 ? 3 : 4);
-                for (std::size_t k = 0; k < 3; ++k) {
-                    if (ACornerUVW[neighbour][k] != ACornerUVW[0][k]) axis_of[target] = k;
-                }
-            }
-
-            auto grid = BlockVolumeT::make_grid(n);
-            for (std::size_t p = 0; p <= n; ++p) {
-                for (std::size_t q = 0; q <= n; ++q) {
-                    for (std::size_t r = 0; r <= n; ++r) {
-                        const std::array<std::size_t, 3> along{p, q, r};
-                        std::array<std::size_t, 3> src{};
-                        for (std::size_t target = 0; target < 3; ++target) {
-                            const std::size_t k = axis_of[target];
-                            src[k] = (ACornerUVW[0][k] == 0) ? along[target] : (n - along[target]);
-                        }
-                        grid[p][q][r] = ASource.control_points()[src[0]][src[1]][src[2]];
-                    }
-                }
-            }
-            return BlockVolumeT(grid);
         }
 
         /**
