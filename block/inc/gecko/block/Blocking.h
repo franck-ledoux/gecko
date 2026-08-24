@@ -199,6 +199,7 @@ namespace gecko {
             // Built from that cycle rather than from `curves` directly, so the frame holds whatever
             // dart the cell ends up on later.
             rebuild_face_surface(f);
+            assign_missing_ids();
             return f;
         }
 
@@ -304,6 +305,7 @@ namespace gecko {
             // The 2 differ by a cube symmetry whenever those disagree, which a uniform sampling
             // hides and a sheet cut does not — it would split the block across the wrong axis.
             rebuild_block_volume(b);
+            assign_missing_ids();
             return b;
         }
 
@@ -318,6 +320,8 @@ namespace gecko {
          * `UnstructuredMesh::build_connectivity()`'s "create raw entities, then link them" pattern.
          */
         void build_connectivity() {
+            // Sewing merges attributes, which discards one of each pair — it never creates any, so
+            // there is nothing new to name afterwards.
             std::vector<Face> block_faces;
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
@@ -866,6 +870,7 @@ namespace gecko {
             split_sheet_edges(*sheet, AParam, mids);
             split_sheet_faces(*sheet, AParam, mids);
             split_sheet_blocks(*sheet, AParam, mids);
+            assign_missing_ids();
             return true;
         }
 
@@ -972,7 +977,7 @@ namespace gecko {
                 m_cmap.template contract_cell<3>(sb.block->dart());
             }
 
-            assign_missing_node_ids();
+            assign_missing_ids();
             refit_around(merged_at, tol);
             return true;
         }
@@ -1038,6 +1043,34 @@ namespace gecko {
         template<unsigned int TDim>
         std::size_t nb_cells() const {
             return m_cmap.template number_of_attributes<TDim>();
+        }
+
+        /**
+         * @brief Finds the cell of dimension @p TDim carrying @p AId.
+         *
+         * The way to hold on to a cell across operations. A handle does not survive them — CGAL
+         * rebuilds an attribute whenever the orbit behind it is disturbed — and a position in a
+         * traversal does not either, every insertion and removal renumbering what comes after it.
+         * An id survives both, and stops meaning anything only when its cell is gone.
+         *
+         * Linear in the number of cells of that dimension, which is what a blocking can afford: it
+         * has thousands of cells, not millions, and this is called once per user-level operation
+         * rather than in any inner loop.
+         *
+         * @tparam TDim The cell dimension, in [0,3].
+         * @param AId The id to look for.
+         * @return The matching cell, or `nullptr` when no cell of that dimension carries @p AId —
+         *         which is what a caller sees when the cell it was holding on to has been deleted.
+         */
+        template<unsigned int TDim>
+        typename Map::template Attribute_descriptor<TDim>::type cell_by_id(Int AId) {
+            if (AId < 0) return nullptr;
+            for (auto it = m_cmap.template attributes<TDim>().begin(), itend = m_cmap.template attributes<TDim>().end();
+                 it != itend;
+                 ++it) {
+                if (it->info().id == AId) return it;
+            }
+            return nullptr;
         }
 
         /** @brief Checks the topological validity of the underlying map. @return true if valid. */
@@ -2944,19 +2977,41 @@ namespace gecko {
         }
 
         /**
-         * @brief Gives an id to every node that has none.
-         *
-         * A node arrives without one when CGAL builds a fresh vertex attribute, which every cell
-         * insertion this class is built on does. Run straight after each of those and before any
-         * frame is read, since a node still at -1 would be recorded into one.
+         * @brief Gives an id to every cell of dimension @p TDim that has none.
+         * @tparam TDim The dimension to sweep.
+         * @param ANext The counter to draw from, advanced past whatever it hands out.
          */
-        void assign_missing_node_ids() {
-            for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
+        template<unsigned int TDim>
+        void assign_missing_ids_of(Int &ANext) {
+            for (auto it = m_cmap.template attributes<TDim>().begin(), itend = m_cmap.template attributes<TDim>().end();
                  it != itend;
                  ++it) {
-                if (it->info().id < 0) it->info().id = m_next_node_id++;
+                if (it->info().id < 0) it->info().id = ANext++;
             }
         }
+
+        /**
+         * @brief Gives an id to every cell that has none, at all 4 dimensions.
+         *
+         * A cell arrives without one whenever CGAL builds a fresh attribute — which every insertion
+         * this class is built on does, and which `SplitFunctor` arranges for deliberately so that a
+         * cell coming out of a split is named as the new cell it is.
+         *
+         * Run at the end of every operation that changes the map, and, for nodes, straight after each
+         * individual insertion as well: a node still at -1 sorts ahead of every real one, and a frame
+         * worked out before the sweep would not be the frame the cell has after it.
+         */
+        void assign_missing_ids() {
+            assign_missing_ids_of<0>(m_next_node_id);
+            assign_missing_ids_of<1>(m_next_edge_id);
+            assign_missing_ids_of<2>(m_next_face_id);
+            assign_missing_ids_of<3>(m_next_block_id);
+        }
+
+        /** @copydoc assign_missing_ids
+         * @brief Gives an id to every node that has none — the 0-dimensional half of
+         * `assign_missing_ids()`, called on its own between the individual insertions of a cut. */
+        void assign_missing_node_ids() { assign_missing_ids_of<0>(m_next_node_id); }
 
         /**
          * @brief The key a node is ordered by when a canonical frame has to choose a starting corner.
@@ -3854,9 +3909,15 @@ namespace gecko {
 
         /** @brief The degree every cell's geometry is built at — see `set_degree()`. */
         std::size_t m_degree = 1;
-        /** @brief Source of `NodeInfo::id`. Only ever increases, so an id is never reused and the
-         * order it defines never changes meaning. */
+        /** @brief Source of a node's `CellInfo::id`. Only ever increases, so an id is never reused
+         * and the order it defines never changes meaning. */
         Int m_next_node_id = 0;
+        /** @brief Source of an edge's `CellInfo::id`. @see m_next_node_id */
+        Int m_next_edge_id = 0;
+        /** @brief Source of a face's `CellInfo::id`. @see m_next_node_id */
+        Int m_next_face_id = 0;
+        /** @brief Source of a block's `CellInfo::id`. @see m_next_node_id */
+        Int m_next_block_id = 0;
         /** @brief Non-owning pointer to the geometric model this blocking is built against. */
         const TGeomModel *m_geom_model;
         /** @brief The underlying (always dimension-3) combinatorial map. */

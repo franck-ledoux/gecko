@@ -29,24 +29,26 @@ namespace gecko {
     struct CellInfo {
         /** @brief The geometric entities this cell may be classified on, as (dimension, entity_tag) pairs. */
         std::vector<std::pair<GroupDim, Int>> geom_targets;
+        /**
+         * @brief A number naming this cell for as long as it exists, handed out by
+         * `Blocking::assign_missing_ids()` and never reused. -1 until it has been.
+         *
+         * What a caller holds on to between operations. An attribute handle cannot serve: CGAL
+         * discards and rebuilds an attribute whenever the orbit behind it is disturbed, which the
+         * ordinary editing operations do all the time. Nor can a position in a traversal, which
+         * every insertion and removal renumbers underneath whoever wrote it down.
+         *
+         * Unique among cells of the same dimension, because `SplitFunctor` clears it: a cell that
+         * comes out of a split is a new cell with a new id, not a second claimant to an old one.
+         * Nodes are the deliberate exception — see `NodeSplitFunctor`.
+         */
+        Int id = -1;
     };
 
     /** @brief Classification + position data for a Blocking node (0-cell). */
     struct NodeInfo : CellInfo {
         /** @brief Spatial location of the node. */
         Point3d point;
-        /**
-         * @brief A number identifying this node for as long as it exists, handed out by
-         * `Blocking::create_node()` and never reused.
-         *
-         * There to give the class a *stable* total order on nodes, which the canonical local frames
-         * of faces and blocks are built from (see `Blocking::face_local_nodes()`). Attribute handles
-         * cannot serve: CGAL discards and rebuilds an attribute whenever the orbit behind it is
-         * disturbed — which deleting a neighbouring block does — and a frame ordered by handles then
-         * silently rotates underneath the surface stored in it. An id copied by `SplitFunctor`
-         * survives exactly those rebuilds.
-         */
-        Int id = -1;
     };
 
     /**
@@ -118,44 +120,52 @@ namespace gecko {
 
     /**
      * @struct SplitFunctor
-     * @brief `Cell_attribute` on-split functor for edge/face/block attributes: duplicates the
-     * first attribute's data onto the second.
+     * @brief `Cell_attribute` on-split functor for edge/face/block attributes: copies the original's
+     * data onto the new one, its id excepted.
      *
-     * Not exercised by any operation this module currently implements (no sheet-cut/pillow-style
-     * topology edits), but CGAL's `Cell_attribute` requires a valid functor type regardless.
+     * Splitting an edge, a face or a block makes 2 cells where there was 1, and both are new in the
+     * sense that matters to a caller: whatever it had a hold of is no longer the whole of what it
+     * had a hold of. Leaving the copy's id unset — for `Blocking::assign_missing_ids()` to fill in —
+     * is what keeps ids unique per dimension, and so usable as names.
      */
-    /**
-     * @struct NodeSplitFunctor
-     * @brief `Cell_attribute` on-split functor for node attributes: copies the original's data,
-     * id included.
-     *
-     * CGAL splits a node attribute whenever the vertex orbit behind it comes apart — which deleting
-     * a neighbouring block does — and the copy is still, geometrically and to every cell that has
-     * one as a corner, the same corner. Keeping the id is what lets a cell find its own recorded
-     * frame again afterwards (see `FaceInfo::frame`): the ids in a frame are matched against one
-     * cell's own corners, where 2 copies of a single original node never appear together, so they
-     * need only be unique within a cell and not across the map.
-     */
-    struct NodeSplitFunctor {
+    struct SplitFunctor {
         /**
-         * @brief Splits a node attribute, copying its data onto the new one but leaving that one's
+         * @brief Splits a cell attribute, copying its data onto the new one but leaving that one's
          * id unset.
-         * @tparam TCellAttribute A `CGAL::Cell_attribute` instantiation over `NodeInfo`.
+         * @tparam TCellAttribute A `CGAL::Cell_attribute` instantiation.
          * @param ACA1 The original attribute, whose data is copied.
          * @param ACA2 The newly-created attribute.
          */
         template<class TCellAttribute>
         void operator()(TCellAttribute &ACA1, TCellAttribute &ACA2) const {
             ACA2.info() = ACA1.info();
+            ACA2.info().id = -1;
         }
     };
 
-    struct SplitFunctor {
+    /**
+     * @struct NodeSplitFunctor
+     * @brief `Cell_attribute` on-split functor for node attributes: copies the original's data, id
+     * included — deliberately unlike `SplitFunctor`.
+     *
+     * A node attribute is split when the vertex orbit behind it comes apart, which deleting a
+     * neighbouring block does. Nothing was cut in two: the copy is the *same corner*, geometrically
+     * and to every cell that has it as one. Cells record their local frame as the ids of their own
+     * corners (see `FaceInfo::frame`), and carrying the id across is what lets them find that frame
+     * again after CGAL has rebuilt the attribute underneath it. Giving the copy a fresh id instead
+     * makes every cell touching that corner re-derive its frame — while its geometry stays written
+     * in the old one, which reads back rotated or mirrored.
+     *
+     * The price is that a node's id is unique only *within a cell*, which is all a frame needs: 2
+     * copies of one original node are never 2 corners of the same cell. It is why nodes are still
+     * addressed through the façade's own numbering rather than by this id.
+     */
+    struct NodeSplitFunctor {
         /**
-         * @brief Splits a cell attribute by copying its data onto the newly-created second one.
-         * @tparam TCellAttribute A `CGAL::Cell_attribute` instantiation.
+         * @brief Splits a node attribute by copying all of its data, id included.
+         * @tparam TCellAttribute A `CGAL::Cell_attribute` instantiation over `NodeInfo`.
          * @param ACA1 The original attribute, whose data is copied.
-         * @param ACA2 The newly-created attribute, overwritten with a copy of @p ACA1's data.
+         * @param ACA2 The newly-created attribute.
          */
         template<class TCellAttribute>
         void operator()(TCellAttribute &ACA1, TCellAttribute &ACA2) const {
