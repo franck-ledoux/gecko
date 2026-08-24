@@ -159,6 +159,7 @@ namespace gecko {
          * @return The newly created face.
          */
         Face create_quad_block(const std::array<Point3d, 4> &ACorners) {
+            const EditSession naming(*this);
             std::array<Node, 4> nodes{};
             for (std::size_t i = 0; i < 4; ++i) {
                 nodes[i] = create_node(ACorners[i]);
@@ -199,7 +200,6 @@ namespace gecko {
             // Built from that cycle rather than from `curves` directly, so the frame holds whatever
             // dart the cell ends up on later.
             rebuild_face_surface(f);
-            assign_missing_ids();
             return f;
         }
 
@@ -213,6 +213,7 @@ namespace gecko {
          * @return The newly created block.
          */
         Block create_hex_block(const std::array<Point3d, 8> &ACorners) {
+            const EditSession naming(*this);
             Dart d1 = m_cmap.make_combinatorial_hexahedron();
 
             std::array<Node, 8> nodes{};
@@ -305,7 +306,6 @@ namespace gecko {
             // The 2 differ by a cube symmetry whenever those disagree, which a uniform sampling
             // hides and a sheet cut does not — it would split the block across the wrong axis.
             rebuild_block_volume(b);
-            assign_missing_ids();
             return b;
         }
 
@@ -320,6 +320,7 @@ namespace gecko {
          * `UnstructuredMesh::build_connectivity()`'s "create raw entities, then link them" pattern.
          */
         void build_connectivity() {
+            const EditSession naming(*this);
             std::vector<Face> block_faces;
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
@@ -328,7 +329,6 @@ namespace gecko {
             }
             sew_matching<3>(block_faces, 4);
             sew_free_quad_edges();
-            assign_missing_ids();
         }
 
         /**
@@ -557,8 +557,8 @@ namespace gecko {
         void delete_face(Face AFace) {
             assert(can_delete_face(AFace) &&
                    "Blocking::delete_face: precondition violated (blocking must be purely 2D)");
+            const EditSession naming(*this);
             m_cmap.template remove_cell<2>(AFace->dart());
-            assign_missing_ids();
         }
 
         /**
@@ -583,8 +583,8 @@ namespace gecko {
          * @param ABlock The block to delete.
          */
         void delete_block(Block ABlock) {
+            const EditSession naming(*this);
             m_cmap.template remove_cell<3>(ABlock->dart());
-            assign_missing_ids();
         }
 
         // ---------------------------------------------------------------------
@@ -862,6 +862,7 @@ namespace gecko {
          *         sheet is not homogeneously cuttable (see `find_sheet()`).
          */
         bool cut_sheet(Edge AEdge, double AParam) {
+            const EditSession naming(*this);
             if (!(AParam > 0.0 && AParam < 1.0)) return false;
             const std::optional<Sheet> sheet = find_sheet(AEdge);
             if (!sheet.has_value()) return false;
@@ -873,7 +874,6 @@ namespace gecko {
             split_sheet_edges(*sheet, AParam, mids);
             split_sheet_faces(*sheet, AParam, mids);
             split_sheet_blocks(*sheet, AParam, mids);
-            assign_missing_ids();
             return true;
         }
 
@@ -926,6 +926,7 @@ namespace gecko {
          *         leave that edge a loop.
          */
         bool delete_sheet(Edge AEdge, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const EditSession naming(*this);
             const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
             const std::optional<Sheet> sheet = find_sheet(AEdge);
             if (!sheet.has_value()) return false;
@@ -980,7 +981,6 @@ namespace gecko {
                 m_cmap.template contract_cell<3>(sb.block->dart());
             }
 
-            assign_missing_ids();
             refit_around(merged_at, tol);
             return true;
         }
@@ -2995,6 +2995,34 @@ namespace gecko {
             const Int b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d))->info().corner_key;
             return {std::min(a, b), std::max(a, b)};
         }
+
+        /**
+         * @brief Scope guard for one edit of the map: names whatever the edit left unnamed, when it
+         * ends, however it ends.
+         *
+         * Every operation that touches the map has to finish by handing out ids to the cells CGAL
+         * created along the way — and *every* operation does create some, including the ones that
+         * only remove things, since erasing a block's darts makes CGAL rebuild the corner attributes
+         * whose orbit came apart. Written as a call at the end of each operation, that is a rule one
+         * has to remember, and the last operation added forgot it: deleting a block left corners with
+         * no id at all, and the façade's own lookups stopped resolving.
+         *
+         * Declared at the top of an operation instead, it cannot be forgotten and cannot be skipped
+         * by an early return.
+         */
+        class EditSession {
+        public:
+            /** @brief Opens a session on @p ABlocking. @param ABlocking The blocking being edited. */
+            explicit EditSession(Blocking &ABlocking) : m_blocking(ABlocking) {}
+            EditSession(const EditSession &) = delete;
+            EditSession &operator=(const EditSession &) = delete;
+            /** @brief Names whatever the edit left unnamed. */
+            ~EditSession() { m_blocking.assign_missing_ids(); }
+
+        private:
+            /** @brief The blocking whose edit this session covers. */
+            Blocking &m_blocking;
+        };
 
         /**
          * @brief Gives an id to every cell of dimension @p TDim that has none.
