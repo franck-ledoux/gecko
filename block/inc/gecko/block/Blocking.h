@@ -1056,9 +1056,11 @@ namespace gecko {
          * traversal does not either, every insertion and removal renumbering what comes after it.
          * An id survives both, and stops meaning anything only when its cell is gone.
          *
-         * Linear in the number of cells of that dimension, which is what a blocking can afford: it
-         * has thousands of cells, not millions, and this is called once per user-level operation
-         * rather than in any inner loop.
+         * Linear in the number of cells of that dimension, on purpose and not for want of an index. A
+         * blocking is a few thousand cells by design — it is the coarse structure a mesh is generated
+         * *from*, not the mesh — so the scan is microseconds, and an index would be another thing to
+         * keep in step with the map through every edit. `biy` calls this once per mouse move, which
+         * is the heaviest use there is and still nowhere near mattering.
          *
          * @tparam TDim The cell dimension, in [0,3].
          * @param AId The id to look for.
