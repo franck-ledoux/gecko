@@ -505,8 +505,9 @@ namespace gecko::app {
          * blocking: merging each block's 2 opposite side faces instead would contract edges shared
          * with blocks outside the column and leave those degenerate. Each cross-section folds onto
          * one of its 2 diagonals, the 2 corners off that diagonal meeting in the middle, and the 2
-         * blocks that were only edge-neighbours across the fold end up sharing a face. The valence
-         * around the chord goes from 4 to 3.
+         * blocks that were only edge-neighbours across the fold end up sharing a face. Each edge of
+         * the hinge itself loses one of the blocks around it: a valence-4 edge comes out with
+         * valence 3, which is what the operation is for.
          *
          * Where 2 corners meet, the more constrained classification wins, exactly as in
          * delete_sheet().

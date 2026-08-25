@@ -1102,8 +1102,9 @@ namespace gecko {
          * but the column: each cross-section quad folds onto one of its 2 diagonals, the 2 corners
          * off that diagonal meeting in the middle, and the 4 side faces closing in *adjacent* pairs
          * rather than opposite ones. The 2 blocks that were only edge-neighbours across the fold end
-         * up sharing a face, and the valence around the chord drops from 4 to 3. It is the 2D
-         * diagonal collapse of a quad, run the length of a column.
+         * up sharing a face, and each edge of the hinge itself loses one of the blocks around it — a
+         * valence-4 edge coming out of it with valence 3, which is what the operation is for. It is
+         * the 2D diagonal collapse of a quad, run the length of a column.
          *
          * @p AHinge names which of the 2 diagonals stays: the fold runs through it and through the
          * corner opposite it, and the other 2 corners of @p AFace are the ones that meet.
