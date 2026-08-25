@@ -5,6 +5,8 @@
 #include <sstream>
 #include <string>
 
+#include <unit_test_config.h>
+
 #include <gecko/block/Blocking.h>
 #include <gecko/geom/FacetedGeometry.h>
 #include <gecko/io/GmshMeshWriter.h>
@@ -411,4 +413,115 @@ TEST_CASE("hex_block_to_mesh_classification_variables_can_be_exported_to_vtk_leg
             std::string::npos);
     REQUIRE(content.find("SCALARS classification_tag int 1\nLOOKUP_TABLE default\n-1\n-1\n-1\n-1\n-1\n-1\n-1\n-1\n") !=
             std::string::npos);
+}
+
+TEST_CASE("to_mesh_names_the_block_every_cell_came_from", "[BlockTestSuite]") {
+    // Which block a cell came from is otherwise unrecoverable once the mesh is fine enough to hide
+    // the block edges under it — and it is what issue #42 asks the VTK export to carry.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(0, 0, 0),
+                               Point3d(1, 0, 0),
+                               Point3d(1, 1, 0),
+                               Point3d(0, 1, 0),
+                               Point3d(0, 0, 1),
+                               Point3d(1, 0, 1),
+                               Point3d(1, 1, 1),
+                               Point3d(0, 1, 1)});
+    REQUIRE(blocking.cut_sheet(blocking.cmap().attributes<1>().begin(), 0.5));
+    REQUIRE(blocking.nb_cells<3>() == 2);
+
+    std::vector<Int> block_ids;
+    for (auto it = blocking.cmap().attributes<3>().begin(), end = blocking.cmap().attributes<3>().end(); it != end;
+         ++it) {
+        block_ids.push_back(it->info().id);
+    }
+
+    for (const SizeT subdivisions : {SizeT{1}, SizeT{2}, SizeT{3}}) {
+        const auto mesh = blocking.to_mesh(subdivisions);
+        REQUIRE(mesh.has_variable<CellType::Cell>(std::string(Blocking<FacetedGeometry>::BLOCK_ID_VARIABLE)));
+        const auto &blocks =
+            mesh.get_variable<Int, CellType::Cell>(std::string(Blocking<FacetedGeometry>::BLOCK_ID_VARIABLE));
+
+        const auto per_block = subdivisions * subdivisions * subdivisions;
+        REQUIRE(mesh.nb_cells() == 2 * per_block);
+        // Block-major, one run of its own cells each, and both blocks named.
+        for (UInt c = 0; c < mesh.nb_cells(); ++c) {
+            REQUIRE(blocks[c] == block_ids[c / per_block]);
+        }
+    }
+}
+
+TEST_CASE("to_mesh_leaves_the_boundary_out_unless_it_is_asked_for", "[BlockTestSuite]") {
+    // The default has to stay what it was: a blocking's mesh is its blocks, and quietly adding its
+    // boundary would double what every existing caller counts and draws.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                               Point3d(hi[0], lo[1], lo[2]),
+                               Point3d(hi[0], hi[1], lo[2]),
+                               Point3d(lo[0], hi[1], lo[2]),
+                               Point3d(lo[0], lo[1], hi[2]),
+                               Point3d(hi[0], lo[1], hi[2]),
+                               Point3d(hi[0], hi[1], hi[2]),
+                               Point3d(lo[0], hi[1], hi[2])});
+    blocking.classify(0.3);
+
+    using BlockingT = Blocking<FacetedGeometry>;
+    const auto plain = blocking.to_mesh(2);
+    REQUIRE(plain.nb_edges() == 0);
+    REQUIRE(plain.nb_faces() == 0);
+    REQUIRE(plain.nb_cells() == 8);
+
+    // Asked for, the boundary comes with the tag of what it lies on.
+    const auto full = blocking.to_mesh(BlockingT::MeshOptions{2, true, true});
+    REQUIRE(full.nb_cells() == plain.nb_cells());
+    REQUIRE(full.nb_nodes() == plain.nb_nodes());
+    REQUIRE(full.nb_edges() > 0);
+    REQUIRE(full.nb_faces() > 0);
+
+    const auto &edge_dims =
+        full.get_variable<Int, CellType::Edge>(std::string(BlockingT::ELEMENT_CLASSIFICATION_DIM_VARIABLE));
+    const auto &edge_tags =
+        full.get_variable<Int, CellType::Edge>(std::string(BlockingT::ELEMENT_CLASSIFICATION_TAG_VARIABLE));
+    for (UInt e = 0; e < full.nb_edges(); ++e) {
+        // Only edges on curves are emitted, and each carries the curve it lies on.
+        REQUIRE(edge_dims[e] == 1);
+        REQUIRE(geom.curve_by_tag(edge_tags[e]) != nullptr);
+    }
+
+    const auto &face_dims =
+        full.get_variable<Int, CellType::Face>(std::string(BlockingT::ELEMENT_CLASSIFICATION_DIM_VARIABLE));
+    const auto &face_tags =
+        full.get_variable<Int, CellType::Face>(std::string(BlockingT::ELEMENT_CLASSIFICATION_TAG_VARIABLE));
+    for (UInt f = 0; f < full.nb_faces(); ++f) {
+        REQUIRE(face_dims[f] == 2);
+        REQUIRE(geom.surface_by_tag(face_tags[f]) != nullptr);
+    }
+}
+
+TEST_CASE("a_standalone_quad_block_is_never_emitted_twice", "[BlockTestSuite]") {
+    // A 2D block's own face *is* the blocking, so it is emitted whether or not the boundary was
+    // asked for — and asking must not add it a second time.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+    using BlockingT = Blocking<FacetedGeometry>;
+    BlockingT blocking(geom, 3);
+    blocking.create_quad_block({Point3d(0, 0, 0), Point3d(1, 0, 0), Point3d(1, 1, 0), Point3d(0, 1, 0)});
+
+    REQUIRE(blocking.to_mesh(2).nb_faces() == 4);
+    REQUIRE(blocking.to_mesh(BlockingT::MeshOptions{2, true, true}).nb_faces() == 4);
 }

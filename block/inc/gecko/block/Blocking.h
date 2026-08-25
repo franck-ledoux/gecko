@@ -87,6 +87,51 @@ namespace gecko {
         static constexpr std::string_view NODE_CLASSIFICATION_TAG_VARIABLE = "classification_tag";
 
         /**
+         * @brief Name of the per-element `Variable<Int>` `to_mesh()` writes giving the dimension of
+         * the geometric entity each mesh edge/face/cell is classified on, or -1 if unclassified.
+         *
+         * The element counterpart of `NODE_CLASSIFICATION_DIM_VARIABLE`, and deliberately the same
+         * name: VTK keeps point data and cell data in separate blocks, so one name can mean the same
+         * thing on both without ambiguity.
+         */
+        static constexpr std::string_view ELEMENT_CLASSIFICATION_DIM_VARIABLE = "classification_dim";
+        /**
+         * @brief Name of the per-element `Variable<Int>` `to_mesh()` writes giving the `entity_tag()`
+         * of the entity named by `ELEMENT_CLASSIFICATION_DIM_VARIABLE`, or -1 if unclassified.
+         *
+         * This is "the curve id" for a mesh edge lying on a model curve, and "the surface id" for a
+         * mesh face lying on a model surface — the dimension variable says which.
+         */
+        static constexpr std::string_view ELEMENT_CLASSIFICATION_TAG_VARIABLE = "classification_tag";
+        /**
+         * @brief Name of the per-cell `Variable<Int>` `to_mesh()` writes giving the id of the block
+         * each hexahedron was generated from, and -1 on an edge or a face.
+         *
+         * Which block a cell came from is otherwise unrecoverable once the mesh is fine enough to
+         * hide the block edges under it — the same thing biy's per-block colouring shows on screen.
+         */
+        static constexpr std::string_view BLOCK_ID_VARIABLE = "block_id";
+
+        /**
+         * @brief What `to_mesh()` should put in the mesh besides the blocks themselves.
+         *
+         * The extra elements are off by default because they change what the mesh *is*: a blocking's
+         * mesh is its blocks, and adding its boundary would silently double what every existing
+         * caller counts and draws. An exporter asks for them; a viewer does not.
+         */
+        struct MeshOptions {
+            /** @brief Intervals per parametric axis; must be >= 1. */
+            SizeT subdivisions = 1;
+            /** @brief Emit a mesh edge along every block edge classified on a model curve, carrying
+             * that curve's tag. */
+            bool classified_edges = false;
+            /** @brief Emit mesh faces over every block face classified on a model surface, carrying
+             * that surface's tag. A standalone 2D block's own face is emitted either way — it is the
+             * blocking, not its boundary — and is never emitted twice. */
+            bool classified_faces = false;
+        };
+
+        /**
          * @brief Per-dimension distance thresholds for snapping a blocking onto its geometric model.
          *
          * Three separate values rather than one because the scales genuinely differ: 2 distinct
@@ -469,8 +514,18 @@ namespace gecko {
          * @return The generated mesh.
          */
         UnstructuredMesh<CubicTraits> to_mesh(SizeT ASubdivisions) {
-            assert(ASubdivisions >= 1 && "Blocking::to_mesh: ASubdivisions must be >= 1");
-            const std::size_t s = ASubdivisions;
+            return to_mesh(MeshOptions{ASubdivisions, false, false});
+        }
+
+        /**
+         * @brief Generates the mesh, with whatever @p AOptions asks for besides the blocks — see the
+         * overload above for what the mesh is and what every node carries.
+         * @param AOptions What to put in the mesh; see `MeshOptions`.
+         * @return The generated mesh.
+         */
+        UnstructuredMesh<CubicTraits> to_mesh(const MeshOptions &AOptions) {
+            assert(AOptions.subdivisions >= 1 && "Blocking::to_mesh: subdivisions must be >= 1");
+            const std::size_t s = AOptions.subdivisions;
             UnstructuredMesh<CubicTraits> mesh;
             Variable<Int> &dims =
                 mesh.template add_variable<Int, CellType::Node>(std::string(NODE_CLASSIFICATION_DIM_VARIABLE));
@@ -492,25 +547,71 @@ namespace gecko {
                 edge_chains[it] = build_edge_chain(it, node_ids, mesh, dims, tags, s);
             }
 
+            // The edges lying on model curves, if asked for. Only those: a mesh edge for every block
+            // edge would bury the ones that mean something under the interior of the blocking.
+            if (AOptions.classified_edges) {
+                Variable<Int> &edge_dims =
+                    mesh.template add_variable<Int, CellType::Edge>(std::string(ELEMENT_CLASSIFICATION_DIM_VARIABLE));
+                Variable<Int> &edge_tags =
+                    mesh.template add_variable<Int, CellType::Edge>(std::string(ELEMENT_CLASSIFICATION_TAG_VARIABLE));
+                for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                     it != itend;
+                     ++it) {
+                    const auto &targets = it->info().geom_targets;
+                    if (targets.empty() || targets.front().first != GroupDim::Dim1) continue;
+                    const auto &chain = edge_chains.at(it).ids;
+                    for (std::size_t k = 0; k < s; ++k) {
+                        const EdgeId id = mesh.add_edge(chain[k], chain[k + 1]);
+                        edge_dims[id.value] = static_cast<Int>(targets.front().first);
+                        edge_tags[id.value] = targets.front().second;
+                    }
+                }
+            }
+
+            Variable<Int> &face_dims =
+                mesh.template add_variable<Int, CellType::Face>(std::string(ELEMENT_CLASSIFICATION_DIM_VARIABLE));
+            Variable<Int> &face_tags =
+                mesh.template add_variable<Int, CellType::Face>(std::string(ELEMENT_CLASSIFICATION_TAG_VARIABLE));
             std::map<Face, FaceGrid> face_grids;
             for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
                  it != itend;
                  ++it) {
                 FaceGrid fg = build_face_grid(it, node_ids, edge_chains, mesh, dims, tags, s);
-                if (!belongs_to_block(it)) {
+                const auto &targets = it->info().geom_targets;
+                const bool is_own_block = !belongs_to_block(it);
+                const bool on_a_surface = !targets.empty() && targets.front().first == GroupDim::Dim2;
+                // A standalone quad *is* a block, so it is emitted whatever its classification; a
+                // hex's bounding face is emitted only when asked for and only when it lies on the
+                // model. `is_own_block` first, so neither is emitted twice.
+                if (is_own_block || (AOptions.classified_faces && on_a_surface)) {
                     for (std::size_t i = 0; i < s; ++i) {
                         for (std::size_t j = 0; j < s; ++j) {
-                            mesh.add_face(fg.grid[i][j], fg.grid[i + 1][j], fg.grid[i + 1][j + 1], fg.grid[i][j + 1]);
+                            const FaceId id = mesh.add_face(
+                                fg.grid[i][j], fg.grid[i + 1][j], fg.grid[i + 1][j + 1], fg.grid[i][j + 1]);
+                            record_element_classification(face_dims, face_tags, id.value, targets);
                         }
                     }
                 }
                 face_grids[it] = std::move(fg);
             }
 
+            Variable<Int> &cell_dims =
+                mesh.template add_variable<Int, CellType::Cell>(std::string(ELEMENT_CLASSIFICATION_DIM_VARIABLE));
+            Variable<Int> &cell_tags =
+                mesh.template add_variable<Int, CellType::Cell>(std::string(ELEMENT_CLASSIFICATION_TAG_VARIABLE));
+            Variable<Int> &cell_blocks =
+                mesh.template add_variable<Int, CellType::Cell>(std::string(BLOCK_ID_VARIABLE));
             for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
                  it != itend;
                  ++it) {
+                // Each block contributes exactly s^3 cells, in one run, so which block a cell came
+                // from is a matter of counting rather than of asking `emit_hex_cells()` to say.
+                const UInt first = mesh.nb_cells();
                 emit_hex_cells(it, node_ids, edge_chains, face_grids, mesh, dims, tags, s);
+                for (UInt c = first; c < mesh.nb_cells(); ++c) {
+                    record_element_classification(cell_dims, cell_tags, c, it->info().geom_targets);
+                    cell_blocks[c] = it->info().id;
+                }
             }
 
             return mesh;
@@ -2611,27 +2712,9 @@ namespace gecko {
                     sys[r][unknowns + 2] = rhs.z();
                 }
 
-                for (std::size_t col = 0; col < unknowns; ++col) {
-                    std::size_t pivot = col;
-                    for (std::size_t r = col + 1; r < unknowns; ++r) {
-                        if (std::abs(sys[r][col]) > std::abs(sys[pivot][col])) pivot = r;
-                    }
-                    std::swap(sys[col], sys[pivot]);
-                    // A Bernstein collocation matrix at distinct parameters is non-singular, so this
-                    // only guards against a degenerate build rather than an expected case.
-                    if (std::abs(sys[col][col]) < 1e-300) continue;
-                    for (std::size_t r = 0; r < unknowns; ++r) {
-                        if (r == col) continue;
-                        const double factor = sys[r][col] / sys[col][col];
-                        for (std::size_t c = col; c < unknowns + 3; ++c) {
-                            sys[r][c] -= factor * sys[col][c];
-                        }
-                    }
-                }
-
+                const auto solved = solve_for_points(sys);
                 for (std::size_t r = 0; r < unknowns; ++r) {
-                    const double d = sys[r][r];
-                    fitted[r + 1] = Point3d(sys[r][unknowns] / d, sys[r][unknowns + 1] / d, sys[r][unknowns + 2] / d);
+                    fitted[r + 1] = solved[r];
                 }
                 return fitted;
             }
@@ -2884,19 +2967,130 @@ namespace gecko {
             const auto result = nearest_of(AFace->info().geom_targets, AFace->info().surface.value(0.5, 0.5));
             if (result.nearest_dim != GroupDim::Dim2) return;
 
-            const std::size_t n = m_degree + 1;
-            std::vector<std::vector<Point3d>> samples(n, std::vector<Point3d>(n));
-            for (std::size_t i = 0; i < n; ++i) {
-                for (std::size_t j = 0; j < n; ++j) {
-                    const double u = static_cast<double>(i) / static_cast<double>(m_degree);
-                    const double v = static_cast<double>(j) / static_cast<double>(m_degree);
+            // Far more samples than there are unknowns, and none of them on the boundary: the fit
+            // below moves only the interior control points, so a boundary sample would pull against
+            // rows it cannot move and bias the answer.
+            const std::size_t steps = 4 * m_degree;
+            std::vector<std::array<double, 2>> params;
+            std::vector<Point3d> points;
+            for (std::size_t i = 1; i < steps; ++i) {
+                for (std::size_t j = 1; j < steps; ++j) {
+                    const double u = static_cast<double>(i) / static_cast<double>(steps);
+                    const double v = static_cast<double>(j) / static_cast<double>(steps);
                     Point3d sample = AFace->info().surface.value(u, v);
-                    const bool interior = i > 0 && i + 1 < n && j > 0 && j + 1 < n;
-                    if (interior) project_onto(result.nearest_dim, result.nearest_tag, sample);
-                    samples[i][j] = sample;
+                    project_onto(result.nearest_dim, result.nearest_tag, sample);
+                    params.push_back({u, v});
+                    points.push_back(sample);
                 }
             }
-            AFace->info().surface = interpolating_surface(samples);
+            AFace->info().surface = fitted_interior(AFace->info().surface, params, points);
+        }
+
+        /**
+         * @brief Solves one square linear system carrying 3 right-hand sides, one per coordinate.
+         *
+         * Gauss-Jordan with partial pivoting, in place. The 3 coordinates share a matrix, so they are
+         * carried as 3 extra columns rather than solved 3 times.
+         *
+         * @param ASystem The augmented system, `n` rows of `n + 3`; consumed.
+         * @return One point per row: the solution.
+         */
+        static std::vector<Point3d> solve_for_points(std::vector<std::vector<double>> &ASystem) {
+            const std::size_t n = ASystem.size();
+            for (std::size_t col = 0; col < n; ++col) {
+                std::size_t pivot = col;
+                for (std::size_t r = col + 1; r < n; ++r) {
+                    if (std::abs(ASystem[r][col]) > std::abs(ASystem[pivot][col])) pivot = r;
+                }
+                std::swap(ASystem[col], ASystem[pivot]);
+                // Both systems built on this are non-singular by construction — a Bernstein
+                // collocation matrix at distinct parameters, and a Gram matrix of linearly
+                // independent basis functions — so this only guards a degenerate build.
+                if (std::abs(ASystem[col][col]) < 1e-300) continue;
+                for (std::size_t r = 0; r < n; ++r) {
+                    if (r == col) continue;
+                    const double factor = ASystem[r][col] / ASystem[col][col];
+                    for (std::size_t c = col; c < n + 3; ++c) {
+                        ASystem[r][c] -= factor * ASystem[col][c];
+                    }
+                }
+            }
+            std::vector<Point3d> solution(n);
+            for (std::size_t r = 0; r < n; ++r) {
+                const double d = ASystem[r][r];
+                solution[r] = Point3d(ASystem[r][n] / d, ASystem[r][n + 1] / d, ASystem[r][n + 2] / d);
+            }
+            return solution;
+        }
+
+        /**
+         * @brief Refits a surface's *interior* control points so it follows @p APoints as closely as
+         * a surface of its degree can, leaving its 4 boundary rows exactly where they are.
+         *
+         * Least squares over far more points than there are unknowns, which is what separates this
+         * from `interpolating_surface()`: interpolation pins the surface at `(degree+1)^2` parameters
+         * and says nothing about what happens between them, and between them is where the error
+         * lives. Fitting a cube's face to a sphere, the interpolant sat 4e-03 off at its own
+         * parameters — the fixture's own faceting — and 2.2e-02 off halfway between them.
+         *
+         * The boundary is left alone rather than fitted, which is what keeps the face welded to its
+         * edges and to the neighbouring face across each of them.
+         *
+         * @param ASurface The surface to refit; its boundary rows are kept verbatim.
+         * @param AParams The parameters @p APoints were taken at, `(u,v)` each.
+         * @param APoints The points to follow, one per entry of @p AParams.
+         * @return The refitted surface, or @p ASurface unchanged when its degree leaves no interior
+         *         control point to move.
+         */
+        static FaceSurfaceT fitted_interior(const FaceSurfaceT &ASurface,
+                                            const std::vector<std::array<double, 2>> &AParams,
+                                            const std::vector<Point3d> &APoints) {
+            const std::size_t n = ASurface.degree();
+            if (n < 2) return ASurface;
+
+            // The unknowns: the (n-1)^2 control points that are not on a boundary row.
+            std::vector<std::pair<std::size_t, std::size_t>> interior;
+            for (std::size_t i = 1; i < n; ++i) {
+                for (std::size_t j = 1; j < n; ++j) {
+                    interior.emplace_back(i, j);
+                }
+            }
+            const std::size_t unknowns = interior.size();
+            std::vector<std::vector<double>> sys(unknowns, std::vector<double>(unknowns + 3, 0.0));
+
+            for (std::size_t k = 0; k < AParams.size(); ++k) {
+                const double u = AParams[k][0];
+                const double v = AParams[k][1];
+                // What the boundary already contributes at this parameter, moved to the right side.
+                Vector3d residual(Point3d(0, 0, 0), APoints[k]);
+                for (std::size_t i = 0; i <= n; ++i) {
+                    for (std::size_t j = 0; j <= n; ++j) {
+                        if (i > 0 && i < n && j > 0 && j < n) continue;
+                        const double w = bernstein(n, i, u) * bernstein(n, j, v);
+                        residual = residual - Vector3d(Point3d(0, 0, 0), ASurface.control_point(i, j)) * w;
+                    }
+                }
+                std::vector<double> weight(unknowns);
+                for (std::size_t p = 0; p < unknowns; ++p) {
+                    weight[p] = bernstein(n, interior[p].first, u) * bernstein(n, interior[p].second, v);
+                }
+                // The normal equations, accumulated sample by sample.
+                for (std::size_t p = 0; p < unknowns; ++p) {
+                    for (std::size_t q = 0; q < unknowns; ++q) {
+                        sys[p][q] += weight[p] * weight[q];
+                    }
+                    sys[p][unknowns] += weight[p] * residual.x();
+                    sys[p][unknowns + 1] += weight[p] * residual.y();
+                    sys[p][unknowns + 2] += weight[p] * residual.z();
+                }
+            }
+
+            const auto solved = solve_for_points(sys);
+            auto grid = ASurface.control_points();
+            for (std::size_t p = 0; p < unknowns; ++p) {
+                grid[interior[p].first][interior[p].second] = solved[p];
+            }
+            return FaceSurfaceT(grid);
         }
 
         /**
@@ -2978,6 +3172,21 @@ namespace gecko {
                 ADims[AId.value] = static_cast<Int>(ATargets.front().first);
                 ATags[AId.value] = ATargets.front().second;
             }
+        }
+
+        /**
+         * @brief Writes one element's classification into the `ELEMENT_CLASSIFICATION_*` variables.
+         * @param ADims The dimension variable, modified in place.
+         * @param ATags The tag variable, modified in place.
+         * @param AIndex The element's index in its own registry.
+         * @param ATargets The cell's `geom_targets`; empty writes -1/-1.
+         */
+        static void record_element_classification(Variable<Int> &ADims,
+                                                  Variable<Int> &ATags,
+                                                  UInt AIndex,
+                                                  const std::vector<std::pair<GroupDim, Int>> &ATargets) {
+            ADims[AIndex] = ATargets.empty() ? -1 : static_cast<Int>(ATargets.front().first);
+            ATags[AIndex] = ATargets.empty() ? -1 : ATargets.front().second;
         }
 
         /**

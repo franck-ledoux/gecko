@@ -206,11 +206,19 @@ namespace gecko::app {
 
     void BlockingFacade::write_vtk(int subdivisions, const std::string &path) {
         check_subdivisions(subdivisions, "Blocking.write_vtk");
-        const auto mesh = m_impl.blocking.to_mesh(static_cast<SizeT>(subdivisions));
+        // The export carries more than the blocks: the edges lying on the model's curves and the
+        // faces lying on its surfaces come too, each with the tag of what it lies on, which is what
+        // makes the file usable as a boundary description and not only as a volume mesh.
+        using BlockingT = Impl::BlockingT;
+        const auto mesh =
+            m_impl.blocking.to_mesh(typename BlockingT::MeshOptions{static_cast<SizeT>(subdivisions), true, true});
         io::VtkMeshWriter<CubicTraits>::write(path,
                                               mesh,
-                                              {std::string(Impl::BlockingT::NODE_CLASSIFICATION_DIM_VARIABLE),
-                                               std::string(Impl::BlockingT::NODE_CLASSIFICATION_TAG_VARIABLE)});
+                                              {std::string(BlockingT::NODE_CLASSIFICATION_DIM_VARIABLE),
+                                               std::string(BlockingT::NODE_CLASSIFICATION_TAG_VARIABLE)},
+                                              {std::string(BlockingT::ELEMENT_CLASSIFICATION_DIM_VARIABLE),
+                                               std::string(BlockingT::ELEMENT_CLASSIFICATION_TAG_VARIABLE),
+                                               std::string(BlockingT::BLOCK_ID_VARIABLE)});
     }
 
     std::vector<double> BlockingFacade::block_volumes(int subdivisions) {

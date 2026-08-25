@@ -755,3 +755,67 @@ TEST_CASE("cutting_a_standalone_quad_block_splits_it_whichever_way_its_sheet_run
         REQUIRE(cuts == 4);
     }
 }
+
+TEST_CASE("a_classified_face_follows_its_surface_as_closely_as_its_own_edges_do", "[BlockTestSuite]") {
+    // Pulling a face's interior onto its surface is not enough on its own: pinning it at the
+    // (degree+1)^2 parameters of an interpolation says nothing about what happens *between* them,
+    // and between them is where the error lives. Measured on the sphere at degree 3, the interpolant
+    // sat 4e-03 off at its own parameters — the fixture's own faceting, so exact — and 2.2e-02 off
+    // halfway between them.
+    //
+    // Fitted over far more samples than there are unknowns instead, the same way an edge on a curve
+    // is fitted, a face reaches what its own edges reach. Stated at degree 5, because at degree 3 the
+    // limit is the bicubic itself: a patch of that degree cannot follow a 70-degree spherical cap
+    // more closely than about 5% of the radius, whichever way its interior is chosen.
+    const FacetedGeometry geom = make_sphere_geom_model();
+
+    const double h = 1.0 / std::sqrt(3.0);
+    Blocking<FacetedGeometry> blocking(geom, 5);
+    blocking.create_hex_block({Point3d(-h, -h, -h),
+                               Point3d(h, -h, -h),
+                               Point3d(h, h, -h),
+                               Point3d(-h, h, -h),
+                               Point3d(-h, -h, h),
+                               Point3d(h, -h, h),
+                               Point3d(h, h, h),
+                               Point3d(-h, h, h)});
+    blocking.classify(1e-9, 1e-9, 2.0);
+
+    const auto off_sphere = [](const Point3d &AP) {
+        return std::abs(std::sqrt(AP.x() * AP.x() + AP.y() * AP.y() + AP.z() * AP.z()) - 1.0);
+    };
+
+    auto &map = blocking.cmap();
+    double worst_edge = 0.0;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        for (int i = 1; i < 16; ++i) {
+            worst_edge = std::max(worst_edge, off_sphere(it->info().curve.value(i / 16.0)));
+        }
+    }
+
+    double worst_face = 0.0;
+    int checked = 0;
+    for (auto it = map.attributes<2>().begin(), end = map.attributes<2>().end(); it != end; ++it) {
+        REQUIRE(!it->info().geom_targets.empty());
+        REQUIRE(it->info().geom_targets.front().first == GroupDim::Dim2);
+        ++checked;
+        for (int i = 1; i < 16; ++i) {
+            for (int j = 1; j < 16; ++j) {
+                worst_face = std::max(worst_face, off_sphere(it->info().surface.value(i / 16.0, j / 16.0)));
+            }
+        }
+    }
+    REQUIRE(checked == 6);
+
+    // The floor both are working against is the fixture's own faceting, which the corners sit at.
+    double worst_corner = 0.0;
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        worst_corner = std::max(worst_corner, off_sphere(it->info().point));
+    }
+    REQUIRE(worst_corner < 5e-3);
+    REQUIRE(worst_edge < 1e-2);
+
+    // The point of the whole thing: a face is no further off its surface than the edges bounding it.
+    // Interpolating instead left it at 1.05e-02 here, half again as far.
+    REQUIRE(worst_face < 1.5 * worst_edge);
+}
