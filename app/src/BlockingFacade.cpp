@@ -310,6 +310,22 @@ namespace gecko::app {
         return true;
     }
 
+    bool BlockingFacade::collapse_chord(int face_id,
+                                        int hinge_node_id,
+                                        double tol_vertex,
+                                        double tol_curve,
+                                        double tol_surface) {
+        const auto face = cell_or_throw<2>(m_impl, face_id, "face");
+        const auto hinge = cell_or_throw<0>(m_impl, hinge_node_id, "node");
+
+        Checkpoint checkpoint(*this);
+        if (!m_impl.blocking.collapse_chord(face, hinge, tol_vertex, tol_curve, tol_surface)) {
+            checkpoint.discard();
+            return false;
+        }
+        return true;
+    }
+
     namespace {
         /** @brief The node carrying @p node_id, straight from the map.
          *
@@ -376,6 +392,15 @@ namespace gecko::app {
             if (const auto far = map.attribute<3>(map.beta<3>(dart)); far != nullptr) {
                 ids.push_back(static_cast<int>(far->info().id));
             }
+        }
+        return ids;
+    }
+
+    std::vector<int> BlockingFacade::face_corners(int face_id) {
+        const auto face = cell_or_throw<2>(m_impl, face_id, "face");
+        std::vector<int> ids;
+        for (const auto node : m_impl.blocking.frame_of(face)) {
+            ids.push_back(static_cast<int>(node->info().id));
         }
         return ids;
     }

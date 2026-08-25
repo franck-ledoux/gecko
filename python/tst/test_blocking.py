@@ -1146,3 +1146,118 @@ def test_pillow_that_refuses_leaves_nothing_to_undo(geom_model_path):
     # left to take back is the block's creation.
     blocking.undo()
     assert blocking.nb_cells(3) == 0
+
+def _grid_2x2x2(blocking):
+    """8 unit blocks filling [0,2]^3, sewn."""
+    for i in (0, 1):
+        for j in (0, 1):
+            for k in (0, 1):
+                blocking.create_hex_block([
+                    (i, j, k), (i + 1, j, k), (i + 1, j + 1, k), (i, j + 1, k),
+                    (i, j, k + 1), (i + 1, j, k + 1), (i + 1, j + 1, k + 1), (i, j + 1, k + 1),
+                ])
+    blocking.build_connectivity()
+
+
+def _face_at(blocking, wanted):
+    """The face whose 4 corners sit exactly at `wanted`, in any order."""
+    for face in blocking.face_ids():
+        corners = [blocking.node_position(n) for n in blocking.face_corners(face)]
+        if len(corners) != 4:
+            continue
+        matched = sum(
+            1 for c in corners
+            if any(all(abs(c[k] - w[k]) < 1e-9 for k in range(3)) for w in wanted)
+        )
+        if matched == 4:
+            return face
+    raise AssertionError("no face at %r" % (wanted,))
+
+
+def test_face_corners_runs_round_the_perimeter(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_hex_block(_UNIT_HEX)
+
+    for face in blocking.face_ids():
+        corners = blocking.face_corners(face)
+        assert len(corners) == 4
+        assert len(set(corners)) == 4
+        # Consecutive corners are adjacent, so each is 1 unit from the next; the diagonals are not.
+        points = [blocking.node_position(n) for n in corners]
+        for k in range(4):
+            a, b = points[k], points[(k + 1) % 4]
+            assert sum((a[i] - b[i]) ** 2 for i in range(3)) == pytest.approx(1.0)
+        for k in range(2):
+            a, b = points[k], points[k + 2]
+            assert sum((a[i] - b[i]) ** 2 for i in range(3)) == pytest.approx(2.0)
+
+
+def test_collapse_chord_folds_a_column_away(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+    assert blocking.nb_cells(3) == 8
+
+    # The chord along x at (y,z) = (0,0): 2 blocks strung together through opposite faces.
+    face = _face_at(blocking, [(0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)])
+    hinge = next(n for n in blocking.face_corners(face)
+                 if blocking.node_position(n) == pytest.approx([0.0, 0.0, 0.0]))
+
+    assert blocking.collapse_chord(face, hinge, 1e-9)
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 6
+    assert min(blocking.block_volumes(2)) > 0.0
+
+
+def test_collapse_chord_of_a_lone_block_leaves_nothing(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+
+    face = blocking.block_faces(block)[0]
+    assert blocking.collapse_chord(face, blocking.face_corners(face)[0], 1e-9)
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 0
+    assert blocking.node_ids() == []
+
+
+def test_collapse_chord_refuses_a_hinge_that_is_not_a_corner_of_the_face(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+    before = blocking.nb_cells(3)
+
+    face = _face_at(blocking, [(0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)])
+    stranger = next(n for n in blocking.node_ids()
+                    if n not in blocking.face_corners(face))
+    assert not blocking.collapse_chord(face, stranger, 1e-9)
+    assert blocking.nb_cells(3) == before
+
+
+def test_collapse_chord_rejects_unknown_ids(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+    face = blocking.block_faces(block)[0]
+
+    with pytest.raises(IndexError):
+        blocking.collapse_chord(max(blocking.face_ids()) + 1, blocking.face_corners(face)[0], 1e-9)
+    with pytest.raises(IndexError):
+        blocking.collapse_chord(face, max(blocking.node_ids()) + 1, 1e-9)
+
+
+def test_collapse_chord_is_undone_in_one_step(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+
+    face = _face_at(blocking, [(0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)])
+    hinge = next(n for n in blocking.face_corners(face)
+                 if blocking.node_position(n) == pytest.approx([0.0, 0.0, 0.0]))
+    assert blocking.collapse_chord(face, hinge, 1e-9)
+    assert blocking.nb_cells(3) == 6
+
+    blocking.undo()
+    assert blocking.nb_cells(3) == 8
+    assert blocking.is_valid_topology()

@@ -1087,6 +1087,135 @@ namespace gecko {
         }
 
         /**
+         * @brief Collapses the chord through @p AFace, folding the column of blocks it runs through
+         * onto the diagonal @p AHinge lies on — the *chord collapse*.
+         *
+         * A **chord** is the column of blocks strung together through opposite faces: @p AFace, the
+         * face opposite it in the block behind it, the face opposite *that* one in the next block,
+         * and so on until the column comes out on the boundary of the blocking. It is the dual curve
+         * of the structure, and the intersection of the 2 sheets running across it.
+         *
+         * **Why a diagonal fold, and not something simpler.** Taking the column out by merging each
+         * block's 2 opposite side faces would mean contracting, in every block of it, the 4 edges
+         * running across the column — and those edges are shared with blocks *outside* it, which
+         * would be left degenerate. Folding is the only way to close the gap that touches nothing
+         * but the column: each cross-section quad folds onto one of its 2 diagonals, the 2 corners
+         * off that diagonal meeting in the middle, and the 4 side faces closing in *adjacent* pairs
+         * rather than opposite ones. The 2 blocks that were only edge-neighbours across the fold end
+         * up sharing a face, and the valence around the chord drops from 4 to 3. It is the 2D
+         * diagonal collapse of a quad, run the length of a column.
+         *
+         * @p AHinge names which of the 2 diagonals stays: the fold runs through it and through the
+         * corner opposite it, and the other 2 corners of @p AFace are the ones that meet.
+         *
+         * **What happens to classification.** Every pair of corners that meets is decided the way
+         * `delete_sheet()` decides its own: the most constrained side wins, the merged corner taking
+         * the lowest-dimensional entity containing what either side was on, and being projected onto
+         * it. Edges, faces and blocks are not decided here at all — they infer from their boundary,
+         * which is what makes deciding the corners enough.
+         *
+         * @param AFace Any face of the chord — the cross-section the fold is named on.
+         * @param AHinge A corner of @p AFace. The diagonal through it stays; the other 2 corners meet.
+         * @param ATolVertex Tolerance for snapping onto a vertex, as `classify()` defines it — used
+         *        only where a refitted cell has to fall back on a proximity search.
+         * @param ATolCurve Tolerance for snapping onto a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * @return false, changing nothing at all, when the chord cannot be folded: when @p AFace is a
+         *         standalone quad block, when @p AHinge is not one of its corners, when the chord
+         *         runs back through a block it has already been through (a chord closing into a ring
+         *         or crossing itself has no single fold), when 2 corners that would meet are
+         *         classified on 2 *different* model vertices — the same information loss
+         *         `delete_sheet()` refuses — when they are already joined by an edge, which folding
+         *         would leave a loop, or when a block outside the chord has both of them as its own
+         *         corners, which folding would leave degenerate.
+         */
+        bool
+        collapse_chord(Face AFace, Node AHinge, double ATolVertex, double ATolCurve = -1.0, double ATolSurface = -1.0) {
+            const EditSession naming(*this);
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
+            const std::optional<Chord> chord = find_chord(AFace, AHinge);
+            if (!chord.has_value()) return false;
+
+            const std::set<Block> column(chord->blocks.begin(), chord->blocks.end());
+            std::set<Node> meeting;
+            for (const auto &[a, b] : chord->merges) {
+                if (a == b) return false;
+                if (!meeting.insert(a).second || !meeting.insert(b).second) return false;
+                if (edge_joins(a, b, nullptr)) return false;
+                if (on_different_vertices(a, b)) return false;
+                if (shares_a_block_outside(a, b, column)) return false;
+            }
+
+            // Every refusal is behind us. Both corners of each pair are given the answer before
+            // anything is deleted, for the reason `delete_sheet()` gives: which of the 2 attributes
+            // CGAL keeps when they are finally merged is CGAL's business, and making both carry the
+            // answer means it does not have to be ours.
+            std::vector<Point3d> met;
+            met.reserve(chord->merges.size());
+            for (const auto &[a, b] : chord->merges) {
+                const auto targets = merged_targets(a->info().geom_targets, b->info().geom_targets);
+                Point3d p = a->info().point + Vector3d(a->info().point, b->info().point) * 0.5;
+                if (!targets.empty()) {
+                    const auto result = nearest_of(targets, p);
+                    if (result.any()) project_onto(result.nearest_dim, result.nearest_tag, p);
+                }
+                a->info().point = p;
+                b->info().point = p;
+                a->info().geom_targets = targets;
+                b->info().geom_targets = targets;
+                met.push_back(p);
+            }
+
+            // By id rather than by handle, here and for the neighbours: CGAL rebuilds an
+            // attribute whenever the orbit behind it is disturbed, and removing one block of the
+            // column disturbs both the next one's and those of everything around it.
+            std::vector<Int> doomed;
+            doomed.reserve(chord->blocks.size());
+            std::set<Int> beside;
+            for (const Block b : chord->blocks) {
+                doomed.push_back(b->info().id);
+                for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    if (m_cmap.template is_free<3>(it)) continue;
+                    const Block other = m_cmap.template attribute<3>(m_cmap.template beta<3>(it));
+                    if (other != nullptr && column.count(other) == 0) beside.insert(other->info().id);
+                }
+            }
+            for (const Int id : doomed) {
+                if (const Block b = cell_by_id<3>(id); b != nullptr) delete_block(b);
+            }
+
+            // The 2 blocks either side of the fold now describe the same 4 corners, the 2 that met
+            // having been moved onto each other — so the position-based sew that glues any 2 blocks
+            // built at the same place glues them here too, and merging their corner attributes is
+            // what finally makes the 2 corners 1.
+            std::vector<Face> candidates;
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (belongs_to_block(it) && m_cmap.template is_free<3>(it->dart())) candidates.push_back(it);
+            }
+            sew_matching<3>(candidates, 4);
+
+            refit_around(met, tol);
+
+            // And the blocks that closed the gap, in full. Sewing 2 of them together merges corner
+            // attributes, and an edge stores its curve against whichever of its 2 ends is named
+            // first — so an edge nowhere near a corner that moved can still come out of the sew with
+            // its 2 ends in the other order, and the face reading it back then twists. `pillow()`
+            // met the same thing from the other side.
+            std::vector<Block> survivors;
+            survivors.reserve(beside.size());
+            for (const Int id : beside) {
+                if (const Block b = cell_by_id<3>(id); b != nullptr) survivors.push_back(b);
+            }
+            rebuild_blocks(survivors, tol);
+            return true;
+        }
+
+        /**
          * @brief Inserts a layer of blocks along @p AFaces — the *pillowing* operation.
          *
          * @p AFaces is a **nappe**: a sheet of block faces that cuts the blocking in two. It may
@@ -1184,7 +1313,7 @@ namespace gecko {
 
             refit_around(settled, tol);
 
-            rebuild_layer(layer, tol);
+            rebuild_blocks(layer, tol);
             return true;
         }
 
@@ -4369,6 +4498,177 @@ namespace gecko {
         }
 
         // ---------------------------------------------------------------------
+        // Chord collapse: walking the column, and folding it
+        // ---------------------------------------------------------------------
+
+        /** @brief The column of blocks a chord runs through, and the corners that meet when it is
+         * folded — one pair per cross-section. */
+        struct Chord {
+            /** @brief The blocks of the column, in the order the walk found them. */
+            std::vector<Block> blocks{};
+            /** @brief The 2 corners meeting at each cross-section, off the fold's own diagonal. */
+            std::vector<std::pair<Node, Node>> merges{};
+        };
+
+        /**
+         * @brief Walks the chord through @p AFace in both directions, collecting its blocks and the
+         * corners the fold on @p AHinge's diagonal would bring together.
+         *
+         * Within a block, the chord leaves by the face opposite the one it came in by, and the 4
+         * corners of the one map onto the 4 of the other along the block's own axis — so the pair
+         * that meets is carried from cross-section to cross-section by corner *index*, never by
+         * geometry, the way `find_sheet()` carries a cut's side.
+         *
+         * @param AFace Any face of the chord.
+         * @param AHinge A corner of @p AFace, naming the diagonal the fold runs through.
+         * @return The chord, or `std::nullopt` when @p AFace bounds no block, when @p AHinge is not
+         *         one of its corners, or when the walk comes back to a block it has already been
+         *         through — a chord closing into a ring or crossing itself, which has no single fold.
+         */
+        std::optional<Chord> find_chord(Face AFace, Node AHinge) {
+            if (!belongs_to_block(AFace)) return std::nullopt;
+            const std::array<Node, 4> ring = frame_of(AFace);
+            const int hinge = index_in_or_none(ring, AHinge);
+            if (hinge < 0) return std::nullopt;
+
+            // A face's frame runs its 4 corners round the perimeter, so the 2 that meet are the ones
+            // either side of the hinge — the other diagonal.
+            const auto meeting = [hinge](const std::array<Node, 4> &ARing) {
+                return std::pair<Node, Node>{ARing[static_cast<std::size_t>((hinge + 1) % 4)],
+                                             ARing[static_cast<std::size_t>((hinge + 3) % 4)]};
+            };
+
+            Chord chord;
+            chord.merges.push_back(meeting(ring));
+            std::set<Block> seen;
+
+            for (int side = 0; side < 2; ++side) {
+                Dart d = AFace->dart();
+                if (side == 1) {
+                    if (m_cmap.template is_free<3>(d)) continue;
+                    d = m_cmap.template beta<3>(d);
+                }
+                Block block = m_cmap.template attribute<3>(d);
+                std::array<Node, 4> at = ring;
+                while (block != nullptr) {
+                    if (!seen.insert(block).second) return std::nullopt;
+                    chord.blocks.push_back(block);
+
+                    const std::array<Node, 8> corners = frame_of(block);
+                    std::array<Node, 4> across{};
+                    if (!opposite_ring(corners, at, across)) return std::nullopt;
+                    chord.merges.push_back(meeting(across));
+
+                    // Taken on a dart of this block's own side of that face — a face attribute
+                    // names either of its 2 darts, and crossing from the wrong one would walk back
+                    // into the block just left.
+                    const Dart exit = dart_facing(block, across);
+                    if (exit == m_cmap.null_descriptor) return std::nullopt;
+                    at = across;
+                    if (m_cmap.template is_free<3>(exit)) break;
+                    block = m_cmap.template attribute<3>(m_cmap.template beta<3>(exit));
+                }
+            }
+            return chord;
+        }
+
+        /**
+         * @brief The 4 corners facing @p ARing across the block, one per corner and in the same
+         * order.
+         *
+         * The axis the chord runs along is the one all 4 corners of @p ARing agree on in the block's
+         * own `HEX_CORNER_UVW` coordinates; the corner facing each of them is the one differing in
+         * that coordinate alone.
+         *
+         * @param ACorners The block's frame.
+         * @param ARing 4 corners of it forming one of its faces.
+         * @param AOut Receives the 4 facing corners.
+         * @return false when @p ARing is not a face of the block — no axis being common to all 4.
+         */
+        static bool opposite_ring(const std::array<Node, 8> &ACorners,
+                                  const std::array<Node, 4> &ARing,
+                                  std::array<Node, 4> &AOut) {
+            std::array<int, 4> index{};
+            for (std::size_t k = 0; k < 4; ++k) {
+                const int i = index_in_or_none(ACorners, ARing[k]);
+                if (i < 0) return false;
+                index[k] = i;
+            }
+            int axis = -1;
+            for (int a = 0; a < 3; ++a) {
+                const int value = HEX_CORNER_UVW[static_cast<std::size_t>(index[0])][static_cast<std::size_t>(a)];
+                bool same = true;
+                for (std::size_t k = 1; k < 4; ++k) {
+                    same = same &&
+                           HEX_CORNER_UVW[static_cast<std::size_t>(index[k])][static_cast<std::size_t>(a)] == value;
+                }
+                if (same) {
+                    axis = a;
+                    break;
+                }
+            }
+            if (axis < 0) return false;
+
+            for (std::size_t k = 0; k < 4; ++k) {
+                auto uvw = HEX_CORNER_UVW[static_cast<std::size_t>(index[k])];
+                uvw[static_cast<std::size_t>(axis)] = 1 - uvw[static_cast<std::size_t>(axis)];
+                for (std::size_t c = 0; c < 8; ++c) {
+                    if (HEX_CORNER_UVW[c] == uvw) {
+                        AOut[k] = ACorners[c];
+                        break;
+                    }
+                }
+            }
+            return true;
+        }
+
+        /** @brief A dart of @p ABlock's own side of the face whose 4 corners are @p ACorners.
+         * @param ABlock The block to look in.
+         * @param ACorners The 4 corners to match, in any order.
+         * @return Such a dart, or the map's null descriptor if the block has no such face. */
+        Dart dart_facing(Block ABlock, const std::array<Node, 4> &ACorners) {
+            const std::set<Node> wanted(ACorners.begin(), ACorners.end());
+            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(ABlock->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<2, 3>(ABlock->dart()).end();
+                 it != itend;
+                 ++it) {
+                std::set<Node> its;
+                Dart walk = it;
+                for (int c = 0; c < 4; ++c) {
+                    its.insert(m_cmap.template attribute<0>(walk));
+                    walk = m_cmap.template beta<1>(walk);
+                }
+                if (its == wanted) return it;
+            }
+            return m_cmap.null_descriptor;
+        }
+
+        /**
+         * @brief Whether some block outside @p AColumn has both @p AA and @p AB as its own corners.
+         *
+         * The one thing a fold cannot survive. The 2 corners meeting are diagonally opposite on the
+         * chord's own cross-section, so no block of the column is troubled by their meeting — but a
+         * block outside it holding both would be left with 2 of its own corners in the same place,
+         * which is a degenerate block and not a blocking at all.
+         *
+         * @param AA One corner that would meet.
+         * @param AB The other.
+         * @param AColumn The chord's own blocks, which do not count.
+         * @return true when such a block exists.
+         */
+        bool shares_a_block_outside(Node AA, Node AB, const std::set<Block> &AColumn) {
+            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 0>(AA->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<3, 0>(AA->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Block b = m_cmap.template attribute<3>(it);
+                if (b == nullptr || AColumn.count(b) > 0) continue;
+                if (has_corner(b, AB)) return true;
+            }
+            return false;
+        }
+
+        // ---------------------------------------------------------------------
         // Pillowing: collecting the nappe, and inserting the layer along it
         // ---------------------------------------------------------------------
 
@@ -4642,11 +4942,13 @@ namespace gecko {
         }
 
         /**
-         * @brief Rebuilds every cell of an inserted layer, edges first, then faces, then blocks.
+         * @brief Rebuilds every cell of a set of blocks, edges first, then faces, then blocks.
          *
-         * All of it, rather than only what `refit_around()` reaches. A block of the layer has 4
-         * corners that moved and 4 that did not, and everything joining the 4 that did not is out of
-         * that sweep — while being just as new.
+         * For the blocks an operation has just built or just re-sewn — all of them, rather than only
+         * what `refit_around()` reaches. A block of an inserted layer has 4 corners that moved and 4
+         * that did not, and everything joining the 4 that did not is out of that sweep while being
+         * just as new; a block left beside a folded chord has none of its own corners moved at all,
+         * and is re-sewn all the same.
          *
          * The edges are the half of this that is easy to miss. An edge stores its curve against one
          * of its 2 ends, and which end that is is settled by `curve_start_node()`, which answers by
@@ -4658,15 +4960,15 @@ namespace gecko {
          * two-fifths of its own volume, or a negative one, depending on which of the 2 corner
          * attributes CGAL happened to keep.
          *
-         * @param ALayer The blocks that were inserted.
+         * @param ABlocks The blocks to rebuild.
          * @param ATol The per-dimension tolerances, for the refits.
          */
-        void rebuild_layer(const std::vector<Block> &ALayer, const Tolerances &ATol) {
+        void rebuild_blocks(const std::vector<Block> &ABlocks, const Tolerances &ATol) {
             // Read back from the blocks, never from anything collected before the sew: a 3-sew
             // identifies 2 faces into 1, so half of what was collected then no longer exists.
             std::set<Edge> edges;
             std::set<Face> faces;
-            for (const Block b : ALayer) {
+            for (const Block b : ABlocks) {
                 for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(b->dart()).begin(),
                           itend = m_cmap.template one_dart_per_incident_cell<1, 3>(b->dart()).end();
                      it != itend;
@@ -4694,7 +4996,7 @@ namespace gecko {
             for (const Face f : faces) {
                 refit(f, ATol, true);
             }
-            for (const Block b : ALayer) {
+            for (const Block b : ABlocks) {
                 refit(b, ATol, true);
             }
         }

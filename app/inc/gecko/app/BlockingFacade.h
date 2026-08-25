@@ -209,6 +209,19 @@ namespace gecko::app {
          * @throw std::out_of_range if no face carries that id.
          */
         [[nodiscard]] std::vector<int> face_blocks(int face_id);
+
+        /**
+         * @brief The 4 corners of one face, in the order its own surface is stored against — so
+         * consecutive ids are adjacent corners, and `[0]`/`[2]` and `[1]`/`[3]` are its 2 diagonals.
+         *
+         * Which is what collapse_chord() needs: its hinge is a corner, and the diagonal through it
+         * is what the fold runs along.
+         *
+         * @param face_id A face id, as face_ids() reports them.
+         * @return Its 4 node ids, round the perimeter.
+         * @throw std::out_of_range if no face carries that id.
+         */
+        [[nodiscard]] std::vector<int> face_corners(int face_id);
         /**
          * @brief Gets the position of a corner node.
          * @param node_id A node id, from node_ids().
@@ -482,6 +495,38 @@ namespace gecko::app {
                     double tol_vertex,
                     double tol_curve = -1.0,
                     double tol_surface = -1.0);
+
+        /**
+         * @brief Collapses the chord through one face, folding the column of blocks it runs through
+         * onto the diagonal a corner names (see `Blocking::collapse_chord()`).
+         *
+         * A chord is the column of blocks strung together through opposite faces — the dual curve of
+         * the structure. Folding is the only way to take it out that leaves everything around it a
+         * blocking: merging each block's 2 opposite side faces instead would contract edges shared
+         * with blocks outside the column and leave those degenerate. Each cross-section folds onto
+         * one of its 2 diagonals, the 2 corners off that diagonal meeting in the middle, and the 2
+         * blocks that were only edge-neighbours across the fold end up sharing a face. The valence
+         * around the chord goes from 4 to 3.
+         *
+         * Where 2 corners meet, the more constrained classification wins, exactly as in
+         * delete_sheet().
+         *
+         * @param face_id Any face of the chord, as face_ids() reports them.
+         * @param hinge_node_id A corner of that face, from face_corners(). The diagonal through it
+         *        stays; the other 2 corners meet.
+         * @param tol_vertex Tolerance for snapping onto a vertex, as classify() defines it.
+         * @param tol_curve Tolerance for snapping onto a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * @return false, changing nothing, when the chord cannot be folded — see
+         *         `Blocking::collapse_chord()` for the cases.
+         * @throw std::out_of_range if @p face_id is not a face of this blocking, or @p hinge_node_id
+         *        not one of its nodes.
+         */
+        bool collapse_chord(int face_id,
+                            int hinge_node_id,
+                            double tol_vertex,
+                            double tol_curve = -1.0,
+                            double tol_surface = -1.0);
 
         /**
          * @brief Whether there is an edit to take back. @return true if undo() would do something.

@@ -152,6 +152,27 @@ sides = blocking.face_blocks(nappe[0])           # 2 blocks, or 1 where the face
 # not separate the named side from the rest, or one that is not manifold along its own edges.
 blocking.pillow(nappe, block, thickness=0.25, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
+# Collapsing a chord: a *chord* is the column of blocks strung together through opposite faces — the
+# dual curve of the structure, where a sheet is its dual surface. Taking it out means folding it:
+# each cross-section folds onto one of its 2 diagonals, the 2 corners off that diagonal meeting in
+# the middle, so the 2 blocks that were only edge-neighbours across the fold end up sharing a face
+# and the valence around the chord drops from 4 to 3. Folding is the only way out that leaves a
+# blocking behind — merging each block's 2 opposite side faces instead would contract edges shared
+# with blocks *outside* the column and leave those degenerate.
+#
+# face_corners() runs the face's 4 corners round its perimeter, so [0]/[2] and [1]/[3] are its 2
+# diagonals: the hinge is a corner, and the fold runs along the diagonal through it.
+face = blocking.face_ids()[0]
+hinge = blocking.face_corners(face)[0]
+
+# Where 2 corners meet, the more constrained classification wins, exactly as for delete_sheet().
+# Returns False, changing nothing, when the chord runs back through a block it has already been
+# through — a chord closing into a ring or crossing itself has no single fold — when the 2 corners
+# meeting are on 2 *different* model vertices, when they are already joined by an edge (folding
+# would leave it a loop), or when a block outside the column has both of them as its own corners
+# (folding would leave it degenerate).
+blocking.collapse_chord(face, hinge, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
 # Undo. Every operation that changes the blocking snapshots it first, so taking an edit back is
 # putting that snapshot in place — not a stack of inverse operations, because these operations have
 # no inverses (collapsing the layer a cut just made does not restore the block). Ids survive an undo,

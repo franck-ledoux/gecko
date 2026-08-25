@@ -301,6 +301,11 @@ namespace gecko::app {
                  py::arg("face_id"),
                  "The ids of the blocks this face bounds: 2 of them, 1 where the face is on the boundary of the "
                  "blocking, and none at all for a standalone quad block.")
+            .def("face_corners",
+                 &BlockingFacade::face_corners,
+                 py::arg("face_id"),
+                 "The 4 node ids of this face, round its perimeter — so [0]/[2] and [1]/[3] are its 2 diagonals, "
+                 "which is what names a fold for ``collapse_chord``.")
             .def("pillow",
                  &BlockingFacade::pillow,
                  py::arg("face_ids"),
@@ -318,7 +323,24 @@ namespace gecko::app {
                  "the inside one keeps only what it is still on after moving — so a blocking nobody classified "
                  "stays unclassified. Returns False, changing nothing, when what was given is not a nappe: a face "
                  "named twice, a standalone quad block, a nappe that does not separate the named side from the "
-                 "rest, or one that is not manifold along its own edges.");
+                 "rest, or one that is not manifold along its own edges.")
+            .def("collapse_chord",
+                 &BlockingFacade::collapse_chord,
+                 py::arg("face_id"),
+                 py::arg("hinge_node_id"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Collapses the *chord* through ``face_id`` — the column of blocks strung together through opposite "
+                 "faces, the dual curve of the structure. Each cross-section folds onto the diagonal through "
+                 "``hinge_node_id``, the 2 corners off it meeting in the middle, so the column goes and the 2 blocks "
+                 "that were only edge-neighbours across the fold come to share a face: the valence around the chord "
+                 "drops from 4 to 3. Folding is the only way to take a chord out that leaves a blocking behind — "
+                 "merging each block's opposite side faces instead would contract edges shared with blocks outside "
+                 "the column. Where 2 corners meet the more constrained classification wins, as in ``delete_sheet``. "
+                 "Returns False, changing nothing, when the chord runs back through a block it has already been "
+                 "through, when the 2 corners meeting are on 2 different model vertices, when they are already "
+                 "joined by an edge, or when a block outside the column has both of them as corners.");
     }
 
 } // namespace gecko::app

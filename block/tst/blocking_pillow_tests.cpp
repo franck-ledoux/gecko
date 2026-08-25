@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <set>
 #include <vector>
@@ -32,6 +33,45 @@ namespace {
         face_entity[f0.value] = 1;
 
         const auto path = (std::filesystem::temp_directory_path() / "gecko_block_pillow_test.msh").string();
+        io::SimplicialMeshWriter::write(path, mesh, groups);
+        FacetedGeometry geom(path);
+        std::filesystem::remove(path);
+        return geom;
+    }
+
+    /** @brief A geometric model whose only features are 8 vertices, one at each corner of the unit
+     * cube — so that a block fitted to it has all 8 of its own corners on a *different* model
+     * vertex, which is what makes any merge between 2 of them a loss of information. */
+    FacetedGeometry make_cube_vertices_geom_model() {
+        SimplicialMesh mesh;
+        GroupRegistry groups;
+        auto vtx_group = groups.add_group("Vertices", GroupDim::Dim0);
+        auto surf_group = groups.add_group("Surf", GroupDim::Dim2);
+
+        auto &node_group = mesh.add_variable<GroupId, CellType::Node>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+        auto &node_entity = mesh.add_variable<Int, CellType::Node>(std::string(io::ENTITY_TAG_VARIABLE));
+        Int tag = 1;
+        for (const int i : {0, 1}) {
+            for (const int j : {0, 1}) {
+                for (const int k : {0, 1}) {
+                    auto n = mesh.add_node(i, j, k);
+                    node_group[n.value] = vtx_group;
+                    node_entity[n.value] = tag++;
+                }
+            }
+        }
+
+        // A surface has to exist for the model to be one; it is put out of every tolerance's way.
+        auto f0 = mesh.add_node(100, 100, 100);
+        auto f1 = mesh.add_node(101, 100, 100);
+        auto f2 = mesh.add_node(100, 101, 100);
+        auto &face_group = mesh.add_variable<GroupId, CellType::Face>(std::string(io::PHYSICAL_GROUP_VARIABLE));
+        auto &face_entity = mesh.add_variable<Int, CellType::Face>(std::string(io::ENTITY_TAG_VARIABLE));
+        auto f = mesh.add_face(f0, f1, f2);
+        face_group[f.value] = surf_group;
+        face_entity[f.value] = 1;
+
+        const auto path = (std::filesystem::temp_directory_path() / "gecko_block_pillow_vertices.msh").string();
         io::SimplicialMeshWriter::write(path, mesh, groups);
         FacetedGeometry geom(path);
         std::filesystem::remove(path);
@@ -90,6 +130,83 @@ namespace {
             if (v <= 0.0) return false;
         }
         return true;
+    }
+
+    /** @brief The face whose 4 corners sit exactly at @p AWanted, in any order. */
+    Blocking<FacetedGeometry>::Face face_at(Blocking<FacetedGeometry> &ABlocking,
+                                            const std::vector<std::array<double, 3>> &AWanted) {
+        auto &map = ABlocking.cmap();
+        const auto same = [](const Point3d &AP, const std::array<double, 3> &AQ) {
+            return std::abs(AP.x() - AQ[0]) < 1e-9 && std::abs(AP.y() - AQ[1]) < 1e-9 &&
+                   std::abs(AP.z() - AQ[2]) < 1e-9;
+        };
+        for (auto it = map.attributes<2>().begin(), end = map.attributes<2>().end(); it != end; ++it) {
+            int matched = 0;
+            auto walk = it->dart();
+            for (int c = 0; c < 4; ++c) {
+                const Point3d &p = map.attribute<0>(walk)->info().point;
+                for (const auto &q : AWanted) {
+                    if (same(p, q)) ++matched;
+                }
+                walk = map.beta<1>(walk);
+            }
+            if (matched == 4) return it;
+        }
+        return nullptr;
+    }
+
+    /** @brief The corner of @p AFace sitting at @p AAt. */
+    Blocking<FacetedGeometry>::Node corner_at(Blocking<FacetedGeometry> &ABlocking,
+                                              Blocking<FacetedGeometry>::Face AFace,
+                                              const std::array<double, 3> &AAt) {
+        auto &map = ABlocking.cmap();
+        auto walk = AFace->dart();
+        for (int c = 0; c < 4; ++c) {
+            const auto node = map.attribute<0>(walk);
+            const Point3d &p = node->info().point;
+            if (std::abs(p.x() - AAt[0]) < 1e-9 && std::abs(p.y() - AAt[1]) < 1e-9 && std::abs(p.z() - AAt[2]) < 1e-9) {
+                return node;
+            }
+            walk = map.beta<1>(walk);
+        }
+        return nullptr;
+    }
+
+    /** @brief Whether 2 blocks share a face. */
+    bool share_a_face(Blocking<FacetedGeometry> &ABlocking,
+                      Blocking<FacetedGeometry>::Block AA,
+                      Blocking<FacetedGeometry>::Block AB) {
+        auto &map = ABlocking.cmap();
+        for (auto it = map.one_dart_per_incident_cell<2, 3>(AA->dart()).begin(),
+                  end = map.one_dart_per_incident_cell<2, 3>(AA->dart()).end();
+             it != end;
+             ++it) {
+            if (map.is_free<3>(it)) continue;
+            if (map.attribute<3>(map.beta<3>(it)) == AB) return true;
+        }
+        return false;
+    }
+
+    /** @brief A 2x2x2 grid of unit blocks, sewn. */
+    void build_grid_2x2x2(Blocking<FacetedGeometry> &ABlocking) {
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 2; ++j) {
+                for (int k = 0; k < 2; ++k) {
+                    const double x = i;
+                    const double y = j;
+                    const double z = k;
+                    ABlocking.create_hex_block({Point3d(x, y, z),
+                                                Point3d(x + 1, y, z),
+                                                Point3d(x + 1, y + 1, z),
+                                                Point3d(x, y + 1, z),
+                                                Point3d(x, y, z + 1),
+                                                Point3d(x + 1, y, z + 1),
+                                                Point3d(x + 1, y + 1, z + 1),
+                                                Point3d(x, y + 1, z + 1)});
+                }
+            }
+        }
+        ABlocking.build_connectivity();
     }
 } // namespace
 
@@ -296,4 +413,126 @@ TEST_CASE("pillowing_an_unclassified_blocking_leaves_it_unclassified", "[BlockTe
     for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
         REQUIRE(it->info().geom_targets.empty());
     }
+}
+
+TEST_CASE("collapsing_a_chord_folds_its_column_away_and_joins_the_2_blocks_across_the_fold", "[BlockTestSuite]") {
+    // The chord along x at (y,z) = (0,0) of a 2x2x2 grid: 2 blocks strung together through opposite
+    // faces. Folding it on the diagonal through (0,0,0) takes both out, and the 2 blocks that were
+    // only edge-neighbours across the fold — the one above it and the one beside it — come to share
+    // a face. The valence around the chord goes from 4 to 3, which is the whole point of the
+    // operation.
+    const FacetedGeometry geom = make_far_away_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    build_grid_2x2x2(blocking);
+    REQUIRE(blocking.nb_cells<3>() == 8);
+
+    const auto start = face_at(blocking, {{{0, 0, 0}}, {{0, 1, 0}}, {{0, 1, 1}}, {{0, 0, 1}}});
+    REQUIRE(start != nullptr);
+    const auto hinge = corner_at(blocking, start, {0, 0, 0});
+    REQUIRE(hinge != nullptr);
+
+    REQUIRE(blocking.collapse_chord(start, hinge, 1e-9));
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.nb_cells<3>() == 6);
+    for (const double v : blocking.block_volumes(2)) {
+        REQUIRE(v > 0.0);
+    }
+
+    // The 2 that closed the gap: the block above the chord and the one beside it.
+    Blocking<FacetedGeometry>::Block above = nullptr;
+    Blocking<FacetedGeometry>::Block beside = nullptr;
+    auto &map = blocking.cmap();
+    for (auto it = map.attributes<3>().begin(), end = map.attributes<3>().end(); it != end; ++it) {
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        for (auto c = map.one_dart_per_incident_cell<0, 3>(it->dart()).begin(),
+                  cend = map.one_dart_per_incident_cell<0, 3>(it->dart()).end();
+             c != cend;
+             ++c) {
+            const Point3d &p = map.attribute<0>(c)->info().point;
+            x += p.x() / 8.0;
+            y += p.y() / 8.0;
+            z += p.z() / 8.0;
+        }
+        if (x < 1.0 && y < 1.0 && z > 1.0) above = it;
+        if (x < 1.0 && y > 1.0 && z < 1.0) beside = it;
+    }
+    REQUIRE(above != nullptr);
+    REQUIRE(beside != nullptr);
+    REQUIRE(share_a_face(blocking, above, beside));
+}
+
+TEST_CASE("collapsing_the_chord_of_a_lone_block_leaves_nothing", "[BlockTestSuite]") {
+    // A chord of one. There is nothing either side to close over the gap, so what is left is
+    // nothing — the same state `delete_sheet()` leaves when the sheet is the whole blocking.
+    const FacetedGeometry geom = make_far_away_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    const auto b = blocking.create_hex_block(box(0, 1));
+    const auto start = faces_of(blocking, b)[0];
+    const auto hinge = blocking.cmap().attribute<0>(start->dart());
+
+    REQUIRE(blocking.collapse_chord(start, hinge, 1e-9));
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.nb_cells<3>() == 0);
+    REQUIRE(blocking.nb_cells<0>() == 0);
+}
+
+TEST_CASE("collapsing_a_chord_refuses_what_has_no_single_fold", "[BlockTestSuite]") {
+    const FacetedGeometry geom = make_far_away_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    build_grid_2x2x2(blocking);
+    const auto blocks_before = blocking.nb_cells<3>();
+    const auto nodes_before = blocking.nb_cells<0>();
+
+    const auto start = face_at(blocking, {{{0, 0, 0}}, {{0, 1, 0}}, {{0, 1, 1}}, {{0, 0, 1}}});
+    REQUIRE(start != nullptr);
+
+    SECTION("a hinge that is not a corner of the face") {
+        const auto elsewhere = face_at(blocking, {{{2, 0, 0}}, {{2, 1, 0}}, {{2, 1, 1}}, {{2, 0, 1}}});
+        REQUIRE(elsewhere != nullptr);
+        const auto stranger = blocking.cmap().attribute<0>(elsewhere->dart());
+        REQUIRE_FALSE(blocking.collapse_chord(start, stranger, 1e-9));
+    }
+    SECTION("a standalone quad block, which is no chord's cross-section") {
+        const auto quad =
+            blocking.create_quad_block({Point3d(0, 0, 5), Point3d(1, 0, 5), Point3d(1, 1, 5), Point3d(0, 1, 5)});
+        const auto corner = blocking.cmap().attribute<0>(quad->dart());
+        REQUIRE_FALSE(blocking.collapse_chord(quad, corner, 1e-9));
+        REQUIRE(blocking.nb_cells<3>() == blocks_before);
+    }
+    SECTION("nothing else moved") {
+        REQUIRE(blocking.nb_cells<3>() == blocks_before);
+        REQUIRE(blocking.nb_cells<0>() == nodes_before);
+    }
+}
+
+TEST_CASE("collapsing_a_chord_refuses_to_merge_2_different_model_vertices", "[BlockTestSuite]") {
+    // The same information loss `delete_sheet()` refuses, and for the same reason: the 2 corners
+    // that would meet sit on 2 different vertices of the model, and folding would leave one of them
+    // with no corner of the block structure on it. Every corner of this block is on one, so every
+    // fold of it is refused, whichever face and whichever diagonal it is named on.
+    const FacetedGeometry geom = make_cube_vertices_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    const auto b = blocking.create_hex_block(box(0, 1));
+    blocking.classify(1e-6, 1e-3, 1e-2);
+
+    auto &map = blocking.cmap();
+    int on_a_vertex = 0;
+    for (auto it = map.attributes<0>().begin(), end = map.attributes<0>().end(); it != end; ++it) {
+        if (!it->info().geom_targets.empty() && it->info().geom_targets[0].first == GroupDim::Dim0) {
+            ++on_a_vertex;
+        }
+    }
+    REQUIRE(on_a_vertex == 8);
+
+    for (const auto face : faces_of(blocking, b)) {
+        auto walk = face->dart();
+        for (int c = 0; c < 4; ++c) {
+            REQUIRE_FALSE(blocking.collapse_chord(face, map.attribute<0>(walk), 1e-6, 1e-3, 1e-2));
+            walk = map.beta<1>(walk);
+        }
+    }
+    REQUIRE(blocking.nb_cells<3>() == 1);
+    REQUIRE(blocking.nb_cells<0>() == 8);
 }
