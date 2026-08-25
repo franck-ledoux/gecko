@@ -1087,6 +1087,100 @@ namespace gecko {
         }
 
         /**
+         * @brief Opens the chord along @p AEdge into a column of blocks — the inverse of
+         * `collapse_chord()`.
+         *
+         * Where a fold brought 2 corners together, an opening takes one apart. @p AFirst and
+         * @p ASecond are the 2 faces the fan of blocks around @p AEdge is cut at: cutting there
+         * leaves the fan in 2 arcs, the edge comes apart into 2, and a block is inserted in the gap.
+         * Where the edge is on the boundary of the blocking its fan is already open at both ends, so
+         * one of the 2 named faces is a boundary face and cutting at it costs nothing.
+         *
+         * **How far it runs.** As far as it can, and it is not told. At the far end of each edge, the
+         * 2 cuts each carry on into one further face — the other face through the edge they leave the
+         * node by — and the chain continues if exactly one such pair of faces meets again along an
+         * edge of its own. That is the same walk `collapse_chord()` makes through opposite faces,
+         * seen from the other side. None means the chain ends there, which it must do on the boundary
+         * or not at all, and more than one means the structure offers 2 different columns from the
+         * same starting point: reported rather than guessed at, the way `find_sheet()` reports a
+         * sheet closing on itself.
+         *
+         * **What happens to classification.** Both copies of a corner keep everything the original
+         * had, restricted to what each is still on after moving apart — an entity further away than
+         * that dimension's tolerance is dropped. Nothing is classified by proximity, so a blocking
+         * nobody classified stays unclassified, as in `pillow()`.
+         *
+         * @param AEdge The edge to open.
+         * @param AFirst One of the 2 faces its fan is cut at.
+         * @param ASecond The other.
+         * @param AThickness How far the 2 copies of each corner move apart, as a fraction of the mean
+         *        length of the edges at it. In `(0,1)`.
+         * @param ATolVertex Tolerance for staying on a vertex, as `classify()` defines it.
+         * @param ATolCurve Tolerance for staying on a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for staying on a surface. Defaults to the curve one.
+         * @return false, changing nothing at all, when @p AThickness is out of range, when the 2
+         *         faces are the same or do not both carry @p AEdge, when the chain runs back into
+         *         itself, when it stops somewhere the 2 cuts do not leave the blocks around a corner
+         *         in exactly 2 groups — which is what an opening needs at every one of its corners,
+         *         and what a chain stopping in mid-air fails — or when the walk finds more than one
+         *         way to carry on.
+         */
+        bool open_chord(Edge AEdge,
+                        Face AFirst,
+                        Face ASecond,
+                        double AThickness,
+                        double ATolVertex,
+                        double ATolCurve = -1.0,
+                        double ATolSurface = -1.0) {
+            const EditSession naming(*this);
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
+            if (!(AThickness > 0.0 && AThickness < 1.0)) return false;
+            const std::optional<Opening> opening = find_opening(AEdge, AFirst, ASecond);
+            if (!opening.has_value()) return false;
+
+            // Every refusal is behind us. Cutting a face that is already on the boundary costs
+            // nothing, which is what makes an edge on the boundary need no special case.
+            for (const OpeningLink &link : opening->links) {
+                for (const Face f : {link.left, link.right}) {
+                    if (!m_cmap.template is_free<3>(f->dart())) m_cmap.template unsew<3>(f->dart());
+                }
+            }
+
+            const std::vector<PartedStation> parted = part_stations(*opening, AThickness, tol);
+            std::vector<Point3d> settled;
+            settled.reserve(parted.size() * 2);
+            for (const PartedStation &station : parted) {
+                settled.push_back(station.copies[0]->info().point);
+                settled.push_back(station.copies[1]->info().point);
+            }
+            const std::vector<Block> column = insert_column(parted);
+
+            std::set<Face> inserted;
+            for (const Block b : column) {
+                for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    inserted.insert(m_cmap.template attribute<2>(it));
+                }
+            }
+            std::vector<Face> candidates;
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (belongs_to_block(it) && m_cmap.template is_free<3>(it->dart()) && inserted.count(it) == 0) {
+                    candidates.push_back(it);
+                }
+            }
+            candidates.insert(candidates.end(), inserted.begin(), inserted.end());
+            sew_matching<3>(candidates, 4);
+
+            refit_around(settled, tol);
+            rebuild_blocks(column, tol);
+            return true;
+        }
+
+        /**
          * @brief Collapses the chord through @p AFace, folding the column of blocks it runs through
          * onto the diagonal @p AHinge lies on — the *chord collapse*.
          *
@@ -4496,6 +4590,485 @@ namespace gecko {
                 }
             }
             AFace->info().surface = reframed(ASurface, corner_ab);
+        }
+
+        // ---------------------------------------------------------------------
+        // Chord opening: walking the chain, and inserting the column along it
+        // ---------------------------------------------------------------------
+
+        /** @brief One edge of a chain being opened, with the 2 faces its fan is cut at and the
+         * direction the walk crossed it in. */
+        struct OpeningLink {
+            /** @brief The edge itself. */
+            Edge edge{};
+            /** @brief One face its fan is cut at. */
+            Face left{};
+            /** @brief The other. */
+            Face right{};
+            /** @brief The corner the walk entered by. */
+            Node from{};
+            /** @brief The corner it left by. */
+            Node to{};
+        };
+
+        /** @brief One corner of a chain being opened, with the 2 corners either side of it that stay
+         * put — the ends of the fold's own hinge, in `collapse_chord()`'s terms. */
+        struct OpeningStation {
+            /** @brief The corner that comes apart in 2. */
+            Node middle{};
+            /** @brief Its neighbour along the first cut face. */
+            Node left{};
+            /** @brief Its neighbour along the second cut face. */
+            Node right{};
+        };
+
+        /** @brief Everything one `open_chord()` would touch. */
+        struct Opening {
+            /** @brief The chain, in order. */
+            std::vector<OpeningLink> links{};
+            /** @brief Its corners, one more than there are links. */
+            std::vector<OpeningStation> stations{};
+        };
+
+        /** @brief Whether @p AEdge is one of @p AFace's 4 edges.
+         * @param AFace The face.
+         * @param AEdge The edge.
+         * @return true when it is. */
+        bool face_has_edge(Face AFace, Edge AEdge) {
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(AFace->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(AFace->dart()).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template attribute<1>(it) == AEdge) return true;
+            }
+            return false;
+        }
+
+        /** @brief The other end of @p AEdge.
+         * @param AEdge The edge.
+         * @param ANode One of its 2 corners.
+         * @return The other one, or `nullptr` when @p ANode is not one of them. */
+        Node other_end(Edge AEdge, Node ANode) {
+            const Dart d = AEdge->dart();
+            const Node a = m_cmap.template attribute<0>(d);
+            const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+            if (a == ANode) return b;
+            if (b == ANode) return a;
+            return nullptr;
+        }
+
+        /** @brief The edge of @p AFace leaving @p ANode that is not @p AEdge, and where it leads.
+         * @param AFace The face to walk.
+         * @param ANode A corner of it.
+         * @param AEdge One of the 2 edges of @p AFace at that corner.
+         * @return The other edge and its far end, or `{nullptr, nullptr}` when there is no such pair. */
+        std::pair<Edge, Node> other_side(Face AFace, Node ANode, Edge AEdge) {
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(AFace->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(AFace->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Edge e = m_cmap.template attribute<1>(it);
+                if (e == AEdge) continue;
+                if (const Node far = other_end(e, ANode); far != nullptr) return {e, far};
+            }
+            return {nullptr, nullptr};
+        }
+
+        /** @brief The edge both faces carry through @p ANode, @p AExcept aside.
+         * @param AA One face.
+         * @param AB The other.
+         * @param ANode The corner to look at.
+         * @param AExcept Edges that do not count.
+         * @return That edge, or `nullptr` when they share none. */
+        Edge shared_edge_at(Face AA, Face AB, Node ANode, const std::set<Edge> &AExcept) {
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 2>(AA->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 2>(AA->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Edge e = m_cmap.template attribute<1>(it);
+                if (AExcept.count(e) > 0) continue;
+                if (other_end(e, ANode) == nullptr) continue;
+                if (face_has_edge(AB, e)) return e;
+            }
+            return nullptr;
+        }
+
+        /** @brief The faces through @p AEdge, @p AExcept aside.
+         * @param AEdge The edge.
+         * @param AExcept A face that does not count.
+         * @return The others. */
+        std::vector<Face> faces_through(Edge AEdge, Face AExcept) {
+            std::vector<Face> faces;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 1>(AEdge->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<2, 1>(AEdge->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Face f = m_cmap.template attribute<2>(it);
+                if (f != AExcept) faces.push_back(f);
+            }
+            return faces;
+        }
+
+        /**
+         * @brief Walks the chain @p AEdge starts, cut at @p AFirst and @p ASecond, in both
+         * directions.
+         *
+         * @param AEdge The edge to open.
+         * @param AFirst One face its fan is cut at.
+         * @param ASecond The other.
+         * @return The chain and its corners, or `std::nullopt` when there is no single one — see
+         *         `open_chord()` for what that means.
+         */
+        std::optional<Opening> find_opening(Edge AEdge, Face AFirst, Face ASecond) {
+            if (AEdge == nullptr || AFirst == nullptr || ASecond == nullptr) return std::nullopt;
+            if (AFirst == ASecond) return std::nullopt;
+            if (!face_has_edge(AFirst, AEdge) || !face_has_edge(ASecond, AEdge)) return std::nullopt;
+
+            const Dart d = AEdge->dart();
+            const Node start = m_cmap.template attribute<0>(d);
+            const Node finish = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+
+            std::vector<OpeningLink> chain{OpeningLink{AEdge, AFirst, ASecond, start, finish}};
+            std::set<Edge> walked{AEdge};
+
+            // Forwards past `finish`, then backwards past `start`, the 2 halves of the same walk.
+            for (int direction = 0; direction < 2; ++direction) {
+                OpeningLink link = chain.front();
+                if (direction == 1) std::swap(link.from, link.to);
+                while (true) {
+                    const auto [left_edge, left_far] = other_side(link.left, link.to, link.edge);
+                    const auto [right_edge, right_far] = other_side(link.right, link.to, link.edge);
+                    if (left_edge == nullptr || right_edge == nullptr) break;
+
+                    OpeningLink next{};
+                    int found = 0;
+                    for (const Face l : faces_through(left_edge, link.left)) {
+                        for (const Face r : faces_through(right_edge, link.right)) {
+                            if (l == r) continue;
+                            // Never the edge a cut leaves the corner by, and never the one it
+                            // arrived on: the chain carries on across the corner, and those 3 edges
+                            // are the ones it does not carry on along.
+                            const Edge shared = shared_edge_at(l, r, link.to, {link.edge, left_edge, right_edge});
+                            if (shared == nullptr || walked.count(shared) > 0) continue;
+                            // And it has to be a cut, not merely a pair of faces meeting: the 4
+                            // faces at this corner must leave the blocks around it in exactly 2
+                            // groups, which is the one thing an opening asks at every corner it
+                            // touches. Without it a plain grid offers several continuations that
+                            // share an edge and cut nothing.
+                            if (!parts_in_two(link.to, {link.left, link.right, l, r})) continue;
+                            ++found;
+                            next = OpeningLink{shared, l, r, link.to, other_end(shared, link.to)};
+                        }
+                    }
+                    // None and the chain ends here; more than one and the structure offers 2
+                    // columns from the same start, which is for the caller to choose between.
+                    if (found == 0) break;
+                    if (found > 1) return std::nullopt;
+
+                    walked.insert(next.edge);
+                    if (direction == 0) {
+                        chain.push_back(next);
+                    } else {
+                        chain.insert(chain.begin(), next);
+                    }
+                    link = next;
+                }
+            }
+
+            // The corners, one more than there are links, each reading its 2 neighbours off the link
+            // beside it — the 2 links at an interior corner agree on them, and are checked to.
+            Opening opening;
+            opening.links = chain;
+            std::vector<Node> corners;
+            corners.push_back(direction_start(chain));
+            for (const OpeningLink &link : chain) {
+                corners.push_back(other_end(link.edge, corners.back()));
+                if (corners.back() == nullptr) return std::nullopt;
+            }
+
+            for (std::size_t i = 0; i < corners.size(); ++i) {
+                const OpeningLink &link = chain[std::min(i, chain.size() - 1)];
+                const auto [left_edge, left] = other_side(link.left, corners[i], link.edge);
+                const auto [right_edge, right] = other_side(link.right, corners[i], link.edge);
+                (void)left_edge;
+                (void)right_edge;
+                if (left == nullptr || right == nullptr || left == right) return std::nullopt;
+                if (!parts_in_two(corners[i], cuts_of(chain))) return std::nullopt;
+                opening.stations.push_back(OpeningStation{corners[i], left, right});
+            }
+            return opening;
+        }
+
+        /** @brief Every face the chain is cut at.
+         * @param AChain The chain.
+         * @return Its cut faces. */
+        static std::set<Face> cuts_of(const std::vector<OpeningLink> &AChain) {
+            std::set<Face> cuts;
+            for (const OpeningLink &link : AChain) {
+                cuts.insert(link.left);
+                cuts.insert(link.right);
+            }
+            return cuts;
+        }
+
+        /** @brief Which corner the assembled chain starts at — the end of its first link that its
+         * second link does not touch.
+         * @param AChain The chain.
+         * @return That corner. */
+        Node direction_start(const std::vector<OpeningLink> &AChain) {
+            const Dart d = AChain.front().edge->dart();
+            const Node a = m_cmap.template attribute<0>(d);
+            const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+            if (AChain.size() == 1) return a;
+            const Node next_a = other_end(AChain[1].edge, a);
+            return (next_a != nullptr) ? b : a;
+        }
+
+        /**
+         * @brief Whether the cuts leave the blocks around @p ANode in exactly 2 groups.
+         *
+         * What an opening needs at every one of its corners, and the one condition a chain stopping
+         * in mid-air fails: the corner comes apart in 2 only if what is around it does, and a corner
+         * that stays one while the blocks around it are pulled apart tears the structure instead of
+         * opening it.
+         *
+         * @param ANode The corner.
+         * @param ACuts The faces that do not count as joining the blocks either side of them.
+         * @return true when there are exactly 2 groups.
+         */
+        bool parts_in_two(Node ANode, const std::set<Face> &ACuts) {
+            const std::set<Face> &cuts = ACuts;
+            std::vector<Block> around;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 0>(ANode->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<3, 0>(ANode->dart()).end();
+                 it != itend;
+                 ++it) {
+                if (const Block b = m_cmap.template attribute<3>(it); b != nullptr) around.push_back(b);
+            }
+            if (around.empty()) return false;
+
+            std::set<Block> seen;
+            int groups = 0;
+            for (const Block b : around) {
+                if (seen.count(b) > 0) continue;
+                ++groups;
+                std::vector<Block> pending{b};
+                seen.insert(b);
+                while (!pending.empty()) {
+                    const Block current = pending.back();
+                    pending.pop_back();
+                    for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(current->dart()).begin(),
+                              itend = m_cmap.template one_dart_per_incident_cell<2, 3>(current->dart()).end();
+                         it != itend;
+                         ++it) {
+                        const Face f = m_cmap.template attribute<2>(it);
+                        if (cuts.count(f) > 0 || m_cmap.template is_free<3>(it)) continue;
+                        if (!has_corner(f, ANode)) continue;
+                        const Block other = m_cmap.template attribute<3>(m_cmap.template beta<3>(it));
+                        if (other != nullptr && seen.insert(other).second) pending.push_back(other);
+                    }
+                }
+            }
+            return groups == 2;
+        }
+
+        /** @brief One corner of a chain, after the cut left it as 2. */
+        struct PartedStation {
+            /** @brief Its neighbour along the first cut face, which does not move. */
+            Node left{};
+            /** @brief Its neighbour along the second cut face, which does not move either. */
+            Node right{};
+            /** @brief The 2 copies the cut left behind, now moved apart. */
+            std::array<Node, 2> copies{};
+        };
+
+        /**
+         * @brief Moves the 2 copies of every corner of @p AOpening apart, and settles what each is
+         * still classified on.
+         *
+         * Each goes into the blocks the cut left it with, and no further: towards the middle of
+         * them, with whatever ran along the chain taken out of it, so that the corner comes apart
+         * across the column and not along it.
+         *
+         * Sending them instead straight across the hinge — perpendicular to the line joining the 2
+         * corners either side, which is what a fold would have brought them back from — is exact only
+         * when that corner sat on that line, which it does after a fold and need not otherwise. It
+         * puts both copies and both hinge corners on one line the moment it does not, and a
+         * cross-section with 3 collinear corners is no cross-section: the block built on it has no
+         * orientation, and nothing will sew to it.
+         *
+         * @param AOpening The chain, already cut.
+         * @param AThickness How far, as a fraction of the mean edge length at the corner.
+         * @param ATol The per-dimension tolerances.
+         * @return One entry per corner of the chain, in the same order.
+         */
+        std::vector<PartedStation> part_stations(const Opening &AOpening, double AThickness, const Tolerances &ATol) {
+            // Read before any of them moves, the chain's own direction at one corner being a matter
+            // of where its neighbours are.
+            std::vector<Point3d> chain;
+            chain.reserve(AOpening.stations.size());
+            for (const OpeningStation &station : AOpening.stations) {
+                chain.push_back(station.middle->info().point);
+            }
+
+            std::vector<PartedStation> parted;
+            parted.reserve(AOpening.stations.size());
+            for (std::size_t i = 0; i < AOpening.stations.size(); ++i) {
+                const OpeningStation &station = AOpening.stations[i];
+                const Point3d at = chain[i];
+                const Int key = station.middle->info().corner_key;
+                const double step = AThickness * mean_edge_length(station.middle);
+                Vector3d along(chain[(i > 0) ? i - 1 : i], chain[(i + 1 < chain.size()) ? i + 1 : i]);
+                if (along.norm() > 0.0) along = along.normalized();
+
+                // The 2 copies the cut left behind. Found by the name they share rather than by
+                // walking to them: CGAL splits a corner attribute the moment its orbit comes apart
+                // and copies `corner_key` onto the new one, which is exactly the statement that the
+                // 2 are the same corner — and no other corner of the blocking carries that name.
+                std::vector<Node> copies;
+                for (auto it = m_cmap.template attributes<0>().begin(), itend = m_cmap.template attributes<0>().end();
+                     it != itend;
+                     ++it) {
+                    if (it->info().corner_key == key) copies.push_back(it);
+                }
+                if (copies.size() != 2) {
+                    // Checked before anything was written, by `parts_in_two()`; if it is ever false
+                    // here the station is left where it is rather than half-opened.
+                    parted.push_back(PartedStation{station.left, station.right, {station.middle, station.middle}});
+                    continue;
+                }
+
+                PartedStation entry{station.left, station.right, {copies[0], copies[1]}};
+                std::array<Vector3d, 2> into{};
+                for (std::size_t k = 0; k < 2; ++k) {
+                    into[k] = Vector3d(at, centroid_of_blocks_at(entry.copies[k]));
+                    into[k] = into[k] - along * into[k].dot(along);
+                }
+                // 2 copies sent the same way are 2 corners of one block in the same place, which is
+                // no block at all — so where the blocks either side cannot tell them apart, they are
+                // simply sent opposite ways.
+                if (into[0].norm() <= 0.0 || into[1].norm() <= 0.0 ||
+                    into[0].normalized().dot(into[1].normalized()) > 0.99) {
+                    into[1] = -into[0];
+                }
+                for (std::size_t k = 0; k < 2; ++k) {
+                    if (into[k].norm() > 0.0) {
+                        entry.copies[k]->info().point = at + into[k].normalized() * step;
+                    }
+                    // A name of its own, for the reason `shrink_inside()` gives: the block about to
+                    // be inserted has both copies as its own corners, and a frame tells 2 corners of
+                    // one cell apart by that name alone.
+                    entry.copies[k]->info().corner_key = m_next_corner_key++;
+                    keep_targets_within(entry.copies[k], ATol);
+                }
+                parted.push_back(entry);
+            }
+            return parted;
+        }
+
+        /**
+         * @brief Builds one block per link of the chain, filling the gap the parting opened.
+         *
+         * Each block's 2 cross-sections are the quads `(left, copy, right, copy)` at the 2 corners
+         * the link joins, and the 2 copies of one are paired with the 2 of the other by the block
+         * they still share — never by which is nearer, 2 corners pulled apart by a fraction of an
+         * edge being no distance at all next to the length of the link.
+         *
+         * @param AParted The corners of the chain, already parted.
+         * @return The blocks inserted, one per link, in order.
+         */
+        std::vector<Block> insert_column(const std::vector<PartedStation> &AParted) {
+            std::vector<Block> column;
+            if (AParted.size() < 2) return column;
+            column.reserve(AParted.size() - 1);
+
+            for (std::size_t i = 0; i + 1 < AParted.size(); ++i) {
+                const PartedStation &here = AParted[i];
+                const PartedStation &there = AParted[i + 1];
+
+                // Which copy of `there` is on the same side as `here.copies[0]`.
+                std::size_t aligned = 2;
+                for (std::size_t k = 0; k < 2; ++k) {
+                    if (share_a_block(here.copies[0], there.copies[k])) aligned = k;
+                }
+                if (aligned > 1) continue;
+
+                const std::array<Node, 4> base{here.left, here.copies[0], here.right, here.copies[1]};
+                const std::array<Node, 4> top{
+                    there.left, there.copies[aligned], there.right, there.copies[1 - aligned]};
+
+                // Measured on the corner of the hexahedron rather than on the normal of its base:
+                // a cross-section opened out of a fold that was never square can be a quad no
+                // Newell normal describes, while the 3 edges meeting at a corner always say which
+                // way round it is.
+                const Vector3d u(base[0]->info().point, base[1]->info().point);
+                const Vector3d v(base[0]->info().point, base[3]->info().point);
+                const Vector3d w(base[0]->info().point, top[0]->info().point);
+                const bool flip = u.cross(v).dot(w) < 0.0;
+
+                std::array<Point3d, 8> corners{};
+                std::array<const std::vector<std::pair<GroupDim, Int>> *, 8> targets{};
+                for (std::size_t k = 0; k < 4; ++k) {
+                    const std::size_t src = flip ? (4 - k) % 4 : k;
+                    corners[k] = base[src]->info().point;
+                    targets[k] = &base[src]->info().geom_targets;
+                    corners[k + 4] = top[src]->info().point;
+                    targets[k + 4] = &top[src]->info().geom_targets;
+                }
+
+                const Block b = create_hex_block(corners);
+                for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<0, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    const Node n = m_cmap.template attribute<0>(it);
+                    for (std::size_t k = 0; k < 8; ++k) {
+                        if (n->info().point == corners[k]) {
+                            n->info().geom_targets = *targets[k];
+                            break;
+                        }
+                    }
+                }
+                column.push_back(b);
+            }
+            return column;
+        }
+
+        /** @brief Whether 2 corners are corners of one and the same block.
+         * @param AA One corner.
+         * @param AB The other.
+         * @return true when some block has both. */
+        bool share_a_block(Node AA, Node AB) {
+            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 0>(AA->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<3, 0>(AA->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Block b = m_cmap.template attribute<3>(it);
+                if (b != nullptr && has_corner(b, AB)) return true;
+            }
+            return false;
+        }
+
+        /** @brief The mean of the centroids of the blocks @p ANode belongs to.
+         * @param ANode The corner.
+         * @return That point. */
+        Point3d centroid_of_blocks_at(Node ANode) {
+            double x = 0.0;
+            double y = 0.0;
+            double z = 0.0;
+            int count = 0;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<3, 0>(ANode->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<3, 0>(ANode->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Point3d c = centroid_of(m_cmap.template attribute<3>(it));
+                x += c.x();
+                y += c.y();
+                z += c.z();
+                ++count;
+            }
+            if (count == 0) return ANode->info().point;
+            return Point3d(x / count, y / count, z / count);
         }
 
         // ---------------------------------------------------------------------

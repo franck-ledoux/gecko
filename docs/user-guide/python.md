@@ -174,6 +174,28 @@ hinge = blocking.face_corners(face)[0]
 # (folding would leave it degenerate).
 blocking.collapse_chord(face, hinge, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
+# And the inverse: opening a chord puts a column back. The 2 named faces, from edge_faces(), are
+# where the fan of blocks around the edge is cut — the fan comes apart in 2 arcs, the edge comes
+# apart in 2, and a block is inserted in the gap. Where the edge is on the boundary of the blocking
+# its fan is already open at both ends, so one of the 2 is a boundary face and cutting at it costs
+# nothing. edge_corners() and face_corners() are how a caller holding positions finds the cells it
+# means.
+edge = blocking.edge_ids()[0]
+fan = blocking.edge_faces(edge)
+
+# How far the column runs is not said: the walk carries the 2 cuts from one edge to the next and
+# stops when nothing carries them further. Returns False, changing nothing, when the 2 faces are the
+# same or do not both carry the edge, when the chain runs back into itself, when it stops somewhere
+# the cuts do not leave the blocks around a corner in exactly 2 groups, or when the walk finds more
+# than one way to carry on — the structure offering several columns from that start, which is the
+# caller's to choose between rather than the operation's to guess.
+blocking.open_chord(edge, fan[0], fan[1], thickness=0.25, tol_vertex=1e-6, tol_curve=1e-3,
+                    tol_surface=1e-2)
+
+# The 2 are not inverses cell for cell, and cannot be: a fold takes with it the corners that belonged
+# only to the column it closed, so an opening builds a column on the corners it now finds. It puts a
+# column back, not that column.
+
 # Undo. Every operation that changes the blocking snapshots it first, so taking an edit back is
 # putting that snapshot in place — not a stack of inverse operations, because these operations have
 # no inverses (collapsing the layer a cut just made does not restore the block). Ids survive an undo,

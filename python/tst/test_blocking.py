@@ -1261,3 +1261,87 @@ def test_collapse_chord_is_undone_in_one_step(geom_model_path):
     blocking.undo()
     assert blocking.nb_cells(3) == 8
     assert blocking.is_valid_topology()
+
+def _edge_between(blocking, a, b):
+    """The edge joining the 2 given positions."""
+    for edge in blocking.edge_ids():
+        ends = [blocking.node_position(n) for n in blocking.edge_corners(edge)]
+        if len(ends) != 2:
+            continue
+        near = all(abs(ends[0][k] - a[k]) < 1e-9 for k in range(3)) and \
+               all(abs(ends[1][k] - b[k]) < 1e-9 for k in range(3))
+        far = all(abs(ends[0][k] - b[k]) < 1e-9 for k in range(3)) and \
+              all(abs(ends[1][k] - a[k]) < 1e-9 for k in range(3))
+        if near or far:
+            return edge
+    raise AssertionError("no edge between %r and %r" % (a, b))
+
+
+def test_edge_faces_reports_the_fan_round_an_edge(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+
+    # An edge running up the middle of the grid has 4 faces round it; one on its outside has 2.
+    middle = _edge_between(blocking, (1, 1, 0), (1, 1, 1))
+    assert len(blocking.edge_faces(middle)) == 4
+    corner = _edge_between(blocking, (0, 0, 0), (0, 0, 1))
+    assert len(blocking.edge_faces(corner)) == 2
+
+
+def test_open_chord_puts_back_a_column_a_fold_took_out(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+
+    face = _face_at(blocking, [(0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)])
+    hinge = next(n for n in blocking.face_corners(face)
+                 if blocking.node_position(n) == pytest.approx([0.0, 0.0, 0.0]))
+    assert blocking.collapse_chord(face, hinge, 1e-9)
+    assert blocking.nb_cells(3) == 6
+
+    # What the fold left: a chain of corners at the middle of each cross-section it closed. One of
+    # the 2 faces it is cut at is a boundary face, the fold there having brought 2 of those together.
+    chain = _edge_between(blocking, (0, 0.5, 0.5), (1, 0.5, 0.5))
+    inner = _face_at(blocking, [(0, 1, 1), (0, 0.5, 0.5), (1, 1, 1), (1, 0.5, 0.5)])
+    outer = _face_at(blocking, [(0, 0.5, 0.5), (1, 0.5, 0.5), (1, 2, 0), (0, 2, 0)])
+
+    assert blocking.open_chord(chain, inner, outer, 0.25, 1e-9)
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 8
+    assert min(blocking.block_volumes(2)) > 0.0
+
+
+def test_open_chord_reports_a_start_that_offers_more_than_one_column(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+    before = blocking.nb_cells(3)
+
+    # An edge up the middle of a plain grid: cutting at 2 opposite faces splits its fan cleanly, but
+    # at the far end the walk finds several ways to carry on and none of them is the caller's.
+    middle = _edge_between(blocking, (1, 1, 0), (1, 1, 1))
+    near = _face_at(blocking, [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)])
+    far = _face_at(blocking, [(1, 1, 0), (1, 2, 0), (1, 2, 1), (1, 1, 1)])
+
+    assert not blocking.open_chord(middle, near, far, 0.25, 1e-9)
+    assert blocking.nb_cells(3) == before
+
+
+def test_open_chord_refuses_what_does_not_name_a_cut(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    _grid_2x2x2(blocking)
+    before = blocking.nb_cells(3)
+
+    edge = _edge_between(blocking, (1, 1, 0), (1, 1, 1))
+    near = _face_at(blocking, [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)])
+    elsewhere = _face_at(blocking, [(0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)])
+
+    assert not blocking.open_chord(edge, near, near, 0.25, 1e-9)
+    assert not blocking.open_chord(edge, near, elsewhere, 0.25, 1e-9)
+    assert not blocking.open_chord(edge, near, elsewhere, 0.0, 1e-9)
+    assert blocking.nb_cells(3) == before
+
+    with pytest.raises(IndexError):
+        blocking.open_chord(max(blocking.edge_ids()) + 1, near, elsewhere, 0.25, 1e-9)

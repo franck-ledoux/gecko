@@ -208,6 +208,48 @@ namespace {
         }
         ABlocking.build_connectivity();
     }
+
+    /** @brief The edge joining the 2 given positions. */
+    Blocking<FacetedGeometry>::Edge edge_between(Blocking<FacetedGeometry> &ABlocking,
+                                                 const std::array<double, 3> &AA,
+                                                 const std::array<double, 3> &AB) {
+        auto &map = ABlocking.cmap();
+        const auto same = [](const Point3d &AP, const std::array<double, 3> &AQ) {
+            return std::abs(AP.x() - AQ[0]) < 1e-9 && std::abs(AP.y() - AQ[1]) < 1e-9 &&
+                   std::abs(AP.z() - AQ[2]) < 1e-9;
+        };
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const Point3d &p = map.attribute<0>(it->dart())->info().point;
+            const Point3d &q = map.attribute<0>(map.beta<1>(it->dart()))->info().point;
+            if ((same(p, AA) && same(q, AB)) || (same(p, AB) && same(q, AA))) return it;
+        }
+        return nullptr;
+    }
+
+    /** @brief Whether 2 faces with no block behind them sit at the very same 4 corners — a crack,
+     * where the structure should have been sewn back together and was not. */
+    bool has_a_crack(Blocking<FacetedGeometry> &ABlocking) {
+        auto &map = ABlocking.cmap();
+        std::vector<std::vector<std::array<double, 3>>> free_faces;
+        for (auto it = map.attributes<2>().begin(), end = map.attributes<2>().end(); it != end; ++it) {
+            if (map.attribute<3>(it->dart()) == nullptr || !map.is_free<3>(it->dart())) continue;
+            std::vector<std::array<double, 3>> corners;
+            auto walk = it->dart();
+            for (int c = 0; c < 4; ++c) {
+                const Point3d &q = map.attribute<0>(walk)->info().point;
+                corners.push_back({q.x(), q.y(), q.z()});
+                walk = map.beta<1>(walk);
+            }
+            std::ranges::sort(corners);
+            free_faces.push_back(corners);
+        }
+        for (std::size_t i = 0; i < free_faces.size(); ++i) {
+            for (std::size_t j = i + 1; j < free_faces.size(); ++j) {
+                if (free_faces[i] == free_faces[j]) return true;
+            }
+        }
+        return false;
+    }
 } // namespace
 
 TEST_CASE("pillowing_a_lone_block_wraps_it_in_a_shell_of_6", "[BlockTestSuite]") {
@@ -535,4 +577,92 @@ TEST_CASE("collapsing_a_chord_refuses_to_merge_2_different_model_vertices", "[Bl
     }
     REQUIRE(blocking.nb_cells<3>() == 1);
     REQUIRE(blocking.nb_cells<0>() == 8);
+}
+
+TEST_CASE("a_chord_folded_shut_opens_back_into_a_column", "[BlockTestSuite]") {
+    // The round trip, and the reason the 2 operations are one issue: folding a chord takes its
+    // column out, and opening the chain it left puts a column back. The structure that comes back is
+    // the one that went in — not corner for corner, the opened corners being pulled apart by the
+    // thickness asked for rather than back to where they were, but block for block and face for
+    // face.
+    const FacetedGeometry geom = make_far_away_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    build_grid_2x2x2(blocking);
+    REQUIRE(blocking.nb_cells<3>() == 8);
+    const auto faces_before = blocking.nb_cells<2>();
+
+    const auto start = face_at(blocking, {{{0, 0, 0}}, {{0, 1, 0}}, {{0, 1, 1}}, {{0, 0, 1}}});
+    REQUIRE(blocking.collapse_chord(start, corner_at(blocking, start, {0, 0, 0}), 1e-9));
+    REQUIRE(blocking.nb_cells<3>() == 6);
+
+    // What the fold left: a chain of corners at the middle of each cross-section it closed, with the
+    // 2 faces it merged running either side of it. One of them is on the boundary, the fold there
+    // having brought 2 boundary faces together.
+    const auto chain = edge_between(blocking, {0, 0.5, 0.5}, {1, 0.5, 0.5});
+    REQUIRE(chain != nullptr);
+    const auto inner = face_at(blocking, {{{0, 1, 1}}, {{0, 0.5, 0.5}}, {{1, 1, 1}}, {{1, 0.5, 0.5}}});
+    // The 2 faces the fold brought together were both on the boundary and went with the blocks that
+    // held them, so the other side of the fan is the boundary face of the block beside it.
+    const auto outer = face_at(blocking, {{{0, 0.5, 0.5}}, {{1, 0.5, 0.5}}, {{1, 2, 0}}, {{0, 2, 0}}});
+    REQUIRE(inner != nullptr);
+    REQUIRE(outer != nullptr);
+
+    REQUIRE(blocking.open_chord(chain, inner, outer, 0.25, 1e-9));
+    REQUIRE(blocking.is_valid_topology());
+    REQUIRE(blocking.nb_cells<3>() == 8);
+    REQUIRE(all_positive(blocking));
+
+    // Sewn back together everywhere it should be: no 2 faces left facing each other across a gap.
+    // That is the assertion that matters here, an insertion being only as good as what it glues to.
+    REQUIRE_FALSE(has_a_crack(blocking));
+
+    // Not the grid that went in, though, and the operations are not inverses in that sense: the fold
+    // took its column's own corners with it — the 2 running along the hinge belonged to no other
+    // block — so the opening builds a column on the corners it now finds instead. It puts a column
+    // back, not that column.
+    REQUIRE(blocking.nb_cells<2>() < faces_before);
+}
+
+TEST_CASE("opening_a_chord_reports_a_start_that_offers_more_than_one_column", "[BlockTestSuite]") {
+    // An edge in the middle of a plain grid has 4 faces round it and 4 blocks between them, and
+    // cutting at 2 opposite faces splits that fan cleanly in 2 — but at the far end of the edge the
+    // walk finds 3 different ways to carry on, one per direction the column could take from there.
+    // There is no single column to insert, and picking one would be picking for the caller.
+    const FacetedGeometry geom = make_far_away_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    build_grid_2x2x2(blocking);
+    const auto blocks_before = blocking.nb_cells<3>();
+    const auto nodes_before = blocking.nb_cells<0>();
+
+    const auto middle = edge_between(blocking, {1, 1, 0}, {1, 1, 1});
+    REQUIRE(middle != nullptr);
+    const auto near = face_at(blocking, {{{1, 0, 0}}, {{1, 1, 0}}, {{1, 1, 1}}, {{1, 0, 1}}});
+    const auto far = face_at(blocking, {{{1, 1, 0}}, {{1, 2, 0}}, {{1, 2, 1}}, {{1, 1, 1}}});
+    REQUIRE(near != nullptr);
+    REQUIRE(far != nullptr);
+
+    REQUIRE_FALSE(blocking.open_chord(middle, near, far, 0.25, 1e-9));
+    REQUIRE(blocking.nb_cells<3>() == blocks_before);
+    REQUIRE(blocking.nb_cells<0>() == nodes_before);
+}
+
+TEST_CASE("opening_a_chord_refuses_what_does_not_name_a_cut", "[BlockTestSuite]") {
+    const FacetedGeometry geom = make_far_away_geom_model();
+    Blocking<FacetedGeometry> blocking(geom, 1);
+    build_grid_2x2x2(blocking);
+    const auto blocks_before = blocking.nb_cells<3>();
+
+    const auto edge = edge_between(blocking, {1, 1, 0}, {1, 1, 1});
+    const auto near = face_at(blocking, {{{1, 0, 0}}, {{1, 1, 0}}, {{1, 1, 1}}, {{1, 0, 1}}});
+    const auto elsewhere = face_at(blocking, {{{0, 0, 0}}, {{0, 1, 0}}, {{0, 1, 1}}, {{0, 0, 1}}});
+    REQUIRE(edge != nullptr);
+    REQUIRE(near != nullptr);
+    REQUIRE(elsewhere != nullptr);
+
+    SECTION("a thickness outside (0,1)") { REQUIRE_FALSE(blocking.open_chord(edge, near, elsewhere, 0.0, 1e-9)); }
+    SECTION("the same face twice") { REQUIRE_FALSE(blocking.open_chord(edge, near, near, 0.25, 1e-9)); }
+    SECTION("a face that does not carry the edge") {
+        REQUIRE_FALSE(blocking.open_chord(edge, near, elsewhere, 0.25, 1e-9));
+    }
+    REQUIRE(blocking.nb_cells<3>() == blocks_before);
 }

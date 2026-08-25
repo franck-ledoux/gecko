@@ -222,6 +222,29 @@ namespace gecko::app {
          * @throw std::out_of_range if no face carries that id.
          */
         [[nodiscard]] std::vector<int> face_corners(int face_id);
+
+        /**
+         * @brief The 2 corners of one edge.
+         *
+         * The other half of naming things by where they are: face_corners() gives a face's, and this
+         * an edge's, so that a caller holding positions can find the cell it means.
+         *
+         * @param edge_id An edge id, as edge_ids() reports them.
+         * @return Its 2 node ids.
+         * @throw std::out_of_range if no edge carries that id.
+         */
+        [[nodiscard]] std::vector<int> edge_corners(int edge_id);
+
+        /**
+         * @brief The faces through one edge — its fan, in no particular order.
+         *
+         * What open_chord() is told where to cut: 2 of these, and the fan comes apart in 2 arcs.
+         *
+         * @param edge_id An edge id, as edge_ids() reports them.
+         * @return The ids of the faces carrying it.
+         * @throw std::out_of_range if no edge carries that id.
+         */
+        [[nodiscard]] std::vector<int> edge_faces(int edge_id);
         /**
          * @brief Gets the position of a corner node.
          * @param node_id A node id, from node_ids().
@@ -528,6 +551,40 @@ namespace gecko::app {
                             double tol_vertex,
                             double tol_curve = -1.0,
                             double tol_surface = -1.0);
+
+        /**
+         * @brief Opens the chord along one edge into a column of blocks — the inverse of
+         * collapse_chord() (see `Blocking::open_chord()`).
+         *
+         * The 2 named faces are where the fan of blocks around the edge is cut: cutting there leaves
+         * it in 2 arcs, the edge comes apart into 2, and a block is inserted in the gap. Where the
+         * edge is on the boundary its fan is already open at both ends, so one of the 2 is a boundary
+         * face and cutting at it costs nothing.
+         *
+         * How far the column runs is not said: the walk carries the 2 cuts on from one edge to the
+         * next and stops when nothing carries them further. Finding 2 ways to carry on is reported
+         * rather than guessed at — the structure offers 2 different columns from that start, and
+         * choosing is the caller's.
+         *
+         * @param edge_id The edge to open, as edge_ids() reports them.
+         * @param first_face_id One of the 2 faces its fan is cut at, from edge_faces().
+         * @param second_face_id The other.
+         * @param thickness How far the 2 copies of each corner move apart, as a fraction of the mean
+         *        length of the edges at it. In `(0,1)`.
+         * @param tol_vertex Tolerance for a moved corner staying on a vertex, as classify() defines it.
+         * @param tol_curve Tolerance for staying on a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for staying on a surface. Defaults to the curve one.
+         * @return false, changing nothing, when the chord cannot be opened — see
+         *         `Blocking::open_chord()` for the cases.
+         * @throw std::out_of_range if any of the 3 ids names nothing in this blocking.
+         */
+        bool open_chord(int edge_id,
+                        int first_face_id,
+                        int second_face_id,
+                        double thickness,
+                        double tol_vertex,
+                        double tol_curve = -1.0,
+                        double tol_surface = -1.0);
 
         /**
          * @brief Whether there is an edit to take back. @return true if undo() would do something.

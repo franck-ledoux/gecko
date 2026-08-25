@@ -326,6 +326,25 @@ namespace gecko::app {
         return true;
     }
 
+    bool BlockingFacade::open_chord(int edge_id,
+                                    int first_face_id,
+                                    int second_face_id,
+                                    double thickness,
+                                    double tol_vertex,
+                                    double tol_curve,
+                                    double tol_surface) {
+        const auto edge = cell_or_throw<1>(m_impl, edge_id, "edge");
+        const auto first = cell_or_throw<2>(m_impl, first_face_id, "face");
+        const auto second = cell_or_throw<2>(m_impl, second_face_id, "face");
+
+        Checkpoint checkpoint(*this);
+        if (!m_impl.blocking.open_chord(edge, first, second, thickness, tol_vertex, tol_curve, tol_surface)) {
+            checkpoint.discard();
+            return false;
+        }
+        return true;
+    }
+
     namespace {
         /** @brief The node carrying @p node_id, straight from the map.
          *
@@ -403,6 +422,27 @@ namespace gecko::app {
             ids.push_back(static_cast<int>(node->info().id));
         }
         return ids;
+    }
+
+    std::vector<int> BlockingFacade::edge_faces(int edge_id) {
+        const auto edge = cell_or_throw<1>(m_impl, edge_id, "edge");
+        auto &map = m_impl.blocking.cmap();
+        std::vector<int> ids;
+        for (auto it = map.one_dart_per_incident_cell<2, 1>(edge->dart()).begin(),
+                  itend = map.one_dart_per_incident_cell<2, 1>(edge->dart()).end();
+             it != itend;
+             ++it) {
+            ids.push_back(static_cast<int>(map.attribute<2>(it)->info().id));
+        }
+        return ids;
+    }
+
+    std::vector<int> BlockingFacade::edge_corners(int edge_id) {
+        const auto edge = cell_or_throw<1>(m_impl, edge_id, "edge");
+        auto &map = m_impl.blocking.cmap();
+        const auto dart = edge->dart();
+        return {static_cast<int>(map.attribute<0>(dart)->info().id),
+                static_cast<int>(map.attribute<0>(map.beta<1>(dart))->info().id)};
     }
 
     std::vector<int> BlockingFacade::node_ids() const {
