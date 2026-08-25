@@ -1028,3 +1028,121 @@ def test_write_vtk_carries_the_classified_boundary_and_the_block_ids(tmp_path, g
     unnamed = {int(b) for t, b in zip(types, block_ids) if t != "12"}
     assert named == set(blocking.block_ids())
     assert unnamed <= {-1}
+
+def _hex_at(x0, x1):
+    """The 8 corners of the box [x0,x1] x [0,1] x [0,1], in HEX8 order."""
+    return [
+        (x0, 0.0, 0.0), (x1, 0.0, 0.0), (x1, 1.0, 0.0), (x0, 1.0, 0.0),
+        (x0, 0.0, 1.0), (x1, 0.0, 1.0), (x1, 1.0, 1.0), (x0, 1.0, 1.0),
+    ]
+
+
+def test_block_faces_and_face_blocks_name_the_2_sides_of_a_nappe(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    left = blocking.create_hex_block(_hex_at(0.0, 1.0))
+    right = blocking.create_hex_block(_hex_at(1.0, 2.0))
+    blocking.build_connectivity()
+
+    faces = blocking.block_faces(left)
+    assert len(faces) == 6
+    assert set(faces) <= set(blocking.face_ids())
+
+    # Exactly one of them is shared, and it is the one naming both blocks.
+    shared = [f for f in faces if len(blocking.face_blocks(f)) == 2]
+    assert len(shared) == 1
+    assert sorted(blocking.face_blocks(shared[0])) == sorted([left, right])
+    for f in faces:
+        if f != shared[0]:
+            assert blocking.face_blocks(f) == [left]
+
+    # A standalone quad block bounds no block at all.
+    quad = blocking.create_quad_block([(0.0, 0.0, 5.0), (1.0, 0.0, 5.0), (1.0, 1.0, 5.0), (0.0, 1.0, 5.0)])
+    assert blocking.face_blocks(quad) == []
+
+
+def test_pillow_wraps_a_block_in_a_shell_of_6(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+
+    # The smallest closed nappe there is: the block's own 6 faces.
+    assert blocking.pillow(blocking.block_faces(block), block, 0.25, 1e-9)
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 7
+    # 8 corners of the shrunk block, and the 8 of the original the shell's outside keeps.
+    assert blocking.nb_cells(0) == 16
+    # The shell fills exactly what the shrink emptied, and every block came out the right way round.
+    volumes = blocking.block_volumes(2)
+    assert min(volumes) > 0.0
+    assert sum(volumes) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_pillow_inserts_a_layer_between_2_blocks(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    left = blocking.create_hex_block(_hex_at(0.0, 1.0))
+    blocking.create_hex_block(_hex_at(1.0, 2.0))
+    blocking.build_connectivity()
+
+    shared = [f for f in blocking.block_faces(left) if len(blocking.face_blocks(f)) == 2]
+    assert blocking.pillow(shared, left, 0.25, 1e-9)
+
+    assert blocking.is_valid_topology()
+    assert blocking.nb_cells(3) == 3
+    # Straight in and only on the named side: the layer is exactly a quarter of an edge thick, taken
+    # out of the left block alone, and the right one has not moved.
+    assert sorted(blocking.block_volumes(2)) == pytest.approx([0.25, 0.75, 1.0], abs=1e-9)
+
+
+def test_pillow_refuses_what_is_not_a_nappe(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+    faces = blocking.block_faces(block)
+    before = (blocking.nb_cells(3), blocking.nb_cells(0))
+
+    assert not blocking.pillow(faces, block, 0.0, 1e-9)
+    assert not blocking.pillow(faces, block, 1.0, 1e-9)
+    assert not blocking.pillow([], block, 0.25, 1e-9)
+    assert not blocking.pillow([faces[0], faces[0]], block, 0.25, 1e-9)
+    assert (blocking.nb_cells(3), blocking.nb_cells(0)) == before
+
+
+def test_pillow_rejects_unknown_ids(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+    faces = blocking.block_faces(block)
+
+    with pytest.raises(IndexError):
+        blocking.pillow([max(blocking.face_ids()) + 1], block, 0.25, 1e-9)
+    with pytest.raises(IndexError):
+        blocking.pillow(faces, max(blocking.block_ids()) + 1, 0.25, 1e-9)
+
+
+def test_pillow_is_undone_in_one_step(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+
+    assert blocking.pillow(blocking.block_faces(block), block, 0.25, 1e-9)
+    assert blocking.nb_cells(3) == 7
+    blocking.undo()
+    assert blocking.nb_cells(3) == 1
+    assert blocking.nb_cells(0) == 8
+    blocking.redo()
+    assert blocking.nb_cells(3) == 7
+
+
+def test_pillow_that_refuses_leaves_nothing_to_undo(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    block = blocking.create_hex_block(_UNIT_HEX)
+    faces = blocking.block_faces(block)
+
+    assert not blocking.pillow([faces[0], faces[0]], block, 0.25, 1e-9)
+    # The refused operation dropped its own snapshot rather than leaving one behind: the one edit
+    # left to take back is the block's creation.
+    blocking.undo()
+    assert blocking.nb_cells(3) == 0

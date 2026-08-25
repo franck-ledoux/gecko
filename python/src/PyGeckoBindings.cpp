@@ -290,7 +290,35 @@ namespace gecko::app {
                  "the blocking empty — so an unclassified grid can be taken apart one sheet at a time. Returns "
                  "False, changing nothing, when one of the sheet's edges joins 2 corners on 2 *different* model "
                  "vertices (merging them would leave one of those vertices with no corner on it), or when the sheet "
-                 "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.");
+                 "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.")
+            .def("block_faces",
+                 &BlockingFacade::block_faces,
+                 py::arg("block_id"),
+                 "The 6 face ids bounding this block, in no particular order — what a nappe closed around a block "
+                 "is named with.")
+            .def("face_blocks",
+                 &BlockingFacade::face_blocks,
+                 py::arg("face_id"),
+                 "The ids of the blocks this face bounds: 2 of them, 1 where the face is on the boundary of the "
+                 "blocking, and none at all for a standalone quad block.")
+            .def("pillow",
+                 &BlockingFacade::pillow,
+                 py::arg("face_ids"),
+                 py::arg("inside_block_id"),
+                 py::arg("thickness"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Inserts a layer of blocks along ``face_ids`` — a *nappe*, a sheet of block faces cutting the "
+                 "blocking in two, either closed around a set of blocks or running clean through the structure and "
+                 "out on its boundary. ``inside_block_id`` names the side that shrinks; the other side does not "
+                 "move at all, which is what keeps a structure fitted to a model on the model when the nappe lies "
+                 "on its boundary. ``thickness`` is a fraction, in (0,1), of the mean edge length at each corner "
+                 "that moves. A corner the nappe cuts through becomes 2: the outside one keeps its classification, "
+                 "the inside one keeps only what it is still on after moving — so a blocking nobody classified "
+                 "stays unclassified. Returns False, changing nothing, when what was given is not a nappe: a face "
+                 "named twice, a standalone quad block, a nappe that does not separate the named side from the "
+                 "rest, or one that is not manifold along its own edges.");
     }
 
 } // namespace gecko::app

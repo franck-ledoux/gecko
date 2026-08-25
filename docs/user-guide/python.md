@@ -133,6 +133,25 @@ blocking.cut_sheet(target, 0.5)                 # False, changing nothing, if th
 # one of those vertices with no corner on it — or when the sheet cannot be collapsed at all.
 blocking.delete_sheet(target, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
+# Pillowing: insert a layer of blocks along a *nappe* — a sheet of block faces cutting the blocking
+# in two. It may close back on itself, isolating a set of blocks from everything around them, or run
+# clean through the structure and out on its boundary. block_faces() and face_blocks() are what a
+# nappe is named with: the faces of a block, and the 1 or 2 blocks either side of a face.
+block = blocking.block_ids()[0]
+nappe = blocking.block_faces(block)              # its 6 faces: the smallest closed nappe there is
+sides = blocking.face_blocks(nappe[0])           # 2 blocks, or 1 where the face is on the boundary
+
+# The second argument names the side that shrinks; the other one does not move at all. It has to be
+# named — a nappe through the middle of a structure has 2 block sides and nothing tells them apart —
+# and where the nappe lies on the boundary of the blocking, the side that stays *is* the model's own
+# boundary. The thickness is a fraction of the mean edge length at each corner that moves, so the
+# layer follows the size of the blocks it is inserted between. A corner the nappe cuts through
+# becomes 2: the outside one keeps its classification, the inside one keeps only what it is still on
+# after moving, so a blocking nobody classified stays unclassified. Returns False, changing nothing,
+# when what was given is not a nappe: a face named twice, a standalone quad block, a nappe that does
+# not separate the named side from the rest, or one that is not manifold along its own edges.
+blocking.pillow(nappe, block, thickness=0.25, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
 # Undo. Every operation that changes the blocking snapshots it first, so taking an edit back is
 # putting that snapshot in place — not a stack of inverse operations, because these operations have
 # no inverses (collapsing the layer a cut just made does not restore the block). Ids survive an undo,

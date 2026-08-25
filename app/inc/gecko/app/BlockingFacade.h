@@ -183,6 +183,32 @@ namespace gecko::app {
         /** @brief Every block's id, in the order block_volumes() and mesh_hex_owners() index.
          * @return One id per block. @see edge_ids() */
         [[nodiscard]] std::vector<int> block_ids() const;
+
+        /**
+         * @brief The 6 faces bounding one block.
+         *
+         * What a nappe is named with: pillow() takes a set of face ids, and the faces of a block are
+         * where any nappe closed around something starts from.
+         *
+         * @param block_id A block id, as block_ids() reports them.
+         * @return Its 6 face ids, in no particular order.
+         * @throw std::out_of_range if no block carries that id.
+         */
+        [[nodiscard]] std::vector<int> block_faces(int block_id);
+
+        /**
+         * @brief The blocks one face bounds — 2 of them, or 1 where the face is on the boundary of
+         * the blocking.
+         *
+         * The other half of naming a nappe: which side of a face is which, so that a caller can say
+         * which of the 2 pillow() should shrink.
+         *
+         * @param face_id A face id, as face_ids() reports them.
+         * @return The ids of the blocks it bounds — empty for a standalone quad block, which bounds
+         *         none.
+         * @throw std::out_of_range if no face carries that id.
+         */
+        [[nodiscard]] std::vector<int> face_blocks(int face_id);
         /**
          * @brief Gets the position of a corner node.
          * @param node_id A node id, from node_ids().
@@ -421,6 +447,41 @@ namespace gecko::app {
          * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
          */
         bool delete_sheet(int edge_id, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
+
+        /**
+         * @brief Inserts a layer of blocks along a nappe of block faces — the pillowing operation
+         * (see `Blocking::pillow()`).
+         *
+         * The nappe is a sheet of faces that cuts the blocking in two: closed around a set of blocks
+         * to isolate them, or running clean through the structure and out on its boundary. Which of
+         * the 2 sides shrinks has to be said, @p inside_block_id saying it — the layer is inserted
+         * into the gap that side leaves, and the other side does not move at all. Where the nappe
+         * lies on the boundary of the blocking, that other side is the model's own boundary, and
+         * this is what keeps the structure on the geometry it was classified onto.
+         *
+         * A corner the nappe cuts through becomes 2. The outside one keeps its classification; the
+         * inside one keeps only what it is still on after moving, and comes back unclassified when
+         * it has been pushed off everything. Nothing is classified by proximity here, so a blocking
+         * nobody classified stays that way.
+         *
+         * @param face_ids The nappe, each face named once.
+         * @param inside_block_id A block on the side that shrinks.
+         * @param thickness How far that side is pulled back, as a fraction of the mean length of the
+         *        edges at each corner that moves. In `(0,1)`.
+         * @param tol_vertex Tolerance for a moved corner staying on a vertex, as classify() defines it.
+         * @param tol_curve Tolerance for staying on a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for staying on a surface. Defaults to the curve one.
+         * @return false, changing nothing, when what was given is not a nappe — see
+         *         `Blocking::pillow()` for the cases.
+         * @throw std::out_of_range if one of @p face_ids is not a face of this blocking, or
+         *        @p inside_block_id not a block of it.
+         */
+        bool pillow(const std::vector<int> &face_ids,
+                    int inside_block_id,
+                    double thickness,
+                    double tol_vertex,
+                    double tol_curve = -1.0,
+                    double tol_surface = -1.0);
 
         /**
          * @brief Whether there is an edit to take back. @return true if undo() would do something.

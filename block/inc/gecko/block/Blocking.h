@@ -1087,6 +1087,108 @@ namespace gecko {
         }
 
         /**
+         * @brief Inserts a layer of blocks along @p AFaces — the *pillowing* operation.
+         *
+         * @p AFaces is a **nappe**: a sheet of block faces that cuts the blocking in two. It may
+         * close back on itself, isolating a set of blocks from everything around them, or run clean
+         * through the structure and come out on its boundary. What makes it a nappe is not its shape
+         * but that it *separates*: once its faces stop joining blocks, no path of shared faces is
+         * left from one side to the other. That is checked, not assumed, and it is what the whole
+         * operation rests on — the 2 sides are pulled apart along the nappe, and a layer of blocks,
+         * one per face of it, is inserted in the gap.
+         *
+         * **Which side is the inside.** @p AInside names it, and it has to be named: a nappe running
+         * through the middle of a structure has 2 block sides and nothing distinguishes them. The
+         * inside is the side that shrinks; the outside stays exactly where it is. That asymmetry is
+         * not a shortcut — where the nappe lies on the boundary of the blocking, the outside *is* the
+         * model's own boundary, and moving it would push the structure off the geometry it was
+         * classified onto. Pillowing the whole boundary with the interior as the inside is the
+         * boundary-layer case, and it falls out of the same rule.
+         *
+         * **What happens to classification.** The corners the nappe cuts through become 2 corners.
+         * The outside copy keeps everything it had. The inside copy keeps only what it is *still* on
+         * after moving — an entity it has drifted further from than the tolerance for that dimension
+         * is dropped — and is then projected back onto the nearest of what is left. So a corner
+         * pushed off a model surface into the interior comes back unclassified, one sliding along a
+         * surface it stays within tolerance of stays on it, and a corner of an unclassified blocking
+         * stays unclassified. Nothing here classifies by proximity: pillowing never puts a corner on
+         * an entity it was not already on, for the reason `refit_around()` gives.
+         *
+         * The layer's own cells take their classification from their corners, as every cell above
+         * dimension 0 always does.
+         *
+         * @param AFaces The nappe: the faces to insert the layer along, each named once.
+         * @param AInside A block on the side that shrinks.
+         * @param AThickness How far the inside is pulled back, as a fraction of the mean length of
+         *        the edges at each corner it moves — so the layer is thinner where the blocks are
+         *        smaller. In `(0,1)`.
+         * @param ATolVertex Tolerance for staying on a vertex, as `classify()` defines it.
+         * @param ATolCurve Tolerance for staying on a curve. Defaults to @p ATolVertex.
+         * @param ATolSurface Tolerance for staying on a surface. Defaults to the curve one.
+         * @return false, changing nothing at all, when @p AThickness is out of range, when a face is
+         *         named twice, when one of them is a standalone quad block (2D pillowing is not this
+         *         operation), when the nappe does not separate @p AInside's side from the rest, when
+         *         a face of it has neither or both of its sides on that side, or when it is not
+         *         manifold along its own edges — an edge carrying 3 of its faces, or carrying 1
+         *         without being on the boundary of the blocking, means the nappe folds or stops in
+         *         mid-air, and no layer follows from it.
+         */
+        bool pillow(const std::vector<Face> &AFaces,
+                    Block AInside,
+                    double AThickness,
+                    double ATolVertex,
+                    double ATolCurve = -1.0,
+                    double ATolSurface = -1.0) {
+            const EditSession naming(*this);
+            const Tolerances tol = resolve_tolerances(ATolVertex, ATolCurve, ATolSurface);
+            if (!(AThickness > 0.0 && AThickness < 1.0)) return false;
+            const std::optional<std::vector<NappeFace>> nappe = find_nappe(AFaces, AInside);
+            if (!nappe.has_value()) return false;
+
+            // Every refusal is behind us: nothing below this line can fail, and nothing above it
+            // wrote anything.
+            for (const NappeFace &nf : *nappe) {
+                if (nf.two_sided) m_cmap.template unsew<3>(nf.inside[0]);
+            }
+
+            // The 2 sides now share nothing: CGAL split every corner of the nappe the moment its
+            // orbit came apart, and each side reads its own copy back from its own darts.
+            const std::vector<Point3d> settled = shrink_inside(*nappe, AThickness, tol);
+            const std::vector<Block> layer = insert_layer(*nappe);
+
+            std::set<Face> inserted;
+            for (const Block b : layer) {
+                for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    inserted.insert(m_cmap.template attribute<2>(it));
+                }
+            }
+
+            // Faces that were already there first, the inserted ones after, because `sew_matching()`
+            // hands the earlier of a matching pair to `sew()` as its first argument and a merge keeps
+            // the first. So where a corner of the layer is merged with a corner that was already
+            // there, it is the one already there that survives — with the name every neighbouring
+            // cell recorded its own frame in.
+            std::vector<Face> candidates;
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (belongs_to_block(it) && m_cmap.template is_free<3>(it->dart()) && inserted.count(it) == 0) {
+                    candidates.push_back(it);
+                }
+            }
+            candidates.insert(candidates.end(), inserted.begin(), inserted.end());
+            sew_matching<3>(candidates, 4);
+
+            refit_around(settled, tol);
+
+            rebuild_layer(layer, tol);
+            return true;
+        }
+
+        /**
          * @brief Moves one node to a new position, refitting the geometry of every cell it belongs
          * to so the structure stays consistent.
          *
@@ -4264,6 +4366,411 @@ namespace gecko {
                 }
             }
             AFace->info().surface = reframed(ASurface, corner_ab);
+        }
+
+        // ---------------------------------------------------------------------
+        // Pillowing: collecting the nappe, and inserting the layer along it
+        // ---------------------------------------------------------------------
+
+        /** @brief One face of a pillow nappe, read from the side the layer pushes back. */
+        struct NappeFace {
+            /** @brief The face itself. */
+            Face face{};
+            /** @brief Its 4 darts on the inside, in cycle order; `inside[k]`'s corner is corner `k`. */
+            std::array<Dart, 4> inside{};
+            /** @brief The outside dart carrying each of those same 4 corners; unset when one-sided. */
+            std::array<Dart, 4> outside{};
+            /** @brief Where its 4 corners were before the inside moved. */
+            std::array<Point3d, 4> at{};
+            /** @brief What those 4 corners were classified on. */
+            std::array<std::vector<std::pair<GroupDim, Int>>, 4> targets{};
+            /** @brief Whether a block sits on the outside too, or the model's boundary does. */
+            bool two_sided = false;
+        };
+
+        /**
+         * @brief Collects the nappe through @p AFaces, checking it is one.
+         *
+         * Three things are checked, in the order a failure is cheapest to find: that every face is a
+         * genuine block face named once; that each of them has exactly one of its 2 sides on
+         * @p AInside's side of the structure, which is what makes the nappe that side's boundary;
+         * and that the nappe is manifold along its own edges.
+         *
+         * @param AFaces The faces the caller offers as a nappe.
+         * @param AInside A block on the side that will shrink.
+         * @return The nappe, read from the inside, or `std::nullopt` when it is not one.
+         */
+        std::optional<std::vector<NappeFace>> find_nappe(const std::vector<Face> &AFaces, Block AInside) {
+            if (AFaces.empty() || AInside == nullptr) return std::nullopt;
+            const std::set<Face> nappe(AFaces.begin(), AFaces.end());
+            if (nappe.size() != AFaces.size()) return std::nullopt;
+            for (const Face f : nappe) {
+                if (!belongs_to_block(f)) return std::nullopt;
+            }
+
+            // What is still reachable from AInside once the nappe's faces stop joining blocks. A
+            // nappe that separates leaves the other side out of this set entirely.
+            const std::set<Block> inside = component_of(AInside, nappe);
+
+            std::vector<NappeFace> result;
+            result.reserve(AFaces.size());
+            std::map<Edge, int> along;
+            for (const Face f : AFaces) {
+                Dart d = f->dart();
+                const bool two_sided = !m_cmap.template is_free<3>(d);
+                const Block b0 = m_cmap.template attribute<3>(d);
+                const Block b1 = two_sided ? m_cmap.template attribute<3>(m_cmap.template beta<3>(d)) : nullptr;
+                const bool in0 = (b0 != nullptr) && inside.count(b0) > 0;
+                const bool in1 = (b1 != nullptr) && inside.count(b1) > 0;
+                // Neither side inside means the face is somewhere else altogether; both mean the
+                // nappe does not separate there, the 2 sides still being joined around it.
+                if (in0 == in1) return std::nullopt;
+                if (in1) d = m_cmap.template beta<3>(d);
+
+                NappeFace nf;
+                nf.face = f;
+                nf.two_sided = two_sided;
+                Dart walk = d;
+                for (std::size_t k = 0; k < 4; ++k) {
+                    nf.inside[k] = walk;
+                    const Node n = m_cmap.template attribute<0>(walk);
+                    nf.at[k] = n->info().point;
+                    nf.targets[k] = n->info().geom_targets;
+                    along[m_cmap.template attribute<1>(walk)] += 1;
+                    walk = m_cmap.template beta<1>(walk);
+                }
+                if (walk != d) return std::nullopt;
+                if (two_sided) {
+                    // `beta<3>` walks the face the other way round, so the outside dart standing at
+                    // corner k is the one across the edge *arriving* at k.
+                    for (std::size_t k = 0; k < 4; ++k) {
+                        nf.outside[k] = m_cmap.template beta<3>(nf.inside[(k + 3) % 4]);
+                    }
+                }
+                result.push_back(nf);
+            }
+
+            // Manifold along its own edges: 2 of its faces meet at an interior edge, and exactly 1 at
+            // an edge where it stops, which can only be on the boundary of the blocking.
+            for (const auto &[e, n] : along) {
+                if (n == 2) continue;
+                if (n == 1 && on_boundary(e)) continue;
+                return std::nullopt;
+            }
+            return result;
+        }
+
+        /**
+         * @brief Every block reachable from @p AStart through shared faces, @p AWithout excepted.
+         * @param AStart Where to start.
+         * @param AWithout Faces that do not count as joining their 2 blocks.
+         * @return The blocks of that component, @p AStart included.
+         */
+        std::set<Block> component_of(Block AStart, const std::set<Face> &AWithout) {
+            std::set<Block> seen{AStart};
+            std::vector<Block> pending{AStart};
+            while (!pending.empty()) {
+                const Block b = pending.back();
+                pending.pop_back();
+                for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    if (m_cmap.template is_free<3>(it)) continue;
+                    if (AWithout.count(m_cmap.template attribute<2>(it)) > 0) continue;
+                    const Block nb = m_cmap.template attribute<3>(m_cmap.template beta<3>(it));
+                    if (nb != nullptr && seen.insert(nb).second) pending.push_back(nb);
+                }
+            }
+            return seen;
+        }
+
+        /** @brief Whether @p AEdge is on the boundary of the blocking — some face through it having
+         * no block on its other side.
+         * @param AEdge The edge to test.
+         * @return true when it is. */
+        bool on_boundary(Edge AEdge) {
+            for (auto it = m_cmap.template one_dart_per_incident_cell<2, 1>(AEdge->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<2, 1>(AEdge->dart()).end();
+                 it != itend;
+                 ++it) {
+                if (m_cmap.template is_free<3>(it)) return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief Pulls the inside copy of every corner of @p ANappe back into its own side, and
+         * settles what it is still classified on.
+         *
+         * @param ANappe The nappe, already unsewn.
+         * @param AThickness How far to pull back, as a fraction of the mean edge length at the corner.
+         * @param ATol The per-dimension tolerances deciding what a corner is still on.
+         * @return Where the corners that moved now sit.
+         */
+        std::vector<Point3d>
+        shrink_inside(const std::vector<NappeFace> &ANappe, double AThickness, const Tolerances &ATol) {
+            // Straight in, which is what a nappe of faces means by "in": the sum of the inward unit
+            // normals of the faces of it meeting at the corner. Pulling towards the middle of the
+            // blocks instead would drag every corner sideways as well, and a layer inserted along a
+            // flat face would come out sheared.
+            std::map<Node, Vector3d> inwards;
+            for (const NappeFace &nf : ANappe) {
+                std::array<Point3d, 4> at{};
+                for (std::size_t k = 0; k < 4; ++k) {
+                    at[k] = m_cmap.template attribute<0>(nf.inside[k])->info().point;
+                }
+                Vector3d normal = Vector3d(at[0], at[1]).cross(Vector3d(at[0], at[3])) +
+                                  Vector3d(at[2], at[3]).cross(Vector3d(at[2], at[1]));
+                const Point3d middle((at[0].x() + at[1].x() + at[2].x() + at[3].x()) / 4.0,
+                                     (at[0].y() + at[1].y() + at[2].y() + at[3].y()) / 4.0,
+                                     (at[0].z() + at[1].z() + at[2].z() + at[3].z()) / 4.0);
+                if (normal.dot(Vector3d(middle, centroid_of(m_cmap.template attribute<3>(nf.inside[0])))) < 0.0) {
+                    normal = -normal;
+                }
+                if (normal.norm() > 0.0) normal = normal.normalized();
+                for (std::size_t k = 0; k < 4; ++k) {
+                    inwards[m_cmap.template attribute<0>(nf.inside[k])] += normal;
+                }
+            }
+
+            // Worked out for every corner before any of them moves. Measured one at a time, a
+            // corner's own edges would already have been shortened by its neighbours going first,
+            // and the layer would come out a different thickness depending on the order the corners
+            // happened to be visited in.
+            std::map<Node, Point3d> destination;
+            for (const auto &[n, direction] : inwards) {
+                const double norm = direction.norm();
+                if (norm <= 0.0) continue;
+                destination[n] = n->info().point + direction * (AThickness * mean_edge_length(n) / norm);
+            }
+
+            std::vector<Point3d> settled;
+            settled.reserve(inwards.size());
+            for (const auto &[n, direction] : inwards) {
+                if (const auto it = destination.find(n); it != destination.end()) {
+                    n->info().point = it->second;
+                }
+                // A name of its own, and this is the one place a corner needs one handed to it. The
+                // copy carries the original's `corner_key` across the split, which is right
+                // everywhere else — it is still that corner — and wrong here, because the block about
+                // to be inserted has *both* copies as its own corners, and a frame tells 2 corners of
+                // one cell apart by that name alone. Every cell whose frame named the old one is
+                // rebuilt by `refit_around()` below, those cells being exactly the ones this corner
+                // moved under.
+                n->info().corner_key = m_next_corner_key++;
+                keep_targets_within(n, ATol);
+                settled.push_back(n->info().point);
+            }
+            return settled;
+        }
+
+        /** @brief One block's centre, as the mean of its 8 corners.
+         * @param ABlock The block.
+         * @return Its centroid. */
+        Point3d centroid_of(Block ABlock) {
+            double x = 0.0;
+            double y = 0.0;
+            double z = 0.0;
+            int count = 0;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(ABlock->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<0, 3>(ABlock->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Point3d &p = m_cmap.template attribute<0>(it)->info().point;
+                x += p.x();
+                y += p.y();
+                z += p.z();
+                ++count;
+            }
+            if (count == 0) return Point3d(0, 0, 0);
+            return Point3d(x / count, y / count, z / count);
+        }
+
+        /** @brief The mean length of the edges at @p ANode, which is what a pillow's thickness is
+         * measured in so that it follows the size of the blocks it is inserted between.
+         * @param ANode The corner.
+         * @return That mean, or 0 when the corner has no edge. */
+        double mean_edge_length(Node ANode) {
+            double total = 0.0;
+            int count = 0;
+            for (auto it = m_cmap.template one_dart_per_incident_cell<1, 0>(ANode->dart()).begin(),
+                      itend = m_cmap.template one_dart_per_incident_cell<1, 0>(ANode->dart()).end();
+                 it != itend;
+                 ++it) {
+                const Node a = m_cmap.template attribute<0>(it);
+                const Node b = m_cmap.template attribute<0>(m_cmap.template beta<1>(it));
+                const Node other = (a == ANode) ? b : a;
+                total += Vector3d(ANode->info().point, other->info().point).norm();
+                ++count;
+            }
+            return (count > 0) ? total / count : 0.0;
+        }
+
+        /**
+         * @brief Drops whatever @p ANode has moved off, and projects it back onto the nearest of what
+         * is left.
+         *
+         * Deliberately not a proximity search: a corner comes out of this on an entity it was already
+         * classified on, or on nothing. Pillowing an unclassified blocking leaves it unclassified.
+         *
+         * @param ANode The corner, already moved.
+         * @param ATol The per-dimension tolerances.
+         */
+        void keep_targets_within(Node ANode, const Tolerances &ATol) {
+            std::vector<std::pair<GroupDim, Int>> kept;
+            for (const auto &target : ANode->info().geom_targets) {
+                if (distance_to(target.first, target.second, ANode->info().point) <=
+                    tolerance_for(target.first, ATol)) {
+                    kept.push_back(target);
+                }
+            }
+            ANode->info().geom_targets = kept;
+            if (kept.empty()) return;
+            const auto result = nearest_of(kept, ANode->info().point);
+            if (result.any()) project_onto(result.nearest_dim, result.nearest_tag, ANode->info().point);
+        }
+
+        /** @brief Which of the 3 tolerances applies at dimension @p ADim.
+         * @param ADim The entity's dimension.
+         * @param ATol The 3 tolerances.
+         * @return The one to measure against. */
+        static double tolerance_for(GroupDim ADim, const Tolerances &ATol) {
+            if (ADim == GroupDim::Dim0) return ATol.vertex;
+            if (ADim == GroupDim::Dim1) return ATol.curve;
+            return ATol.surface;
+        }
+
+        /**
+         * @brief Rebuilds every cell of an inserted layer, edges first, then faces, then blocks.
+         *
+         * All of it, rather than only what `refit_around()` reaches. A block of the layer has 4
+         * corners that moved and 4 that did not, and everything joining the 4 that did not is out of
+         * that sweep — while being just as new.
+         *
+         * The edges are the half of this that is easy to miss. An edge stores its curve against one
+         * of its 2 ends, and which end that is is settled by `curve_start_node()`, which answers by
+         * corner name. Sewing the layer merges each of its corners with one already there and keeps
+         * one of the 2 names — so an edge whose curve was stored before the sew can come out of it
+         * with its 2 ends in the other order, and the face reading that edge back then builds its
+         * interior with one side running backwards. It is a quarter-turn twist in a patch whose 4
+         * corners are all still in the right place, and it made a block of the layer measure
+         * two-fifths of its own volume, or a negative one, depending on which of the 2 corner
+         * attributes CGAL happened to keep.
+         *
+         * @param ALayer The blocks that were inserted.
+         * @param ATol The per-dimension tolerances, for the refits.
+         */
+        void rebuild_layer(const std::vector<Block> &ALayer, const Tolerances &ATol) {
+            // Read back from the blocks, never from anything collected before the sew: a 3-sew
+            // identifies 2 faces into 1, so half of what was collected then no longer exists.
+            std::set<Edge> edges;
+            std::set<Face> faces;
+            for (const Block b : ALayer) {
+                for (auto it = m_cmap.template one_dart_per_incident_cell<1, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<1, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    edges.insert(m_cmap.template attribute<1>(it));
+                }
+                for (auto it = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<2, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    faces.insert(m_cmap.template attribute<2>(it));
+                }
+            }
+
+            for (const Edge e : edges) {
+                const Dart d = e->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                // Straightened before being refitted, the 2 steps in the order `refit_around()` uses
+                // and for the same reason — and here it is also what puts the curve back in agreement
+                // with the end `curve_start_node()` now names.
+                store_curve(e, straight_curve(n0->info().point, n1->info().point), n0);
+                refit(e, ATol, true);
+            }
+            for (const Face f : faces) {
+                refit(f, ATol, true);
+            }
+            for (const Block b : ALayer) {
+                refit(b, ATol, true);
+            }
+        }
+
+        /**
+         * @brief Builds one block per face of @p ANappe, spanning the gap the shrink opened.
+         *
+         * The blocks are created free-standing and sewn afterwards, by position, the way
+         * `build_connectivity()` glues any 2 blocks built independently at the same place — which is
+         * also why each new corner is handed the classification of the corner it is about to be
+         * merged with, so that the answer does not depend on which of the 2 attributes CGAL keeps.
+         *
+         * @param ANappe The nappe, unsewn and with its inside already moved.
+         * @return The blocks inserted, one per face, in the same order.
+         */
+        std::vector<Block> insert_layer(const std::vector<NappeFace> &ANappe) {
+            std::vector<Block> layer;
+            layer.reserve(ANappe.size());
+            for (const NappeFace &nf : ANappe) {
+                std::array<Point3d, 4> in{};
+                std::array<Point3d, 4> out{};
+                std::array<const std::vector<std::pair<GroupDim, Int>> *, 4> in_targets{};
+                std::array<const std::vector<std::pair<GroupDim, Int>> *, 4> out_targets{};
+                for (std::size_t k = 0; k < 4; ++k) {
+                    const Node n = m_cmap.template attribute<0>(nf.inside[k]);
+                    in[k] = n->info().point;
+                    in_targets[k] = &n->info().geom_targets;
+                    if (nf.two_sided) {
+                        const Node o = m_cmap.template attribute<0>(nf.outside[k]);
+                        out[k] = o->info().point;
+                        out_targets[k] = &o->info().geom_targets;
+                    } else {
+                        // Nothing on the outside to take a copy from: the layer's outer corners are
+                        // simply where the nappe was, which is where the model's boundary is.
+                        out[k] = nf.at[k];
+                        out_targets[k] = &nf.targets[k];
+                    }
+                }
+
+                // HEX8 asks that its base be ordered so the right-hand normal points at the opposite
+                // face. Read off the inside cycle it may point either way — which way depends on
+                // which side of its own block the face is — so it is measured rather than assumed.
+                const Vector3d normal = Vector3d(in[0], in[1]).cross(Vector3d(in[0], in[3])) +
+                                        Vector3d(in[2], in[3]).cross(Vector3d(in[2], in[1]));
+                Vector3d towards(0.0, 0.0, 0.0);
+                for (std::size_t k = 0; k < 4; ++k) {
+                    towards += Vector3d(in[k], out[k]);
+                }
+                const bool flip = normal.dot(towards) < 0.0;
+
+                std::array<Point3d, 8> corners{};
+                std::array<const std::vector<std::pair<GroupDim, Int>> *, 8> targets{};
+                for (std::size_t k = 0; k < 4; ++k) {
+                    const std::size_t src = flip ? (4 - k) % 4 : k;
+                    corners[k] = in[src];
+                    targets[k] = in_targets[src];
+                    corners[k + 4] = out[src];
+                    targets[k + 4] = out_targets[src];
+                }
+
+                const Block b = create_hex_block(corners);
+                for (auto it = m_cmap.template one_dart_per_incident_cell<0, 3>(b->dart()).begin(),
+                          itend = m_cmap.template one_dart_per_incident_cell<0, 3>(b->dart()).end();
+                     it != itend;
+                     ++it) {
+                    const Node n = m_cmap.template attribute<0>(it);
+                    for (std::size_t k = 0; k < 8; ++k) {
+                        if (n->info().point == corners[k]) {
+                            n->info().geom_targets = *targets[k];
+                            break;
+                        }
+                    }
+                }
+                layer.push_back(b);
+            }
+            return layer;
         }
 
         /**
