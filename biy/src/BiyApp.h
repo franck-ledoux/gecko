@@ -1,10 +1,13 @@
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -48,6 +51,23 @@ namespace gecko::biy {
     enum class MeshColoring {
         Uniform, ///< One `mesh_color` for the whole mesh.
         ByBlock  ///< One hue per block, spread over every cell that block generated.
+    };
+
+    /**
+     * @enum NodeConstraint
+     * @brief How free a corner is to move, in Edit mode.
+     *
+     * biy's own state, deliberately: the kernel has no notion of it (a `Blocking` is a shape, not a
+     * record of what a user is willing to do to it), and undo/redo does not touch it either — an
+     * edit taken back should not also un-freeze the corner it moved.
+     *
+     * A corner not named in `BiyApp`'s own map is `Free`, which is why the enumerators start at 1:
+     * 0 doubles as "absent, so free" without a map lookup ever needing to special-case it.
+     */
+    enum class NodeConstraint {
+        Free = 1,    ///< Moves wherever dragged; the release-time tolerance snap is its only constraint.
+        Constrained, ///< Stays on whatever it is already classified on for the whole drag, not only at release.
+        Frozen       ///< Does not move at all — and, later, is what a smoothing pass is asked to leave alone.
     };
 
     /**
@@ -185,8 +205,32 @@ namespace gecko::biy {
         static void draw_scene_entry(const char *label, polyscope::Structure *structure);
         /** @brief Draws the button panel. Assumes the ImGui frame is already set up. */
         void draw_panel();
-        /** @brief Starts/continues/ends a corner drag from the current mouse state. */
+        /** @brief Starts/continues/ends a corner drag from the current mouse state, and services
+         * the constraint keys (see `draw_panel()`'s Edit-mode text) while a corner is hovered. */
         void handle_drag();
+        /** @brief Which corner the cursor is over in Edit mode, across all 3 constraint displays —
+         * whichever of `BLOCK_VERTICES`/`BLOCK_VERTICES_CONSTRAINED`/`BLOCK_VERTICES_FROZEN` is
+         * under it.
+         * @param screen_coords Current mouse position.
+         * @return That corner's node id, or nothing when the cursor is over none of the 3. */
+        std::optional<int> pick_vertex(glm::vec2 screen_coords);
+        /** @brief The constraint @p node_id is currently under. @return `NodeConstraint::Free` for
+         * a node `m_node_constraint` says nothing about. */
+        NodeConstraint constraint_of(int node_id) const;
+        /** @brief Registers (or removes) the 3 constraint displays — free corners as spheres,
+         * constrained ones as cube glyphs, frozen ones as black spheres — colored by classification
+         * except frozen, which is a fixed color by design (see `NodeConstraint`). Drops from
+         * `m_node_constraint` any id no longer in the blocking, so it cannot grow across a session
+         * that keeps deleting and rebuilding the corners it names. */
+        void refresh_constraint_displays();
+        /** @brief The `(vertices, quads)` of one disjoint axis-aligned cube per point in @p points,
+         * each `2 * half_size` across — what draws a `Constrained` corner, since Polyscope's point
+         * cloud has no cube glyph of its own to ask for.
+         * @param points Where to centre each cube.
+         * @param half_size Half the length of a cube's edge.
+         * @return Vertex positions and the quads joining them, 8 and 6 per point respectively. */
+        static std::pair<std::vector<std::array<double, 3>>, std::vector<std::array<int, 4>>>
+        build_cube_glyphs(const std::vector<std::array<double, 3>> &points, double half_size);
         /** @brief Tracks what the cursor is over in Cut mode, previewing the sheet it would cut, and
          * performs the cut on a click or on space. */
         void handle_cut();
@@ -300,6 +344,21 @@ namespace gecko::biy {
         MouseMode m_mode = MouseMode::Camera;
         /** @brief Node id of the corner currently being dragged, if any. */
         std::optional<int> m_dragged_node;
+        /** @brief Every corner that is not `NodeConstraint::Free`, and what it is instead. Absent
+         * means `Free` — see `NodeConstraint`. */
+        std::map<int, NodeConstraint> m_node_constraint;
+        /** @brief Corner the cursor is over in Edit mode, when not currently dragging one. */
+        std::optional<int> m_hover_node;
+        /** @copydoc m_last_cut_mouse */
+        glm::vec2 m_last_vertex_mouse{-1.0f, -1.0f};
+        /** @brief Node id behind each point of `BLOCK_VERTICES`, in display order — that structure
+         * now carries only `Free` corners, so a pick's `localIndex` no longer equals a position in
+         * `node_ids()` and has to be resolved through this instead. */
+        std::vector<int> m_vertex_owner;
+        /** @copydoc m_vertex_owner but for `BLOCK_VERTICES_CONSTRAINED`'s cube glyphs. */
+        std::vector<int> m_vertex_owner_constrained;
+        /** @copydoc m_vertex_owner but for `BLOCK_VERTICES_FROZEN`. */
+        std::vector<int> m_vertex_owner_frozen;
         /** @brief Edge the cursor is currently over in Cut or Collapse mode, as its *id*, or unset
          * when the cursor is over no edge.
          *

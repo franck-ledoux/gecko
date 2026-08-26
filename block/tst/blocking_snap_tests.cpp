@@ -183,6 +183,36 @@ TEST_CASE("snap_node_reclassifies_the_node_and_its_incident_edges", "[BlockTestS
     REQUIRE(e->info().geom_targets[0] == std::pair{GroupDim::Dim1, Int{10}});
 }
 
+TEST_CASE("project_onto_classification_reads_where_a_node_already_is_not_where_it_is_near", "[BlockTestSuite]") {
+    // The read-only counterpart of snap_node()'s own search: it answers from a node's *current*
+    // classification, and must not re-run the search itself — which the fixture checks by asking
+    // from a point that is actually closer to a different vertex than the one the node is on.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_quad_block({Point3d(0, 0, 0), Point3d(1, 0, 0), Point3d(1, 1, 0), Point3d(0, 1, 0)});
+    blocking.classify(1e-6);
+
+    const auto origin = node_at(blocking, Point3d(0, 0, 0));
+    REQUIRE(origin->info().geom_targets.size() == 1);
+    REQUIRE(origin->info().geom_targets[0] == std::pair{GroupDim::Dim0, Int{1}});
+
+    // Nearer to (1,1,0) than to the origin, yet the answer is still the origin: it reads what
+    // `origin` is classified on, not what the trial point happens to be near.
+    const Point3d trial(0.9, 0.9, 5.0);
+    const Point3d projected = blocking.project_onto_classification(origin, trial);
+    REQUIRE(projected.x() == Approx(0.0));
+    REQUIRE(projected.y() == Approx(0.0));
+    REQUIRE(projected.z() == Approx(0.0));
+
+    // An unclassified node gives the trial point straight back — nothing to pull it onto.
+    const auto bare = blocking.create_node(Point3d(3, 3, 3));
+    REQUIRE(bare->info().geom_targets.empty());
+    const Point3d unmoved = blocking.project_onto_classification(bare, trial);
+    REQUIRE(unmoved.x() == Approx(trial.x()));
+    REQUIRE(unmoved.y() == Approx(trial.y()));
+    REQUIRE(unmoved.z() == Approx(trial.z()));
+}
+
 TEST_CASE("a_curved_edge_lies_on_its_geometric_curve_not_merely_near_it", "[BlockTestSuite]") {
     // The bottom boundary curve is a 2-segment polyline bulging up to (0.5, 0.25, 0), so following
     // it genuinely requires bending — a straight edge is 0.25 away from it at mid-span.
@@ -354,4 +384,27 @@ TEST_CASE("snap_node_leaves_cells_it_does_not_touch_alone", "[BlockTestSuite]") 
     blocking.snap_node(n, 0.1, 0.1, 0.1);
 
     REQUIRE(untouched->info().geom_targets == before);
+}
+
+TEST_CASE("a_tolerance_below_the_true_distance_excludes_that_whole_dimension_from_snapping", "[BlockTestSuite]") {
+    // #48 asks for a way to snap onto some kinds of entity but not others (vertices and curves,
+    // say, but not surfaces) — which the existing 3-way tolerance already gives, without needing a
+    // separate on/off switch: pass a tolerance below the true distance (0, if nothing is ever meant
+    // to reach that dimension) and classify_position()'s `<=` search simply never matches there.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_quad_block({Point3d(0, 0, 0), Point3d(1, 0, 0), Point3d(1, 1, 0), Point3d(0, 1, 0)});
+    blocking.classify(1e-6);
+
+    // Above the surface's interior, 0.5 from every vertex and every curve (so those 2 dimensions
+    // are never candidates here) and a known 0.01 above the surface itself.
+    auto n = node_at(blocking, Point3d(0, 0, 0));
+    blocking.move_node(n, Point3d(0.5, 0.5, 0.01));
+
+    blocking.snap_node(n, 1e-6, 1e-6, 0.001);
+    REQUIRE(n->info().geom_targets.empty());
+
+    blocking.snap_node(n, 1e-6, 1e-6, 0.02);
+    REQUIRE(n->info().geom_targets.size() == 1);
+    REQUIRE(n->info().geom_targets[0].first == GroupDim::Dim2);
 }

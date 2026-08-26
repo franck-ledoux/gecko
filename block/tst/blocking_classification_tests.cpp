@@ -819,3 +819,205 @@ TEST_CASE("a_classified_face_follows_its_surface_as_closely_as_its_own_edges_do"
     // Interpolating instead left it at 1.05e-02 here, half again as far.
     REQUIRE(worst_face < 1.5 * worst_edge);
 }
+
+TEST_CASE("a_curve_classified_edge_follows_its_curve_at_every_degree", "[BlockTestSuite]") {
+    // The regression case for issue #48: an edge classified on a model curve has to have its own
+    // sampled points sit close to that curve, not only its 2 endpoints. Measured across every degree
+    // rather than at just one, because the defect this covers was invisible at degree 3 alone —
+    // degree 2 collapsed a shared array slot onto itself and threw away half a least-squares solve,
+    // and degree 4 and up quietly pinned their extra control points to the straight chord instead of
+    // fitting them, both of which left the worst-followed degree *further* from the curve than the
+    // straight-edge (degree 1) case it was supposed to improve on.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+    const double extent = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+
+    double previous = 0.0;
+    for (const std::size_t degree : {std::size_t{2}, std::size_t{3}, std::size_t{4}, std::size_t{5}, std::size_t{7}}) {
+        Blocking<FacetedGeometry> blocking(geom, degree);
+        blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                                   Point3d(hi[0], lo[1], lo[2]),
+                                   Point3d(hi[0], hi[1], lo[2]),
+                                   Point3d(lo[0], hi[1], lo[2]),
+                                   Point3d(lo[0], lo[1], hi[2]),
+                                   Point3d(hi[0], lo[1], hi[2]),
+                                   Point3d(hi[0], hi[1], hi[2]),
+                                   Point3d(lo[0], hi[1], hi[2])});
+        blocking.classify(0.3);
+
+        double worst = 0.0;
+        int checked = 0;
+        auto &map = blocking.cmap();
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            if (it->info().geom_targets.empty() || it->info().geom_targets.front().first != GroupDim::Dim1) continue;
+            const auto *curve = geom.curve_by_tag(it->info().geom_targets.front().second);
+            REQUIRE(curve != nullptr);
+            ++checked;
+            for (int i = 1; i < 16; ++i) {
+                worst = std::max(worst, curve->distance(it->info().curve.value(i / 16.0)));
+            }
+        }
+        REQUIRE(checked > 0);
+
+        // Loose in absolute terms — this is a coarse faceted cylinder, not a smooth analytic one —
+        // but tight enough to catch either defect: both used to push a curve *off* the model by
+        // several percent of its own extent, well past what any of these degrees now reaches.
+        REQUIRE(worst < 0.01 * extent);
+        INFO("degree " << degree << " worst deviation " << worst << " (" << 100.0 * worst / extent << "% of extent)");
+        // Not strictly monotone — a coarse facet can favour one degree over its neighbour by chance
+        // — but a fit that keeps adding control points should not be getting *worse* by an order of
+        // magnitude, which is what the bug did between degree 2 and degree 3 before this fix.
+        if (previous > 0.0) REQUIRE(worst < 5.0 * previous);
+        previous = worst;
+    }
+}
+
+TEST_CASE("an_edge_on_a_surface_lies_in_one_plane_and_not_just_somewhere_on_it", "[BlockTestSuite]") {
+    // The half of #48 about edges. A surface holds infinitely many curves between one pair of its
+    // points, so "classified on a surface" says where the edge lands but not which way it goes —
+    // and projecting each sample separately traces whichever curve the projection happens to give.
+    //
+    // The edge is pinned instead to the surface's section by the plane through its 2 ends containing
+    // the surface's normal. What that buys is measured here: the edge lies in that plane, rather
+    // than wandering a quarter of a percent of the model out of it as it did before.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                               Point3d(hi[0], lo[1], lo[2]),
+                               Point3d(hi[0], hi[1], lo[2]),
+                               Point3d(lo[0], hi[1], lo[2]),
+                               Point3d(lo[0], lo[1], hi[2]),
+                               Point3d(hi[0], lo[1], hi[2]),
+                               Point3d(hi[0], hi[1], hi[2]),
+                               Point3d(lo[0], hi[1], hi[2])});
+    blocking.classify(0.3);
+
+    auto &map = blocking.cmap();
+    int checked = 0;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        const auto &targets = it->info().geom_targets;
+        if (targets.empty() || targets.front().first != GroupDim::Dim2) continue;
+        const auto *surface = geom.surface_by_tag(targets.front().second);
+        REQUIRE(surface != nullptr);
+        ++checked;
+
+        const auto &curve = it->info().curve;
+        const Point3d p0 = curve.value(0.0);
+        const Point3d p1 = curve.value(1.0);
+        const Vector3d chord(p0, p1);
+
+        // The very plane the fit is pinned to: through both ends, along the surface's own normal.
+        Point3d middle = p0 + chord * 0.5;
+        surface->project(middle);
+        const Vector3d plane_normal = chord.cross(surface->normal(middle)).normalized();
+
+        double off_plane = 0.0;
+        double off_surface = 0.0;
+        for (int i = 0; i <= 24; ++i) {
+            const Point3d at = curve.value(i / 24.0);
+            off_plane = std::max(off_plane, std::abs(Vector3d(p0, at).dot(plane_normal)));
+            off_surface = std::max(off_surface, surface->distance(at));
+        }
+
+        // In the plane, to rounding. Projecting sample by sample left it 5.7e-03 out of it — a
+        // quarter of a percent of a model 2 units across.
+        REQUIRE(off_plane < 1e-6);
+        // And still on the surface: the fixture's own faceting is the floor, and this stays at it.
+        REQUIRE(off_surface < 1e-2);
+    }
+    REQUIRE(checked == 4);
+}
+
+TEST_CASE("an_edge_along_a_ruling_of_a_surface_keeps_a_straight_control_net", "[BlockTestSuite]") {
+    // The trap the section fit fell into twice. These 4 edges run along the cylinder's axis, where
+    // the surface is ruled: the right answer is a straight line, so anything else is the fit's own
+    // invention.
+    //
+    // Measured on the *control net*, not on the curve, and that distinction is the point. A Bezier
+    // stays inside its control points' convex hull, so an oscillating net barely moves the curve —
+    // measured over 200 samples, the 2 fits below differ by 1.05e-03 against 1.5e-03, which no
+    // honest threshold separates. The net itself separates cleanly, and it is what matters: an
+    // oscillating net is an ill-conditioned representation, and every later subdivision and refit
+    // inherits it.
+    //
+    // The 2 fits this rules out, at degree 6: constraining the end tangents on nearly-straight data
+    // is nearly singular and wandered 5e-02; interpolating the section at uniform parameters is
+    // Runge's phenomenon and wandered 1.4e-02. Least squares with the 2 ends pinned stays at
+    // 7.1e-03 or below.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+
+    // Stopping at 7 is not arbitrary: past it the Bernstein normal equations this fit solves are
+    // themselves too ill-conditioned to trust, and the net wanders 3.3e-02 at degree 8 and 7.2e-02
+    // at degree 10 whatever the data. See `fitted_curve()`.
+    for (const std::size_t degree : {std::size_t{2}, std::size_t{3}, std::size_t{5}, std::size_t{6}, std::size_t{7}}) {
+        Blocking<FacetedGeometry> blocking(geom, degree);
+        blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                                   Point3d(hi[0], lo[1], lo[2]),
+                                   Point3d(hi[0], hi[1], lo[2]),
+                                   Point3d(lo[0], hi[1], lo[2]),
+                                   Point3d(lo[0], lo[1], hi[2]),
+                                   Point3d(hi[0], lo[1], hi[2]),
+                                   Point3d(hi[0], hi[1], hi[2]),
+                                   Point3d(lo[0], hi[1], hi[2])});
+        blocking.classify(0.3);
+
+        auto &map = blocking.cmap();
+        double worst = 0.0;
+        int checked = 0;
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto &targets = it->info().geom_targets;
+            if (targets.empty() || targets.front().first != GroupDim::Dim2) continue;
+            ++checked;
+
+            const auto &points = it->info().curve.control_points();
+            const Point3d &first = points.front();
+            const Point3d &last = points.back();
+            const Vector3d chord(first, last);
+            const double length2 = chord.dot(chord);
+            for (std::size_t k = 1; k + 1 < points.size(); ++k) {
+                const Vector3d offset(first, points[k]);
+                const double t = (length2 > 0.0) ? offset.dot(chord) / length2 : 0.0;
+                worst = std::max(worst, (offset - chord * t).norm());
+            }
+        }
+        REQUIRE(checked == 4);
+        INFO("degree " << degree << " worst control wander " << worst);
+        REQUIRE(worst < 1e-2);
+    }
+}

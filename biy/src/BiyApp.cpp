@@ -49,6 +49,11 @@ namespace gecko::biy {
         constexpr const char *MESH_HEXES = "mesh hexes";
         /** @brief The block structure itself — the Blocking section's 4 subsections. */
         constexpr const char *BLOCK_VERTICES = "vertices";
+        /** @brief Constrained corners, drawn as cube glyphs (see `BiyApp::build_cube_glyphs()`) —
+         * Polyscope's point cloud has no cube of its own to ask for. */
+        constexpr const char *BLOCK_VERTICES_CONSTRAINED = "vertices (constrained)";
+        /** @brief Frozen corners, drawn as a fixed-color point cloud. */
+        constexpr const char *BLOCK_VERTICES_FROZEN = "vertices (frozen)";
         /** @brief The block faces themselves, sampled into quads — not the generated mesh's quads,
          * which exist only for standalone 2D blocks (see `refresh_view()`). */
         constexpr const char *BLOCK_FACES = "faces";
@@ -223,6 +228,10 @@ namespace gecko::biy {
             m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
             refresh_delete_preview();
         }
+        if (mode != MouseMode::Edit) {
+            m_hover_node.reset();
+            m_last_vertex_mouse = glm::vec2(-1.0f, -1.0f);
+        }
         // A selection survives a trip through Camera mode, and only that: reaching the faces on the
         // far side of a nappe means rotating the view, and losing 6 clicks to do it would make the
         // mode unusable. Anything that changes the blocking clears it, the faces picked being named
@@ -334,8 +343,20 @@ namespace gecko::biy {
             const auto p = m_blocking->node_position(id);
             corners.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
         }
+        // Free corners only — Constrained and Frozen ones get their own displays below, drawn
+        // as the cube and the fixed-color sphere issue #48 asks for, which a single point cloud
+        // cannot mix into (Polyscope's point-render mode is one choice for the whole structure).
+        std::vector<glm::vec3> free_corners;
+        std::vector<int> free_owner;
+        for (std::size_t i = 0; i < corners.size() && i < node_ids.size(); ++i) {
+            if (constraint_of(node_ids[i]) != NodeConstraint::Free) continue;
+            free_corners.push_back(corners[i]);
+            free_owner.push_back(node_ids[i]);
+        }
+        m_vertex_owner = free_owner;
+
         const auto vertices_shown = enabled_state(points_or_null(BLOCK_VERTICES));
-        auto *cloud = polyscope::registerPointCloud(BLOCK_VERTICES, corners);
+        auto *cloud = polyscope::registerPointCloud(BLOCK_VERTICES, free_corners);
         cloud->setPointRadius(m_config.corner_radius);
         restore_enabled(cloud, vertices_shown, true);
 
@@ -343,12 +364,18 @@ namespace gecko::biy {
         // to a model is mostly "which corners have found their geometry yet", so it belongs on the
         // corners themselves rather than in a side panel.
         const auto dims = m_blocking->node_classification_dims();
+        std::map<int, int> dim_of;
+        for (std::size_t i = 0; i < node_ids.size() && i < dims.size(); ++i) {
+            dim_of[node_ids[i]] = dims[i];
+        }
         std::vector<glm::vec3> colors;
-        colors.reserve(dims.size());
-        for (const int dim : dims)
-            colors.push_back(to_glm(m_config.color_for(dim)));
+        colors.reserve(free_owner.size());
+        for (const int id : free_owner) {
+            colors.push_back(to_glm(m_config.color_for(dim_of[id])));
+        }
         cloud->addColorQuantity("classification", colors)->setEnabled(true);
 
+        refresh_constraint_displays();
         if (m_dragged_node) show_highlight(m_dragged_node);
 
         const auto edges_shown = enabled_state(curves_or_null(BLOCK_EDGES));
@@ -721,6 +748,8 @@ namespace gecko::biy {
             draw_scene_entry("faces", surface_or_null(BLOCK_FACES));
             draw_scene_entry("edges", curves_or_null(BLOCK_EDGES));
             draw_scene_entry("vertices", points_or_null(BLOCK_VERTICES));
+            draw_scene_entry("vertices (constrained)", surface_or_null(BLOCK_VERTICES_CONSTRAINED));
+            draw_scene_entry("vertices (frozen)", points_or_null(BLOCK_VERTICES_FROZEN));
         }
 
         if (ImGui::CollapsingHeader("Mesh")) {
@@ -879,7 +908,12 @@ namespace gecko::biy {
         if (ImGui::RadioButton("Open (O)", m_mode == MouseMode::Open)) set_mouse_mode(MouseMode::Open);
         switch (m_mode) {
             case MouseMode::Edit:
-                ImGui::TextWrapped("Drag a block corner to move it. Camera navigation is off.");
+                ImGui::TextWrapped(
+                    "Drag a block corner to move it. Point at a corner (no need to drag) and press F to "
+                    "freeze it — it stops moving at all, drawn as a black sphere, and F unfreezes it back to "
+                    "Free. Press G to constrain it instead: it stays on whatever it is already classified on "
+                    "for the whole drag rather than only when the mouse comes up, drawn as a small cube. G "
+                    "again frees it. Camera navigation is off.");
                 break;
             case MouseMode::Cut:
                 ImGui::TextWrapped("Point at a block edge: the whole sheet that would be cut lights up, and the "
@@ -1967,19 +2001,192 @@ namespace gecko::biy {
                std::to_string(after) + "." + bend_report(*m_blocking));
     }
 
+    NodeConstraint BiyApp::constraint_of(int node_id) const {
+        const auto it = m_node_constraint.find(node_id);
+        return (it != m_node_constraint.end()) ? it->second : NodeConstraint::Free;
+    }
+
+    std::pair<std::vector<std::array<double, 3>>, std::vector<std::array<int, 4>>>
+    BiyApp::build_cube_glyphs(const std::vector<std::array<double, 3>> &points, double half_size) {
+        std::vector<std::array<double, 3>> vertices;
+        std::vector<std::array<int, 4>> quads;
+        vertices.reserve(points.size() * 8);
+        quads.reserve(points.size() * 6);
+
+        // The 8 corner offsets and the 6 quads joining them, in the same HEX8-perimeter convention
+        // the rest of the block structure uses — no meaning here beyond "a box", but 1 convention
+        // is 1 fewer to keep straight.
+        static constexpr std::array<std::array<int, 3>, 8> offsets = {
+            {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}};
+        static constexpr std::array<std::array<int, 4>, 6> faces = {
+            {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {3, 7, 6, 2}, {0, 4, 7, 3}, {1, 2, 6, 5}}};
+
+        for (const auto &centre : points) {
+            const int base = static_cast<int>(vertices.size());
+            for (const auto &offset : offsets) {
+                vertices.push_back({centre[0] + offset[0] * half_size,
+                                    centre[1] + offset[1] * half_size,
+                                    centre[2] + offset[2] * half_size});
+            }
+            for (const auto &face : faces) {
+                quads.push_back({base + face[0], base + face[1], base + face[2], base + face[3]});
+            }
+        }
+        return {vertices, quads};
+    }
+
+    void BiyApp::refresh_constraint_displays() {
+        const auto drop_surface = [](const char *name) {
+            if (polyscope::hasSurfaceMesh(name)) polyscope::removeStructure(polyscope::getSurfaceMesh(name));
+        };
+        const auto drop_points = [](const char *name) {
+            if (polyscope::hasPointCloud(name)) polyscope::removeStructure(polyscope::getPointCloud(name));
+        };
+
+        if (!m_blocking) {
+            drop_surface(BLOCK_VERTICES_CONSTRAINED);
+            drop_points(BLOCK_VERTICES_FROZEN);
+            m_vertex_owner_constrained.clear();
+            m_vertex_owner_frozen.clear();
+            return;
+        }
+
+        // Pruned to the blocking's own ids first: an id this still names may have been the corner
+        // of a block a collapse or a delete took out from under it, and nothing else in biy ever
+        // tells this map to let go of one.
+        const auto ids = m_blocking->node_ids();
+        const std::set<int> live(ids.begin(), ids.end());
+        std::erase_if(m_node_constraint, [&live](const auto &entry) { return live.count(entry.first) == 0; });
+
+        // Read per id via node_position() rather than off the generated mesh: to_mesh()'s vertex
+        // list is deduplicated and ordered by its own rules, not guaranteed to line up 1:1 with
+        // node_ids() the way the classification-dims accessor documents itself as doing.
+        const auto dims = m_blocking->node_classification_dims();
+        std::map<int, std::array<double, 3>> position_of;
+        std::map<int, int> dim_of;
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            position_of[ids[i]] = m_blocking->node_position(ids[i]);
+            if (i < dims.size()) dim_of[ids[i]] = dims[i];
+        }
+
+        std::vector<std::array<double, 3>> constrained_points;
+        m_vertex_owner_constrained.clear();
+        std::vector<std::array<double, 3>> frozen_points;
+        m_vertex_owner_frozen.clear();
+        for (const auto &[id, state] : m_node_constraint) {
+            const auto found = position_of.find(id);
+            if (found == position_of.end()) continue;
+            if (state == NodeConstraint::Constrained) {
+                constrained_points.push_back(found->second);
+                m_vertex_owner_constrained.push_back(id);
+            } else if (state == NodeConstraint::Frozen) {
+                frozen_points.push_back(found->second);
+                m_vertex_owner_frozen.push_back(id);
+            }
+        }
+
+        if (constrained_points.empty()) {
+            drop_surface(BLOCK_VERTICES_CONSTRAINED);
+        } else {
+            const auto [glyph_vertices, glyph_quads] =
+                build_cube_glyphs(constrained_points, m_config.corner_constrained_size);
+            const auto shown = enabled_state(surface_or_null(BLOCK_VERTICES_CONSTRAINED));
+            auto *mesh = polyscope::registerSurfaceMesh(BLOCK_VERTICES_CONSTRAINED, glyph_vertices, glyph_quads);
+            std::vector<glm::vec3> colors;
+            colors.reserve(glyph_quads.size());
+            for (const int id : m_vertex_owner_constrained) {
+                for (int face = 0; face < 6; ++face) {
+                    colors.push_back(to_glm(m_config.color_for(dim_of[id])));
+                }
+            }
+            mesh->addFaceColorQuantity("classification", colors)->setEnabled(true);
+            restore_enabled(mesh, shown, true);
+        }
+
+        if (frozen_points.empty()) {
+            drop_points(BLOCK_VERTICES_FROZEN);
+        } else {
+            std::vector<glm::vec3> pts;
+            pts.reserve(frozen_points.size());
+            for (const auto &p : frozen_points) {
+                pts.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
+            }
+            const auto shown = enabled_state(points_or_null(BLOCK_VERTICES_FROZEN));
+            auto *cloud = polyscope::registerPointCloud(BLOCK_VERTICES_FROZEN, pts);
+            cloud->setPointRadius(m_config.corner_radius);
+            cloud->setPointColor(to_glm(m_config.corner_color_frozen));
+            restore_enabled(cloud, shown, true);
+        }
+    }
+
+    std::optional<int> BiyApp::pick_vertex(glm::vec2 screen_coords) {
+        if (!m_blocking) return std::nullopt;
+        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        if (!pick.isHit) return std::nullopt;
+
+        if (pick.structureName == BLOCK_VERTICES && polyscope::hasPointCloud(BLOCK_VERTICES)) {
+            if (pick.localIndex < m_vertex_owner.size()) return m_vertex_owner[pick.localIndex];
+        } else if (pick.structureName == BLOCK_VERTICES_CONSTRAINED &&
+                   polyscope::hasSurfaceMesh(BLOCK_VERTICES_CONSTRAINED)) {
+            const auto hit = polyscope::getSurfaceMesh(BLOCK_VERTICES_CONSTRAINED)->interpretPickResult(pick);
+            if (hit.elementType == polyscope::MeshElement::FACE) {
+                const std::size_t glyph = hit.index / 6;
+                if (glyph < m_vertex_owner_constrained.size()) return m_vertex_owner_constrained[glyph];
+            }
+        } else if (pick.structureName == BLOCK_VERTICES_FROZEN && polyscope::hasPointCloud(BLOCK_VERTICES_FROZEN)) {
+            if (pick.localIndex < m_vertex_owner_frozen.size()) return m_vertex_owner_frozen[pick.localIndex];
+        }
+        return std::nullopt;
+    }
+
     void BiyApp::handle_drag() {
         if (!m_blocking || m_mode != MouseMode::Edit) return;
         ImGuiIO &io = ImGui::GetIO();
 
+        // The constraint keys act on whichever corner is spoken for right now — dragged if one is,
+        // hovered otherwise — so they work whether pressed mid-drag or from a standing point.
+        const auto acted_on = m_dragged_node ? m_dragged_node : m_hover_node;
+        if (!io.WantCaptureKeyboard && acted_on) {
+            if (ImGui::IsKeyPressed(ImGuiKey_F)) {
+                // Unfreezing goes all the way back to Free, never to Constrained: freeze/unfreeze is
+                // its own toggle, independent of the constrained one below.
+                const bool was_frozen = constraint_of(*acted_on) == NodeConstraint::Frozen;
+                if (was_frozen) {
+                    m_node_constraint.erase(*acted_on);
+                } else {
+                    m_node_constraint[*acted_on] = NodeConstraint::Frozen;
+                    if (m_dragged_node == acted_on) {
+                        m_dragged_node.reset();
+                        show_highlight(std::nullopt);
+                    }
+                }
+                // refresh_view() rebuilds BLOCK_VERTICES too, not only the constraint displays: a
+                // corner moving into or out of Frozen also moves into or out of the plain "Free"
+                // point cloud, which only that full rebuild touches.
+                m_status = "Corner " + std::to_string(*acted_on) + (was_frozen ? " unfrozen" : " frozen");
+                refresh_view();
+            } else if (ImGui::IsKeyPressed(ImGuiKey_G) && constraint_of(*acted_on) != NodeConstraint::Frozen) {
+                const bool was_constrained = constraint_of(*acted_on) == NodeConstraint::Constrained;
+                if (was_constrained) {
+                    m_node_constraint.erase(*acted_on);
+                } else {
+                    m_node_constraint[*acted_on] = NodeConstraint::Constrained;
+                }
+                m_status = "Corner " + std::to_string(*acted_on) + (was_constrained ? " freed" : " constrained");
+                refresh_view();
+            }
+        }
+
         if (!m_dragged_node && io.MouseClicked[0] && !io.WantCaptureMouse) {
             const glm::vec2 screen_coords{io.MousePos.x, io.MousePos.y};
-            const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
-            if (pick.isHit && pick.structureName == BLOCK_VERTICES) {
-                const auto node_ids = m_blocking->node_ids();
-                if (pick.localIndex < node_ids.size()) {
-                    m_dragged_node = node_ids[pick.localIndex];
+            if (const auto picked = pick_vertex(screen_coords)) {
+                if (constraint_of(*picked) == NodeConstraint::Frozen) {
+                    m_status = "Corner " + std::to_string(*picked) + " is frozen — press F to unfreeze it first";
+                } else {
+                    m_dragged_node = picked;
                     show_highlight(m_dragged_node);
-                    m_status = "Dragging corner " + std::to_string(*m_dragged_node);
+                    m_status = "Dragging corner " + std::to_string(*picked) +
+                               (constraint_of(*picked) == NodeConstraint::Constrained ? " (constrained)" : "");
                 }
             }
         }
@@ -1989,15 +2196,28 @@ namespace gecko::biy {
                 const auto current = m_blocking->node_position(*m_dragged_node);
                 const glm::vec3 anchor(
                     static_cast<float>(current[0]), static_cast<float>(current[1]), static_cast<float>(current[2]));
-                const glm::vec3 target = screen_to_plane({io.MousePos.x, io.MousePos.y}, anchor);
+                glm::vec3 target = screen_to_plane({io.MousePos.x, io.MousePos.y}, anchor);
                 m_blocking->move_node(*m_dragged_node, target.x, target.y, target.z);
+
+                // A constrained corner is pulled straight back onto its own classification every
+                // frame, not only when the button comes up — that is the entire difference from
+                // Free, which only meets the model at release, via snap_node()'s own search below.
+                if (constraint_of(*m_dragged_node) == NodeConstraint::Constrained) {
+                    const auto pulled = m_blocking->project_onto_classification(*m_dragged_node,
+                                                                                static_cast<double>(target.x),
+                                                                                static_cast<double>(target.y),
+                                                                                static_cast<double>(target.z));
+                    m_blocking->move_node(*m_dragged_node, pulled[0], pulled[1], pulled[2]);
+                }
                 refresh_view();
             } else {
-                // Snap on release: the corner settles onto whatever it landed near, and every
-                // edge/face touching it is reclassified and refitted to match — so the colors on
-                // screen tell the truth again the moment the button comes up.
+                // Snap on release, Free corners only: a Constrained one has already been kept on
+                // its own entity for the whole drag, and searching afresh here could hop it onto
+                // something else nearby — precisely what being constrained promises will not happen.
                 const int released = *m_dragged_node;
-                m_blocking->snap_node(released, m_tol_vertex, m_tol_curve, m_tol_surface);
+                if (constraint_of(released) != NodeConstraint::Constrained) {
+                    m_blocking->snap_node(released, m_tol_vertex, m_tol_curve, m_tol_surface);
+                }
                 m_dragged_node.reset();
                 show_highlight(std::nullopt);
                 refresh_view();
@@ -2006,7 +2226,16 @@ namespace gecko::biy {
                 const auto ids = m_blocking->node_ids();
                 const auto it = std::find(ids.begin(), ids.end(), released);
                 const int dim = (it != ids.end()) ? dims[static_cast<std::size_t>(it - ids.begin())] : -1;
-                m_status = "Corner " + std::to_string(released) + " snapped onto " + classification_name(dim);
+                m_status =
+                    (constraint_of(released) == NodeConstraint::Constrained)
+                        ? "Corner " + std::to_string(released) + " released, still on " + classification_name(dim)
+                        : "Corner " + std::to_string(released) + " snapped onto " + classification_name(dim);
+            }
+        } else if (!io.WantCaptureMouse) {
+            const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
+            if (mouse != m_last_vertex_mouse) {
+                m_last_vertex_mouse = mouse;
+                m_hover_node = pick_vertex(mouse);
             }
         }
     }

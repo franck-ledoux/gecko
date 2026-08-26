@@ -339,3 +339,59 @@ TEST_CASE("FacetedGeometry_FromGmshCylinderFile", "[FacetedGeometry]") {
     REQUIRE(volume != nullptr);
     REQUIRE(volume->distance(axis_midpoint) == Approx(0.0).margin(1e-12));
 }
+
+TEST_CASE("FacetedSurface_Normal_ComesFromTheNearestFacet", "[FacetedGeometry]") {
+    // 2 triangles meeting along a ridge, at right angles: one lies in z=0, the other in y=0. The
+    // normal a query gets is the one of whichever facet it is nearest, which is all a faceted
+    // surface has to give.
+    SimplicialMesh mesh;
+    auto n0 = mesh.add_node(0, 0, 0);
+    auto n1 = mesh.add_node(1, 0, 0);
+    auto n2 = mesh.add_node(1, 1, 0);
+    auto n3 = mesh.add_node(1, 0, 1);
+
+    std::vector<FaceId> faces{mesh.add_face(n0, n1, n2), mesh.add_face(n0, n1, n3)};
+    const FacetedSurface surface(&mesh, faces, 1);
+
+    // Just above the flat triangle, and nearer it than the upright one: its normal is along z.
+    // Far above would not do — the upright triangle rises to z = 1 and reaches up to meet it.
+    const Vector3d flat = surface.normal(Point3d(0.7, 0.3, 0.05));
+    REQUIRE(std::abs(flat.z()) == Approx(1.0).margin(1e-12));
+
+    // And just off the upright one: its normal is along y.
+    const Vector3d upright = surface.normal(Point3d(0.9, -0.05, 0.5));
+    REQUIRE(std::abs(upright.y()) == Approx(1.0).margin(1e-12));
+}
+
+TEST_CASE("FacetedSurface_PlaneSection_IsTheCurveThePlaneCutsOut", "[FacetedGeometry]") {
+    // One square of 2 triangles in z=0, spanning [0,1]^2. The plane y = 1/2 cuts it along the
+    // segment from (0,1/2,0) to (1,1/2,0), and that segment is what the section query answers on.
+    SimplicialMesh mesh;
+    auto n0 = mesh.add_node(0, 0, 0);
+    auto n1 = mesh.add_node(1, 0, 0);
+    auto n2 = mesh.add_node(1, 1, 0);
+    auto n3 = mesh.add_node(0, 1, 0);
+    std::vector<FaceId> faces{mesh.add_face(n0, n1, n2), mesh.add_face(n0, n2, n3)};
+    const FacetedSurface surface(&mesh, faces, 1);
+
+    const Point3d origin(0.0, 0.5, 0.0);
+    const Vector3d normal(0.0, 1.0, 0.0);
+
+    // A point above the middle of the section lands on it.
+    const auto middle = surface.closest_point_on_section(Point3d(0.5, 0.5, 3.0), origin, normal);
+    REQUIRE(middle.has_value());
+    REQUIRE(middle->x() == Approx(0.5));
+    REQUIRE(middle->y() == Approx(0.5));
+    REQUIRE(middle->z() == Approx(0.0));
+
+    // A point off to one side lands on the section's end, not on the nearest point of the surface:
+    // the section stops where the surface does.
+    const auto beyond = surface.closest_point_on_section(Point3d(4.0, 0.2, 0.0), origin, normal);
+    REQUIRE(beyond.has_value());
+    REQUIRE(beyond->x() == Approx(1.0));
+    REQUIRE(beyond->y() == Approx(0.5));
+
+    // A plane that misses the surface has no section at all, and says so rather than answering
+    // with the nearest point of the surface — a caller has to be able to tell the difference.
+    REQUIRE_FALSE(surface.closest_point_on_section(Point3d(0.5, 0.5, 0.0), Point3d(0.0, 5.0, 0.0), normal).has_value());
+}

@@ -1,5 +1,7 @@
 """Tests for the gecko.Blocking façade — see docs/user-guide/python.md."""
 
+import math
+import os
 import pathlib
 
 import pytest
@@ -247,12 +249,57 @@ def test_snap_node(geom_model_path):
     assert blocking.node_classification_dims()[0] == 0
 
 
+def test_a_tolerance_below_the_true_distance_excludes_that_dimension(square_model_path):
+    # #48 asks for a way to snap onto some kinds of entity but not others — already there, without
+    # a separate switch: passing a tolerance below the true distance excludes that whole dimension,
+    # since classify()/snap_node() only ever keep what is <= their tolerance.
+    model = gecko.GeomModel(square_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)])
+    blocking.classify(1e-6)
+
+    # Above the surface's interior, 0.5 from every vertex and every curve, a known 0.01 above the
+    # surface itself.
+    blocking.move_node(0, 0.5, 0.5, 0.01)
+
+    blocking.snap_node(0, 1e-6, 1e-6, 0.001)
+    assert blocking.node_classification_dims()[0] == -1
+
+    blocking.snap_node(0, 1e-6, 1e-6, 0.02)
+    assert blocking.node_classification_dims()[0] == 2
+
+
 def test_snap_node_unknown_id_raises(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model)
     blocking.create_quad_block(_QUAD_A)
     with pytest.raises(IndexError):
         blocking.snap_node(99, 0.1)
+
+
+def test_project_onto_classification_pulls_onto_a_nodes_own_target(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    blocking.classify(1e-6)
+
+    # Node 0 sits on the fixture's only model vertex, the origin. Wherever the trial point is,
+    # pulling it onto node 0's own classification lands it there.
+    assert blocking.node_classification_dims()[0] == 0
+    assert blocking.project_onto_classification(0, 5.0, -3.0, 2.0) == [0.0, 0.0, 0.0]
+
+    # A node with nothing to be classified on gives the trial point straight back.
+    ids, dims = blocking.node_ids(), blocking.node_classification_dims()
+    unclassified = next(i for i, d in zip(ids, dims) if d == -1)
+    assert blocking.project_onto_classification(unclassified, 5.0, -3.0, 2.0) == [5.0, -3.0, 2.0]
+
+
+def test_project_onto_classification_rejects_unknown_id(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    with pytest.raises(IndexError):
+        blocking.project_onto_classification(99, 0.0, 0.0, 0.0)
 
 
 def test_nb_cells_invalid_dim_raises(geom_model_path):
@@ -1345,3 +1392,113 @@ def test_open_chord_refuses_what_does_not_name_a_cut(geom_model_path):
 
     with pytest.raises(IndexError):
         blocking.open_chord(max(blocking.edge_ids()) + 1, near, elsewhere, 0.25, 1e-9)
+
+def _cylinder_model_path():
+    """Path to the checked-in cylinder.msh fixture the C++ suites use, via the env var
+    python/CMakeLists.txt sets for exactly this — GECKO_TEST_DATA_DIR."""
+    return str(pathlib.Path(os.environ["GECKO_TEST_DATA_DIR"]) / "cylinder.msh")
+
+
+def _cylinder_bounding_hex(model):
+    verts = model.mesh_vertices()
+    lo = [min(p[k] for p in verts) for k in range(3)]
+    hi = [max(p[k] for p in verts) for k in range(3)]
+    return lo, hi, [
+        (lo[0], lo[1], lo[2]), (hi[0], lo[1], lo[2]), (hi[0], hi[1], lo[2]), (lo[0], hi[1], lo[2]),
+        (lo[0], lo[1], hi[2]), (hi[0], lo[1], hi[2]), (hi[0], hi[1], hi[2]), (lo[0], hi[1], hi[2]),
+    ]
+
+
+def _triangle_normal_nearest(tris, p):
+    """The unit normal of whichever of the model's mesh triangles is nearest p — the same
+    "read it off the nearest facet" rule FacetedSurface.normal() uses on the C++ side, done here
+    in pure Python since that per-facet query is not itself exposed to Python."""
+    best, best_d = None, float("inf")
+    for a, b, c in tris:
+        centre = tuple((a[k] + b[k] + c[k]) / 3.0 for k in range(3))
+        d = math.dist(p, centre)
+        if d < best_d:
+            best_d, best = d, (a, b, c)
+    a, b, c = best
+    ab = tuple(b[k] - a[k] for k in range(3))
+    ac = tuple(c[k] - a[k] for k in range(3))
+    n = (ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0])
+    length = math.sqrt(sum(x * x for x in n))
+    return tuple(x / length for x in n) if length > 0 else (0.0, 0.0, 0.0)
+
+
+def test_an_edge_on_a_surface_lies_in_its_normal_plane(request):
+    # The Python-visible half of #48's edge/surface fit: an edge classified on a surface is pinned
+    # to the surface's section by the plane through its 2 ends containing the surface's own normal,
+    # rather than to whatever projecting each sample separately happens to trace. Measured here in
+    # plain geometry (mesh vertices/triangles), since the per-tag distance queries the C++ test uses
+    # are not themselves exposed to Python — the point is the same: does the edge stay in that plane.
+    model = gecko.GeomModel(_cylinder_model_path())
+    _, _, hexa = _cylinder_bounding_hex(model)
+    blocking = gecko.Blocking(model, degree=3)
+    blocking.create_hex_block(hexa)
+    blocking.classify(0.3)
+
+    tris = [
+        (model.mesh_vertices()[a], model.mesh_vertices()[b], model.mesh_vertices()[c])
+        for a, b, c in model.mesh_triangles()
+    ]
+    dims = blocking.edge_classification_dims()
+    samples = 16
+    verts = blocking.edge_vertices(samples)
+    per_edge = samples + 1
+
+    checked = 0
+    for e, dim in enumerate(dims):
+        if dim != 2:
+            continue
+        p0 = verts[e * per_edge]
+        p1 = verts[e * per_edge + per_edge - 1]
+        chord = tuple(p1[k] - p0[k] for k in range(3))
+        mid = tuple((p0[k] + p1[k]) / 2.0 for k in range(3))
+        up = _triangle_normal_nearest(tris, mid)
+        # chord x up, normalized: the section plane's own normal.
+        n = (chord[1] * up[2] - chord[2] * up[1], chord[2] * up[0] - chord[0] * up[2],
+             chord[0] * up[1] - chord[1] * up[0])
+        length = math.sqrt(sum(x * x for x in n))
+        if length < 1e-9:
+            continue
+        n = tuple(x / length for x in n)
+
+        worst = 0.0
+        for s in range(per_edge):
+            q = verts[e * per_edge + s]
+            off = sum((q[k] - p0[k]) * n[k] for k in range(3))
+            worst = max(worst, abs(off))
+        # The margin has to be tight enough to be a test: measured, this is 1.1e-16 with the
+        # section fit and 7.2e-05 without it, so anything between them separates the two. A looser
+        # 1e-4 * extent passed either way, which is no protection at all.
+        assert worst < 1e-8
+        checked += 1
+    assert checked == 4
+
+
+def test_an_edge_along_a_cylinder_ruling_keeps_a_straight_control_net():
+    # On a ruled surface an edge running along a ruling is exactly straight, so anything else is the
+    # fit inventing it. Measured on the control net — edge_bends() is exactly that — rather than on
+    # the curve: a Bezier stays inside its control points' hull, so an oscillating net barely moves
+    # the curve, and the 2 rejected fits are indistinguishable from the good one if you only look at
+    # where the curve goes. The net is also what matters, an oscillating one being an
+    # ill-conditioned representation that every later subdivision inherits.
+    #
+    # At degree 6: end-tangent constraints wandered 5e-02, uniform interpolation 1.4e-02 (Runge),
+    # least squares with pinned ends 7.1e-03. Degrees stop at 7 because past it the fit's own normal
+    # equations are too ill-conditioned to trust — see fitted_curve() in Blocking.h.
+    model = gecko.GeomModel(_cylinder_model_path())
+    _, _, hexa = _cylinder_bounding_hex(model)
+
+    for degree in (2, 3, 5, 6, 7):
+        blocking = gecko.Blocking(model, degree=degree)
+        blocking.create_hex_block(hexa)
+        blocking.classify(0.3)
+
+        dims = blocking.edge_classification_dims()
+        bends = blocking.edge_bends()
+        on_surface = [bends[i] for i, d in enumerate(dims) if d == 2]
+        assert len(on_surface) == 4
+        assert max(on_surface) < 1e-2
