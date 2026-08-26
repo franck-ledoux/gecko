@@ -290,7 +290,83 @@ namespace gecko::app {
                  "the blocking empty — so an unclassified grid can be taken apart one sheet at a time. Returns "
                  "False, changing nothing, when one of the sheet's edges joins 2 corners on 2 *different* model "
                  "vertices (merging them would leave one of those vertices with no corner on it), or when the sheet "
-                 "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.");
+                 "cannot be collapsed at all: one closing back onto itself, or one that would leave an edge a loop.")
+            .def("block_faces",
+                 &BlockingFacade::block_faces,
+                 py::arg("block_id"),
+                 "The 6 face ids bounding this block, in no particular order — what a nappe closed around a block "
+                 "is named with.")
+            .def("face_blocks",
+                 &BlockingFacade::face_blocks,
+                 py::arg("face_id"),
+                 "The ids of the blocks this face bounds: 2 of them, 1 where the face is on the boundary of the "
+                 "blocking, and none at all for a standalone quad block.")
+            .def("edge_corners", &BlockingFacade::edge_corners, py::arg("edge_id"), "The 2 node ids this edge joins.")
+            .def("face_corners",
+                 &BlockingFacade::face_corners,
+                 py::arg("face_id"),
+                 "The 4 node ids of this face, round its perimeter — so [0]/[2] and [1]/[3] are its 2 diagonals, "
+                 "which is what names a fold for ``collapse_chord``.")
+            .def("edge_faces",
+                 &BlockingFacade::edge_faces,
+                 py::arg("edge_id"),
+                 "The ids of the faces through this edge — its fan. Naming 2 of them is what tells ``open_chord`` "
+                 "where to cut it.")
+            .def("pillow",
+                 &BlockingFacade::pillow,
+                 py::arg("face_ids"),
+                 py::arg("inside_block_id"),
+                 py::arg("thickness"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Inserts a layer of blocks along ``face_ids`` — a *nappe*, a sheet of block faces cutting the "
+                 "blocking in two, either closed around a set of blocks or running clean through the structure and "
+                 "out on its boundary. ``inside_block_id`` names the side that shrinks; the other side does not "
+                 "move at all, which is what keeps a structure fitted to a model on the model when the nappe lies "
+                 "on its boundary. ``thickness`` is a fraction, in (0,1), of the mean edge length at each corner "
+                 "that moves. A corner the nappe cuts through becomes 2: the outside one keeps its classification, "
+                 "the inside one keeps only what it is still on after moving — so a blocking nobody classified "
+                 "stays unclassified. Returns False, changing nothing, when what was given is not a nappe: a face "
+                 "named twice, a standalone quad block, a nappe that does not separate the named side from the "
+                 "rest, or one that is not manifold along its own edges.")
+            .def("collapse_chord",
+                 &BlockingFacade::collapse_chord,
+                 py::arg("face_id"),
+                 py::arg("hinge_node_id"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Collapses the *chord* through ``face_id`` — the column of blocks strung together through opposite "
+                 "faces, the dual curve of the structure. Each cross-section folds onto the diagonal through "
+                 "``hinge_node_id``, the 2 corners off it meeting in the middle, so the column goes and the 2 blocks "
+                 "that were only edge-neighbours across the fold come to share a face. Each edge of the hinge itself "
+                 "loses one of the blocks around it: a valence-4 edge comes out with valence 3, which is what the "
+                 "operation is for. Folding is the only way to take a chord out that leaves a blocking behind — "
+                 "merging each block's opposite side faces instead would contract edges shared with blocks outside "
+                 "the column. Where 2 corners meet the more constrained classification wins, as in ``delete_sheet``. "
+                 "Returns False, changing nothing, when the chord runs back through a block it has already been "
+                 "through, when the 2 corners meeting are on 2 different model vertices, when they are already "
+                 "joined by an edge, or when a block outside the column has both of them as corners.")
+            .def("open_chord",
+                 &BlockingFacade::open_chord,
+                 py::arg("edge_id"),
+                 py::arg("first_face_id"),
+                 py::arg("second_face_id"),
+                 py::arg("thickness"),
+                 py::arg("tol_vertex"),
+                 py::arg("tol_curve") = -1.0,
+                 py::arg("tol_surface") = -1.0,
+                 "Opens the chord along ``edge_id`` into a column of blocks — the inverse of ``collapse_chord``. "
+                 "The 2 named faces, from ``edge_faces``, are where the fan of blocks around the edge is cut: the "
+                 "fan comes apart in 2 arcs, the edge comes apart in 2, and a block is inserted in the gap. Where "
+                 "the edge is on the boundary its fan is already open at both ends, so one of the 2 is a boundary "
+                 "face and cutting at it costs nothing. How far the column runs is not said: the walk carries the "
+                 "cuts from one edge to the next and stops when nothing carries them further. Returns False, "
+                 "changing nothing, when the 2 faces are the same or do not both carry the edge, when the chain "
+                 "runs back into itself, when it stops somewhere the cuts do not leave the blocks around a corner "
+                 "in exactly 2 groups, or when the walk finds more than one way to carry on — the structure "
+                 "offering 2 different columns from that start, which is the caller's to choose between.");
     }
 
 } // namespace gecko::app

@@ -77,6 +77,15 @@ namespace gecko::biy {
         /** @brief Delete-mode preview: the one block a click would remove. */
         constexpr const char *DELETE_PREVIEW = "to delete";
 
+        /** @brief The colour quantity marking whatever faces an operation in progress has spoken
+         * for: a nappe being gathered, a fold being aimed, or the cuts of an opening. */
+        constexpr const char *FACE_SELECTION = "selection";
+
+        /** @brief The colour quantity the block faces otherwise carry, put back when a selection is
+         * done with — enabling one dominant quantity disables the other, and Polyscope does not
+         * remember which was on before. */
+        constexpr const char *FACE_CLASSIFICATION = "classification";
+
         glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
 
         /**
@@ -214,6 +223,36 @@ namespace gecko::biy {
             m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
             refresh_delete_preview();
         }
+        // A selection survives a trip through Camera mode, and only that: reaching the faces on the
+        // far side of a nappe means rotating the view, and losing 6 clicks to do it would make the
+        // mode unusable. Anything that changes the blocking clears it, the faces picked being named
+        // by id and an id meaning nothing once its cell has gone.
+        if (mode == MouseMode::Edit || mode == MouseMode::Cut || mode == MouseMode::Collapse ||
+            mode == MouseMode::Delete) {
+            clear_selection();
+        }
+        m_selection_dirty = true;
+
+        // All 3 of these aim at block faces, and Polyscope picks nothing from a structure that is
+        // not shown — so with that display off they do nothing at all, silently. Said here rather
+        // than left to be discovered by clicking and getting no answer.
+        if (mode == MouseMode::Pillow || mode == MouseMode::Chord || mode == MouseMode::Open) {
+            const bool showing =
+                polyscope::hasSurfaceMesh(BLOCK_FACES) && polyscope::getSurfaceMesh(BLOCK_FACES)->isEnabled();
+            if (!showing) {
+                m_status = "Turn on Blocking > faces in the Scene panel: this mode aims at block faces";
+            }
+        }
+    }
+
+    void BiyApp::clear_selection() {
+        m_nappe.clear();
+        m_hover_face.reset();
+        m_hinge_node.reset();
+        m_open_edge.reset();
+        m_open_faces.clear();
+        m_last_face_mouse = glm::vec2(-1.0f, -1.0f);
+        m_selection_dirty = true;
     }
 
     void BiyApp::register_model() {
@@ -602,6 +641,12 @@ namespace gecko::biy {
         handle_cut();
         handle_collapse();
         handle_delete();
+        handle_pillow();
+        handle_chord();
+        handle_open();
+        // After everything, because a rebuild of the Polyscope structures — this frame's, or one the
+        // console asked for — registers the block faces afresh and takes the mark with them.
+        refresh_face_preview();
     }
 
     void BiyApp::draw_operations_panel() {
@@ -800,6 +845,9 @@ namespace gecko::biy {
             if (ImGui::IsKeyPressed(ImGuiKey_X)) set_mouse_mode(MouseMode::Cut);
             if (ImGui::IsKeyPressed(ImGuiKey_S)) set_mouse_mode(MouseMode::Collapse);
             if (ImGui::IsKeyPressed(ImGuiKey_D)) set_mouse_mode(MouseMode::Delete);
+            if (ImGui::IsKeyPressed(ImGuiKey_P)) set_mouse_mode(MouseMode::Pillow);
+            if (ImGui::IsKeyPressed(ImGuiKey_K)) set_mouse_mode(MouseMode::Chord);
+            if (ImGui::IsKeyPressed(ImGuiKey_O)) set_mouse_mode(MouseMode::Open);
 
             // Redo first: its chord also satisfies undo's, so testing undo first would swallow it.
             // ImGui reports Cmd as KeyCtrl on macOS (ConfigMacOSXBehaviors), which is what a user
@@ -824,6 +872,11 @@ namespace gecko::biy {
         if (ImGui::RadioButton("Collapse (S)", m_mode == MouseMode::Collapse)) set_mouse_mode(MouseMode::Collapse);
         ImGui::SameLine();
         if (ImGui::RadioButton("Delete (D)", m_mode == MouseMode::Delete)) set_mouse_mode(MouseMode::Delete);
+        if (ImGui::RadioButton("Pillow (P)", m_mode == MouseMode::Pillow)) set_mouse_mode(MouseMode::Pillow);
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Chord (K)", m_mode == MouseMode::Chord)) set_mouse_mode(MouseMode::Chord);
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Open (O)", m_mode == MouseMode::Open)) set_mouse_mode(MouseMode::Open);
         switch (m_mode) {
             case MouseMode::Edit:
                 ImGui::TextWrapped("Drag a block corner to move it. Camera navigation is off.");
@@ -844,12 +897,67 @@ namespace gecko::biy {
                 ImGui::TextWrapped("Point at a block: it lights up. Click, or press Space, to delete it — along "
                                    "with everything that existed only because of it. Camera navigation is off.");
                 break;
+            case MouseMode::Pillow:
+                ImGui::TextWrapped("Click block faces to gather a nappe — a sheet of them cutting the blocking in "
+                                   "two, closed around some blocks or running clean through it. Clicking a face "
+                                   "again takes it back. Press Space to insert a layer of blocks along it. The "
+                                   "side that shrinks is the one you are looking *through* the first face at; the "
+                                   "other does not move, which is what keeps a structure on its model. Camera "
+                                   "navigation is off.");
+                break;
+            case MouseMode::Chord:
+                ImGui::TextWrapped("Point at a block face, near the corner you want the fold to run through: the "
+                                   "face lights up. Click, or press Space, to fold away the whole chord behind it "
+                                   "— the column of blocks strung together through opposite faces. The 2 corners "
+                                   "off that diagonal meet in the middle. Camera navigation is off.");
+                break;
+            case MouseMode::Open:
+                ImGui::TextWrapped("The inverse: click a block edge, then the 2 faces round it to cut its fan at, "
+                                   "and a column of blocks opens along the chain that edge starts. Escape clears "
+                                   "what has been picked. Camera navigation is off.");
+                break;
             default:
                 ImGui::TextWrapped("Rotate/pan/zoom the view. Switch to Edit to move corners, Cut to split "
-                                   "blocks, Collapse to take a whole layer out, Delete to remove one block.");
+                                   "blocks, Collapse to take a whole layer out, Delete to remove one block, "
+                                   "Pillow to insert a layer along a nappe of faces, Chord to fold a column "
+                                   "away, Open to put one back.");
                 break;
         }
 
+        if (m_mode == MouseMode::Pillow || m_mode == MouseMode::Open) {
+            // Both operations insert blocks, and both measure how thick against the edges at each
+            // corner that moves rather than against the model — so one layer is not 10 times the
+            // next one's size just because the blocks are.
+            ImGui::SetNextItemWidth(120.0f * polyscope::options::uiScale);
+            ImGui::SliderFloat("Thickness", &m_thickness, 0.05f, 0.9f, "%.2f");
+        }
+        if (m_mode == MouseMode::Pillow) {
+            ImGui::Text("Nappe: %zu face(s)", m_nappe.size());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear##nappe")) {
+                clear_selection();
+                m_status = "Nappe cleared";
+            }
+        }
+        if (m_mode == MouseMode::Chord) {
+            if (m_hover_face && m_hinge_node) {
+                ImGui::Text("Face %d, folding through corner %d", *m_hover_face, *m_hinge_node);
+            } else {
+                ImGui::TextUnformatted("Face: none under the cursor");
+            }
+        }
+        if (m_mode == MouseMode::Open) {
+            if (!m_open_edge) {
+                ImGui::TextUnformatted("Edge: none picked yet");
+            } else {
+                ImGui::Text("Edge %d, %zu face(s) of 2", *m_open_edge, m_open_faces.size());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Clear##open")) {
+                    clear_selection();
+                    m_status = "Cleared";
+                }
+            }
+        }
         if (m_mode == MouseMode::Collapse) {
             if (m_hover_edge && !m_sheet.empty()) {
                 ImGui::Text("Sheet: %zu edges", m_sheet.size());
@@ -1026,6 +1134,38 @@ namespace gecko::biy {
         return eye + ray * t;
     }
 
+    std::optional<std::pair<int, double>> BiyApp::nearest_edge(const glm::vec3 &target) const {
+        // The block edges are drawn as polylines sampled from the very same curves the facade
+        // indexes, so finding the nearest sampled segment recovers both which edge it was and how
+        // far along — without depending on how Polyscope happens to number a curve network.
+        const auto points = m_blocking->edge_vertices(m_edge_samples);
+        const auto per_edge = static_cast<std::size_t>(m_edge_samples) + 1;
+        if (points.empty() || points.size() % per_edge != 0) return std::nullopt;
+
+        double best = std::numeric_limits<double>::max();
+        int best_edge = -1;
+        double best_param = 0.5;
+        for (std::size_t e = 0; e * per_edge < points.size(); ++e) {
+            for (std::size_t k = 0; k + 1 < per_edge; ++k) {
+                const auto &a = points[e * per_edge + k];
+                const auto &b = points[e * per_edge + k + 1];
+                const glm::vec3 pa(static_cast<float>(a[0]), static_cast<float>(a[1]), static_cast<float>(a[2]));
+                const glm::vec3 pb(static_cast<float>(b[0]), static_cast<float>(b[1]), static_cast<float>(b[2]));
+                const glm::vec3 ab = pb - pa;
+                const float len2 = glm::dot(ab, ab);
+                const float f = (len2 > 0.0f) ? glm::clamp(glm::dot(target - pa, ab) / len2, 0.0f, 1.0f) : 0.0f;
+                const double distance = glm::length(target - (pa + ab * f));
+                if (distance < best) {
+                    best = distance;
+                    best_edge = static_cast<int>(e);
+                    best_param = (static_cast<double>(k) + f) / static_cast<double>(m_edge_samples);
+                }
+            }
+        }
+        if (best_edge < 0) return std::nullopt;
+        return std::pair<int, double>{best_edge, best_param};
+    }
+
     void BiyApp::update_cut_hover(glm::vec2 screen_coords) {
         const auto clear = [this] {
             m_hover_edge.reset();
@@ -1063,34 +1203,13 @@ namespace gecko::biy {
         // edges are drawn as polylines sampled from the very same curves the facade indexes, so
         // finding the nearest sampled segment recovers both which edge it was and how far along —
         // without depending on how Polyscope happens to number a curve network's elements.
-        const auto points = m_blocking->edge_vertices(m_edge_samples);
-        const auto per_edge = static_cast<std::size_t>(m_edge_samples) + 1;
-        if (points.empty() || points.size() % per_edge != 0) {
+        const auto found = nearest_edge(pick.position);
+        if (!found) {
             clear();
             return;
         }
-
-        const glm::vec3 target = pick.position;
-        double best = std::numeric_limits<double>::max();
-        int best_edge = -1;
-        double best_param = 0.5;
-        for (std::size_t e = 0; e * per_edge < points.size(); ++e) {
-            for (std::size_t k = 0; k + 1 < per_edge; ++k) {
-                const auto &a = points[e * per_edge + k];
-                const auto &b = points[e * per_edge + k + 1];
-                const glm::vec3 pa(static_cast<float>(a[0]), static_cast<float>(a[1]), static_cast<float>(a[2]));
-                const glm::vec3 pb(static_cast<float>(b[0]), static_cast<float>(b[1]), static_cast<float>(b[2]));
-                const glm::vec3 ab = pb - pa;
-                const float len2 = glm::dot(ab, ab);
-                const float f = (len2 > 0.0f) ? glm::clamp(glm::dot(target - pa, ab) / len2, 0.0f, 1.0f) : 0.0f;
-                const double distance = glm::length(target - (pa + ab * f));
-                if (distance < best) {
-                    best = distance;
-                    best_edge = static_cast<int>(e);
-                    best_param = (static_cast<double>(k) + f) / static_cast<double>(m_edge_samples);
-                }
-            }
-        }
+        const int best_edge = found->first;
+        double best_param = found->second;
         if (best_edge < 0) {
             clear();
             return;
@@ -1339,6 +1458,369 @@ namespace gecko::biy {
                    " to " + std::to_string(after);
         report("collapsed a sheet of " + std::to_string(sheet_edges) + " edges, blocks " + std::to_string(before) +
                " -> " + std::to_string(after) + "." + bend_report(*m_blocking));
+    }
+
+    std::optional<std::pair<int, int>> BiyApp::pick_face(glm::vec2 screen_coords) {
+        if (!m_blocking || !polyscope::hasSurfaceMesh(BLOCK_FACES)) return std::nullopt;
+
+        // Always the faces themselves: a selected face is *coloured* rather than covered, so
+        // nothing of ours ever comes between the cursor and it — which is also what lets a face be
+        // clicked a second time to take it back out of a nappe.
+        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        if (!pick.isHit || pick.structureName != BLOCK_FACES) return std::nullopt;
+
+        const auto hit = polyscope::getSurfaceMesh(BLOCK_FACES)->interpretPickResult(pick);
+        if (hit.elementType != polyscope::MeshElement::FACE) return std::nullopt;
+
+        // The faces are drawn as a grid of quads per 2-cell, and `face_grid_owners()` says which
+        // 2-cell each quad came from — as a position, turned into an id here for the reason
+        // `m_hover_edge` gives.
+        const auto owners = m_blocking->face_grid_owners(m_edge_samples);
+        if (hit.index >= owners.size()) return std::nullopt;
+        const auto ids = m_blocking->face_ids();
+        const auto owner = static_cast<std::size_t>(owners[hit.index]);
+        if (owner >= ids.size()) return std::nullopt;
+        const int face_id = ids[owner];
+
+        // And which of its 4 corners the pick landed nearest, which is what names a fold's diagonal:
+        // aiming at a corner of a face is the whole of the interface for it.
+        int nearest = -1;
+        double best = std::numeric_limits<double>::max();
+        for (const int node : m_blocking->face_corners(face_id)) {
+            const auto at = m_blocking->node_position(node);
+            const glm::vec3 p(static_cast<float>(at[0]), static_cast<float>(at[1]), static_cast<float>(at[2]));
+            const double distance = glm::length(pick.position - p);
+            if (distance < best) {
+                best = distance;
+                nearest = node;
+            }
+        }
+        if (nearest < 0) return std::nullopt;
+        return std::pair<int, int>{face_id, nearest};
+    }
+
+    std::optional<glm::vec3> BiyApp::block_centre(int block_id) {
+        const int position = display_position(3, block_id);
+        if (position < 0) return std::nullopt;
+        const auto hexes = m_blocking->mesh_hexes(1);
+        const auto index = static_cast<std::size_t>(position);
+        if (index >= hexes.size()) return std::nullopt;
+
+        const auto points = m_blocking->mesh_vertices(1);
+        glm::vec3 centre(0.0f);
+        for (const int node : hexes[index]) {
+            const auto &at = points[static_cast<std::size_t>(node)];
+            centre += glm::vec3(static_cast<float>(at[0]), static_cast<float>(at[1]), static_cast<float>(at[2]));
+        }
+        return centre / 8.0f;
+    }
+
+    void BiyApp::refresh_face_preview() {
+        if (!m_selection_dirty) return;
+        if (!m_blocking || !polyscope::hasSurfaceMesh(BLOCK_FACES)) return;
+        m_selection_dirty = false;
+        auto *faces = polyscope::getSurfaceMesh(BLOCK_FACES);
+
+        std::vector<int> wanted;
+        if (m_mode == MouseMode::Pillow) {
+            wanted = m_nappe;
+        } else if (m_mode == MouseMode::Chord && m_hover_face) {
+            wanted.push_back(*m_hover_face);
+        } else if (m_mode == MouseMode::Open) {
+            wanted = m_open_faces;
+        }
+
+        if (wanted.empty()) {
+            faces->removeQuantity(FACE_SELECTION);
+            // Whatever the faces were showing before comes back: enabling one dominant quantity
+            // disabled it, and Polyscope keeps no memory of which that was.
+            if (auto *classification = faces->getQuantity(FACE_CLASSIFICATION)) {
+                classification->setEnabled(true);
+            }
+            return;
+        }
+
+        std::set<int> positions;
+        const auto ids = m_blocking->face_ids();
+        for (const int id : wanted) {
+            const auto found = std::ranges::find(ids, id);
+            if (found != ids.end()) positions.insert(static_cast<int>(found - ids.begin()));
+        }
+
+        // One colour per drawn quad: the selection colour for the faces spoken for, and for every
+        // other one the colour it would have had anyway, so that marking a face changes that face
+        // and nothing else about the picture.
+        const auto owners = m_blocking->face_grid_owners(m_edge_samples);
+        const auto dims = m_blocking->face_classification_dims();
+        const glm::vec3 marked = to_glm(m_config.sheet_color);
+        std::vector<glm::vec3> colors;
+        colors.reserve(owners.size());
+        for (const int owner : owners) {
+            const auto position = static_cast<std::size_t>(owner);
+            if (positions.count(owner) > 0) {
+                colors.push_back(marked);
+            } else {
+                colors.push_back(to_glm(m_config.color_for(position < dims.size() ? dims[position] : -1)));
+            }
+        }
+        faces->addFaceColorQuantity(FACE_SELECTION, colors)->setEnabled(true);
+    }
+
+    void BiyApp::handle_pillow() {
+        if (!m_blocking || m_mode != MouseMode::Pillow) return;
+        ImGuiIO &io = ImGui::GetIO();
+
+        if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_Space)) {
+            perform_pillow("space");
+            return;
+        }
+        if (io.WantCaptureMouse) return;
+
+        if (io.MouseClicked[0]) {
+            const auto picked = pick_face(glm::vec2{io.MousePos.x, io.MousePos.y});
+            if (!picked) {
+                m_status = "No block face under the cursor";
+                return;
+            }
+            // A click takes a face back as readily as it adds one: gathering a nappe by eye means
+            // getting one wrong now and then, and there is nothing else the second click could mean.
+            const auto found = std::ranges::find(m_nappe, picked->first);
+            if (found != m_nappe.end()) {
+                m_nappe.erase(found);
+            } else {
+                m_nappe.push_back(picked->first);
+            }
+            m_selection_dirty = true;
+            m_status = std::to_string(m_nappe.size()) + " face(s) in the nappe — Space to insert the layer";
+        }
+    }
+
+    void BiyApp::perform_pillow(const char *trigger) {
+        const auto report = [trigger](const std::string &message) {
+            std::cout << "biy [pillow by " << trigger << "]: " << message << std::endl;
+        };
+
+        if (m_nappe.empty()) {
+            m_status = "No nappe: click the block faces to insert the layer along";
+            report("nothing picked. Click the faces the layer should follow, then press Space.");
+            return;
+        }
+
+        // Which side shrinks has to be said, and what a click means is "this face, of the block I am
+        // looking through it at" — so the inside is the block on the far side of the first face
+        // picked, the one the cursor was aimed into.
+        const auto sides = m_blocking->face_blocks(m_nappe.front());
+        if (sides.empty()) {
+            m_status = "That face bounds no block";
+            report("the first face picked bounds no block — a standalone quad block is not a nappe.");
+            return;
+        }
+        int inside = sides.front();
+        if (sides.size() == 2) {
+            const glm::vec3 eye = polyscope::view::getCameraWorldPosition();
+            const auto near_centre = block_centre(sides[0]);
+            const auto far_centre = block_centre(sides[1]);
+            if (near_centre && far_centre && glm::length(*far_centre - eye) > glm::length(*near_centre - eye)) {
+                inside = sides[1];
+            }
+        }
+
+        const auto before = m_blocking->nb_cells(3);
+        bool done = false;
+        try {
+            done = m_blocking->pillow(m_nappe,
+                                      inside,
+                                      static_cast<double>(m_thickness),
+                                      static_cast<double>(m_tol_vertex),
+                                      static_cast<double>(m_tol_curve),
+                                      static_cast<double>(m_tol_surface));
+        } catch (const std::exception &error) {
+            m_status = std::string("Pillow failed: ") + error.what();
+            report(std::string("failed: ") + error.what());
+            return;
+        }
+
+        if (!done) {
+            m_status = "Those faces are not a nappe — see the terminal";
+            report("refused. The faces have to cut the blocking in two: every one of them with the "
+                   "named side on exactly one of its 2 sides, and 2 of them meeting at every edge "
+                   "they share unless that edge is on the boundary.");
+            return;
+        }
+
+        clear_selection();
+        refresh_view();
+        const auto after = m_blocking->nb_cells(3);
+        m_status = "Inserted a layer: blocks " + std::to_string(before) + " -> " + std::to_string(after);
+        report("inserted a layer, blocks " + std::to_string(before) + " -> " + std::to_string(after) + ".");
+    }
+
+    void BiyApp::handle_chord() {
+        if (!m_blocking || m_mode != MouseMode::Chord) return;
+        ImGuiIO &io = ImGui::GetIO();
+
+        const bool by_key = !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_Space);
+        const bool by_click = !io.WantCaptureMouse && io.MouseClicked[0];
+        if (by_click || by_key) {
+            // Acts on what the highlight is showing without re-testing under the cursor, for the
+            // reason handle_cut() gives about trackpads.
+            perform_chord(by_key ? "space" : "click");
+            return;
+        }
+        if (io.WantCaptureMouse) return;
+
+        const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
+        if (mouse != m_last_face_mouse) {
+            m_last_face_mouse = mouse;
+            const auto previous = m_hover_face;
+            const auto picked = pick_face(mouse);
+            m_hover_face = picked ? std::optional<int>{picked->first} : std::nullopt;
+            m_hinge_node = picked ? std::optional<int>{picked->second} : std::nullopt;
+            m_selection_dirty = true;
+            if (m_hover_face != previous) {
+                m_status = m_hover_face ? "Face " + std::to_string(*m_hover_face) + ", folding through corner " +
+                                              std::to_string(*m_hinge_node) + " — click or Space"
+                                        : "No block face under the cursor";
+            }
+        }
+    }
+
+    void BiyApp::perform_chord(const char *trigger) {
+        const auto report = [trigger](const std::string &message) {
+            std::cout << "biy [chord collapse by " << trigger << "]: " << message << std::endl;
+        };
+
+        if (!m_hover_face || !m_hinge_node) {
+            m_status = "Nothing under the cursor to fold";
+            report("no face under the cursor. Point at one — it lights up — then click or press Space.");
+            return;
+        }
+
+        const auto before = m_blocking->nb_cells(3);
+        bool done = false;
+        try {
+            done = m_blocking->collapse_chord(*m_hover_face,
+                                              *m_hinge_node,
+                                              static_cast<double>(m_tol_vertex),
+                                              static_cast<double>(m_tol_curve),
+                                              static_cast<double>(m_tol_surface));
+        } catch (const std::exception &error) {
+            m_status = std::string("Chord collapse failed: ") + error.what();
+            report(std::string("failed: ") + error.what());
+            return;
+        }
+
+        if (!done) {
+            m_status = "That chord cannot be folded — see the terminal";
+            report("refused. Either the chord runs back through a block it has already been through, "
+                   "or the 2 corners that would meet are on 2 different model vertices, are already "
+                   "joined by an edge, or are both corners of one block outside the column.");
+            return;
+        }
+
+        clear_selection();
+        refresh_view();
+        const auto after = m_blocking->nb_cells(3);
+        m_status = "Folded a chord: blocks " + std::to_string(before) + " -> " + std::to_string(after);
+        report("folded a chord, blocks " + std::to_string(before) + " -> " + std::to_string(after) + ".");
+    }
+
+    void BiyApp::handle_open() {
+        if (!m_blocking || m_mode != MouseMode::Open) return;
+        ImGuiIO &io = ImGui::GetIO();
+
+        if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            clear_selection();
+            m_status = "Cleared. Point at the edge to open.";
+            return;
+        }
+        if (io.WantCaptureMouse || !io.MouseClicked[0]) return;
+
+        const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
+        if (!m_open_edge) {
+            const polyscope::PickResult pick = polyscope::pickAtScreenCoords(mouse);
+            if (!pick.isHit || pick.structureName != BLOCK_EDGES) {
+                m_status = "No block edge under the cursor";
+                return;
+            }
+            const auto found = nearest_edge(pick.position);
+            if (!found) return;
+            const auto ids = m_blocking->edge_ids();
+            const auto position = static_cast<std::size_t>(found->first);
+            if (position >= ids.size()) return;
+            m_open_edge = ids[position];
+            m_status = "Edge " + std::to_string(*m_open_edge) + " — now click the 2 faces to cut its fan at";
+            return;
+        }
+
+        const auto picked = pick_face(mouse);
+        if (!picked) {
+            m_status = "No block face under the cursor";
+            return;
+        }
+        // Only the faces through that edge can cut its fan, so saying so here is cheaper than a
+        // refusal from the kernel a click later.
+        const auto fan = m_blocking->edge_faces(*m_open_edge);
+        if (std::ranges::find(fan, picked->first) == fan.end()) {
+            m_status =
+                "That face does not carry the edge — pick one of the " + std::to_string(fan.size()) + " round it";
+            return;
+        }
+        const auto already = std::ranges::find(m_open_faces, picked->first);
+        if (already != m_open_faces.end()) {
+            m_open_faces.erase(already);
+        } else {
+            m_open_faces.push_back(picked->first);
+        }
+        m_selection_dirty = true;
+
+        if (m_open_faces.size() < 2) {
+            m_status = "Edge " + std::to_string(*m_open_edge) + ", 1 face of 2 — pick the other";
+            return;
+        }
+        perform_open("click");
+    }
+
+    void BiyApp::perform_open(const char *trigger) {
+        const auto report = [trigger](const std::string &message) {
+            std::cout << "biy [chord opening by " << trigger << "]: " << message << std::endl;
+        };
+
+        if (!m_open_edge || m_open_faces.size() != 2) {
+            m_status = "Pick an edge, then the 2 faces to cut its fan at";
+            return;
+        }
+
+        const auto before = m_blocking->nb_cells(3);
+        bool done = false;
+        try {
+            done = m_blocking->open_chord(*m_open_edge,
+                                          m_open_faces[0],
+                                          m_open_faces[1],
+                                          static_cast<double>(m_thickness),
+                                          static_cast<double>(m_tol_vertex),
+                                          static_cast<double>(m_tol_curve),
+                                          static_cast<double>(m_tol_surface));
+        } catch (const std::exception &error) {
+            m_status = std::string("Chord opening failed: ") + error.what();
+            report(std::string("failed: ") + error.what());
+            return;
+        }
+
+        if (!done) {
+            m_status = "That chord cannot be opened — see the terminal";
+            report("refused. Either the 2 faces do not cut the fan in two, or the chain stops "
+                   "somewhere it cannot, or the walk found more than one way to carry on — which "
+                   "means the structure offers several columns from that edge, and choosing is yours.");
+            clear_selection();
+            return;
+        }
+
+        clear_selection();
+        refresh_view();
+        const auto after = m_blocking->nb_cells(3);
+        m_status = "Opened a chord: blocks " + std::to_string(before) + " -> " + std::to_string(after);
+        report("opened a chord, blocks " + std::to_string(before) + " -> " + std::to_string(after) + ".");
     }
 
     void BiyApp::update_delete_hover(glm::vec2 screen_coords) {

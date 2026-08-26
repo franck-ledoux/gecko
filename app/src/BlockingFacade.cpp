@@ -286,6 +286,65 @@ namespace gecko::app {
         return true;
     }
 
+    bool BlockingFacade::pillow(const std::vector<int> &face_ids,
+                                int inside_block_id,
+                                double thickness,
+                                double tol_vertex,
+                                double tol_curve,
+                                double tol_surface) {
+        // Resolved before the checkpoint would be worth taking, so that naming a face that is not
+        // there throws without a snapshot having been pushed.
+        using BlockingT = Impl::BlockingT;
+        std::vector<typename BlockingT::Face> faces;
+        faces.reserve(face_ids.size());
+        for (const int id : face_ids) {
+            faces.push_back(cell_or_throw<2>(m_impl, id, "face"));
+        }
+        const auto inside = cell_or_throw<3>(m_impl, inside_block_id, "block");
+
+        Checkpoint checkpoint(*this);
+        if (!m_impl.blocking.pillow(faces, inside, thickness, tol_vertex, tol_curve, tol_surface)) {
+            checkpoint.discard();
+            return false;
+        }
+        return true;
+    }
+
+    bool BlockingFacade::collapse_chord(int face_id,
+                                        int hinge_node_id,
+                                        double tol_vertex,
+                                        double tol_curve,
+                                        double tol_surface) {
+        const auto face = cell_or_throw<2>(m_impl, face_id, "face");
+        const auto hinge = cell_or_throw<0>(m_impl, hinge_node_id, "node");
+
+        Checkpoint checkpoint(*this);
+        if (!m_impl.blocking.collapse_chord(face, hinge, tol_vertex, tol_curve, tol_surface)) {
+            checkpoint.discard();
+            return false;
+        }
+        return true;
+    }
+
+    bool BlockingFacade::open_chord(int edge_id,
+                                    int first_face_id,
+                                    int second_face_id,
+                                    double thickness,
+                                    double tol_vertex,
+                                    double tol_curve,
+                                    double tol_surface) {
+        const auto edge = cell_or_throw<1>(m_impl, edge_id, "edge");
+        const auto first = cell_or_throw<2>(m_impl, first_face_id, "face");
+        const auto second = cell_or_throw<2>(m_impl, second_face_id, "face");
+
+        Checkpoint checkpoint(*this);
+        if (!m_impl.blocking.open_chord(edge, first, second, thickness, tol_vertex, tol_curve, tol_surface)) {
+            checkpoint.discard();
+            return false;
+        }
+        return true;
+    }
+
     namespace {
         /** @brief The node carrying @p node_id, straight from the map.
          *
@@ -326,6 +385,65 @@ namespace gecko::app {
     std::vector<int> BlockingFacade::face_ids() const { return ids_in_traversal_order<2>(m_impl.blocking.cmap()); }
 
     std::vector<int> BlockingFacade::block_ids() const { return ids_in_traversal_order<3>(m_impl.blocking.cmap()); }
+
+    std::vector<int> BlockingFacade::block_faces(int block_id) {
+        const auto block = cell_or_throw<3>(m_impl, block_id, "block");
+        auto &map = m_impl.blocking.cmap();
+        std::vector<int> ids;
+        for (auto it = map.one_dart_per_incident_cell<2, 3>(block->dart()).begin(),
+                  itend = map.one_dart_per_incident_cell<2, 3>(block->dart()).end();
+             it != itend;
+             ++it) {
+            ids.push_back(static_cast<int>(map.attribute<2>(it)->info().id));
+        }
+        return ids;
+    }
+
+    std::vector<int> BlockingFacade::face_blocks(int face_id) {
+        const auto face = cell_or_throw<2>(m_impl, face_id, "face");
+        auto &map = m_impl.blocking.cmap();
+        std::vector<int> ids;
+        const auto dart = face->dart();
+        if (const auto near = map.attribute<3>(dart); near != nullptr) {
+            ids.push_back(static_cast<int>(near->info().id));
+        }
+        if (!map.is_free<3>(dart)) {
+            if (const auto far = map.attribute<3>(map.beta<3>(dart)); far != nullptr) {
+                ids.push_back(static_cast<int>(far->info().id));
+            }
+        }
+        return ids;
+    }
+
+    std::vector<int> BlockingFacade::face_corners(int face_id) {
+        const auto face = cell_or_throw<2>(m_impl, face_id, "face");
+        std::vector<int> ids;
+        for (const auto node : m_impl.blocking.frame_of(face)) {
+            ids.push_back(static_cast<int>(node->info().id));
+        }
+        return ids;
+    }
+
+    std::vector<int> BlockingFacade::edge_faces(int edge_id) {
+        const auto edge = cell_or_throw<1>(m_impl, edge_id, "edge");
+        auto &map = m_impl.blocking.cmap();
+        std::vector<int> ids;
+        for (auto it = map.one_dart_per_incident_cell<2, 1>(edge->dart()).begin(),
+                  itend = map.one_dart_per_incident_cell<2, 1>(edge->dart()).end();
+             it != itend;
+             ++it) {
+            ids.push_back(static_cast<int>(map.attribute<2>(it)->info().id));
+        }
+        return ids;
+    }
+
+    std::vector<int> BlockingFacade::edge_corners(int edge_id) {
+        const auto edge = cell_or_throw<1>(m_impl, edge_id, "edge");
+        auto &map = m_impl.blocking.cmap();
+        const auto dart = edge->dart();
+        return {static_cast<int>(map.attribute<0>(dart)->info().id),
+                static_cast<int>(map.attribute<0>(map.beta<1>(dart))->info().id)};
+    }
 
     std::vector<int> BlockingFacade::node_ids() const {
         const auto &map = m_impl.blocking.cmap();

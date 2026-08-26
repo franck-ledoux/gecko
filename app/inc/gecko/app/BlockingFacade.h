@@ -183,6 +183,68 @@ namespace gecko::app {
         /** @brief Every block's id, in the order block_volumes() and mesh_hex_owners() index.
          * @return One id per block. @see edge_ids() */
         [[nodiscard]] std::vector<int> block_ids() const;
+
+        /**
+         * @brief The 6 faces bounding one block.
+         *
+         * What a nappe is named with: pillow() takes a set of face ids, and the faces of a block are
+         * where any nappe closed around something starts from.
+         *
+         * @param block_id A block id, as block_ids() reports them.
+         * @return Its 6 face ids, in no particular order.
+         * @throw std::out_of_range if no block carries that id.
+         */
+        [[nodiscard]] std::vector<int> block_faces(int block_id);
+
+        /**
+         * @brief The blocks one face bounds — 2 of them, or 1 where the face is on the boundary of
+         * the blocking.
+         *
+         * The other half of naming a nappe: which side of a face is which, so that a caller can say
+         * which of the 2 pillow() should shrink.
+         *
+         * @param face_id A face id, as face_ids() reports them.
+         * @return The ids of the blocks it bounds — empty for a standalone quad block, which bounds
+         *         none.
+         * @throw std::out_of_range if no face carries that id.
+         */
+        [[nodiscard]] std::vector<int> face_blocks(int face_id);
+
+        /**
+         * @brief The 4 corners of one face, in the order its own surface is stored against — so
+         * consecutive ids are adjacent corners, and `[0]`/`[2]` and `[1]`/`[3]` are its 2 diagonals.
+         *
+         * Which is what collapse_chord() needs: its hinge is a corner, and the diagonal through it
+         * is what the fold runs along.
+         *
+         * @param face_id A face id, as face_ids() reports them.
+         * @return Its 4 node ids, round the perimeter.
+         * @throw std::out_of_range if no face carries that id.
+         */
+        [[nodiscard]] std::vector<int> face_corners(int face_id);
+
+        /**
+         * @brief The 2 corners of one edge.
+         *
+         * The other half of naming things by where they are: face_corners() gives a face's, and this
+         * an edge's, so that a caller holding positions can find the cell it means.
+         *
+         * @param edge_id An edge id, as edge_ids() reports them.
+         * @return Its 2 node ids.
+         * @throw std::out_of_range if no edge carries that id.
+         */
+        [[nodiscard]] std::vector<int> edge_corners(int edge_id);
+
+        /**
+         * @brief The faces through one edge — its fan, in no particular order.
+         *
+         * What open_chord() is told where to cut: 2 of these, and the fan comes apart in 2 arcs.
+         *
+         * @param edge_id An edge id, as edge_ids() reports them.
+         * @return The ids of the faces carrying it.
+         * @throw std::out_of_range if no edge carries that id.
+         */
+        [[nodiscard]] std::vector<int> edge_faces(int edge_id);
         /**
          * @brief Gets the position of a corner node.
          * @param node_id A node id, from node_ids().
@@ -421,6 +483,108 @@ namespace gecko::app {
          * @throw std::out_of_range if @p edge_id is not an edge of this blocking.
          */
         bool delete_sheet(int edge_id, double tol_vertex, double tol_curve = -1.0, double tol_surface = -1.0);
+
+        /**
+         * @brief Inserts a layer of blocks along a nappe of block faces — the pillowing operation
+         * (see `Blocking::pillow()`).
+         *
+         * The nappe is a sheet of faces that cuts the blocking in two: closed around a set of blocks
+         * to isolate them, or running clean through the structure and out on its boundary. Which of
+         * the 2 sides shrinks has to be said, @p inside_block_id saying it — the layer is inserted
+         * into the gap that side leaves, and the other side does not move at all. Where the nappe
+         * lies on the boundary of the blocking, that other side is the model's own boundary, and
+         * this is what keeps the structure on the geometry it was classified onto.
+         *
+         * A corner the nappe cuts through becomes 2. The outside one keeps its classification; the
+         * inside one keeps only what it is still on after moving, and comes back unclassified when
+         * it has been pushed off everything. Nothing is classified by proximity here, so a blocking
+         * nobody classified stays that way.
+         *
+         * @param face_ids The nappe, each face named once.
+         * @param inside_block_id A block on the side that shrinks.
+         * @param thickness How far that side is pulled back, as a fraction of the mean length of the
+         *        edges at each corner that moves. In `(0,1)`.
+         * @param tol_vertex Tolerance for a moved corner staying on a vertex, as classify() defines it.
+         * @param tol_curve Tolerance for staying on a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for staying on a surface. Defaults to the curve one.
+         * @return false, changing nothing, when what was given is not a nappe — see
+         *         `Blocking::pillow()` for the cases.
+         * @throw std::out_of_range if one of @p face_ids is not a face of this blocking, or
+         *        @p inside_block_id not a block of it.
+         */
+        bool pillow(const std::vector<int> &face_ids,
+                    int inside_block_id,
+                    double thickness,
+                    double tol_vertex,
+                    double tol_curve = -1.0,
+                    double tol_surface = -1.0);
+
+        /**
+         * @brief Collapses the chord through one face, folding the column of blocks it runs through
+         * onto the diagonal a corner names (see `Blocking::collapse_chord()`).
+         *
+         * A chord is the column of blocks strung together through opposite faces — the dual curve of
+         * the structure. Folding is the only way to take it out that leaves everything around it a
+         * blocking: merging each block's 2 opposite side faces instead would contract edges shared
+         * with blocks outside the column and leave those degenerate. Each cross-section folds onto
+         * one of its 2 diagonals, the 2 corners off that diagonal meeting in the middle, and the 2
+         * blocks that were only edge-neighbours across the fold end up sharing a face. Each edge of
+         * the hinge itself loses one of the blocks around it: a valence-4 edge comes out with
+         * valence 3, which is what the operation is for.
+         *
+         * Where 2 corners meet, the more constrained classification wins, exactly as in
+         * delete_sheet().
+         *
+         * @param face_id Any face of the chord, as face_ids() reports them.
+         * @param hinge_node_id A corner of that face, from face_corners(). The diagonal through it
+         *        stays; the other 2 corners meet.
+         * @param tol_vertex Tolerance for snapping onto a vertex, as classify() defines it.
+         * @param tol_curve Tolerance for snapping onto a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for snapping onto a surface. Defaults to the curve one.
+         * @return false, changing nothing, when the chord cannot be folded — see
+         *         `Blocking::collapse_chord()` for the cases.
+         * @throw std::out_of_range if @p face_id is not a face of this blocking, or @p hinge_node_id
+         *        not one of its nodes.
+         */
+        bool collapse_chord(int face_id,
+                            int hinge_node_id,
+                            double tol_vertex,
+                            double tol_curve = -1.0,
+                            double tol_surface = -1.0);
+
+        /**
+         * @brief Opens the chord along one edge into a column of blocks — the inverse of
+         * collapse_chord() (see `Blocking::open_chord()`).
+         *
+         * The 2 named faces are where the fan of blocks around the edge is cut: cutting there leaves
+         * it in 2 arcs, the edge comes apart into 2, and a block is inserted in the gap. Where the
+         * edge is on the boundary its fan is already open at both ends, so one of the 2 is a boundary
+         * face and cutting at it costs nothing.
+         *
+         * How far the column runs is not said: the walk carries the 2 cuts on from one edge to the
+         * next and stops when nothing carries them further. Finding 2 ways to carry on is reported
+         * rather than guessed at — the structure offers 2 different columns from that start, and
+         * choosing is the caller's.
+         *
+         * @param edge_id The edge to open, as edge_ids() reports them.
+         * @param first_face_id One of the 2 faces its fan is cut at, from edge_faces().
+         * @param second_face_id The other.
+         * @param thickness How far the 2 copies of each corner move apart, as a fraction of the mean
+         *        length of the edges at it. In `(0,1)`.
+         * @param tol_vertex Tolerance for a moved corner staying on a vertex, as classify() defines it.
+         * @param tol_curve Tolerance for staying on a curve. Defaults to @p tol_vertex.
+         * @param tol_surface Tolerance for staying on a surface. Defaults to the curve one.
+         * @return false, changing nothing, when the chord cannot be opened — see
+         *         `Blocking::open_chord()` for the cases.
+         * @throw std::out_of_range if any of the 3 ids names nothing in this blocking.
+         */
+        bool open_chord(int edge_id,
+                        int first_face_id,
+                        int second_face_id,
+                        double thickness,
+                        double tol_vertex,
+                        double tol_curve = -1.0,
+                        double tol_surface = -1.0);
 
         /**
          * @brief Whether there is an edit to take back. @return true if undo() would do something.

@@ -230,16 +230,19 @@ position only.
 
 ## Moving corners
 
-The left mouse button does one of five things, picked with the **mouse mode** radio buttons at the
+The left mouse button does one of eight things, picked with the **mouse mode** radio buttons at the
 top of the panel or with a keypress:
 
-| Mode     | Key | Left button                                                    |
-| -------- | --- | -------------------------------------------------------------- |
-| Camera   | `C` | Polyscope's usual navigation: rotate, pan, zoom                |
-| Edit     | `E` | Picks up a block corner and moves it                           |
-| Cut      | `X` | Cuts the sheet under the cursor — click or `Space` (see below) |
-| Collapse | `S` | Takes the whole sheet under the cursor out — click or `Space`  |
-| Delete   | `D` | Deletes the block under the cursor — click or `Space`          |
+| Mode     | Key | Left button                                                        |
+| -------- | --- | ------------------------------------------------------------------ |
+| Camera   | `C` | Polyscope's usual navigation: rotate, pan, zoom                    |
+| Edit     | `E` | Picks up a block corner and moves it                               |
+| Cut      | `X` | Cuts the sheet under the cursor — click or `Space` (see below)     |
+| Collapse | `S` | Takes the whole sheet under the cursor out — click or `Space`      |
+| Delete   | `D` | Deletes the block under the cursor — click or `Space`              |
+| Pillow   | `P` | Gathers block faces into a nappe; `Space` inserts a layer along it |
+| Chord    | `K` | Folds away the column of blocks behind the face under the cursor   |
+| Open     | `O` | An edge, then 2 faces round it, and a column opens along the chain |
 
 These are genuine modes rather than a modifier like `Ctrl`+drag, because of how Polyscope is
 built: it processes camera navigation at the top of each frame, *before* the per-frame user
@@ -416,6 +419,85 @@ decided, and every cell around them takes what its own boundary agrees on or not
 blocking nobody classified therefore stays unclassified as it comes apart — without that, the
 proximity fallback would classify its edges onto whatever geometry the merged plane had drifted onto
 and bend them there.
+
+## Pillowing
+
+All three of the operations below aim at **block faces**, so `Blocking ▸ faces` has to be shown in
+the Scene panel: Polyscope picks nothing from a structure that is not drawn, and with it off these
+modes do nothing at all. Switching into one of them says so if it is off.
+
+**Pillow** mode inserts a layer of blocks along a *nappe*: a sheet of block faces that cuts the
+blocking in two. It may close back on itself, isolating a set of blocks from everything around them,
+or run clean through the structure and come out on its boundary.
+
+Click block faces to gather the nappe; each one taken turns the sheet colour, painted onto the face
+itself rather than drawn over it — a mark laid on top would sit in exactly the same plane as what it
+marks, and two coplanar surfaces fight over the depth buffer. The selection survives a trip through
+**Camera** mode, and only that — reaching the faces on the far side of a nappe means rotating the
+view — while anything that changes the blocking clears it. Clicking a face again takes it back — the highlight is drawn over the faces it marks, and the pick reads through
+it precisely so that a face can be taken back. Press `Space` to insert the layer.
+
+**Which side shrinks** is the one you are looking *through* the first face you picked at: click a
+block's own faces from outside it, and that block is what gets wrapped. The other side does not move
+at all, and that asymmetry is not a shortcut — where the nappe lies on the boundary of the blocking,
+the side that stays *is* the model's own boundary, and moving it would push the structure off the
+geometry it was classified onto. Pillowing the whole boundary is the boundary-layer case, and it
+falls out of the same rule.
+
+**Thickness** is a fraction of the mean length of the edges at each corner that moves, so the layer
+follows the size of the blocks it is inserted between rather than the size of the model.
+
+A corner the nappe cuts through becomes two. The outside one keeps its classification; the inside one
+keeps only what it is still on after moving, so a corner pushed off a model surface into the interior
+comes back unclassified and one sliding along a surface stays on it. Nothing is classified by
+proximity: a blocking nobody classified stays that way.
+
+It is refused, changing nothing, when what was picked is not a nappe — a face named twice, a nappe
+that does not separate the named side from the rest, or one that is not manifold along its own edges.
+
+## Folding a chord away
+
+A **chord** is the column of blocks strung together through opposite faces: the face you point at,
+the face opposite it in the block behind it, the face opposite *that* one in the next block, and so
+on until the column comes out on the boundary. It is the dual curve of the structure, where a sheet
+is its dual surface.
+
+**Chord** mode folds one away. Point at a block face, *near the corner you want the fold to run
+through*: the face lights up and the panel names the corner. Click, or press `Space`.
+
+Taking the column out by merging each block's two opposite side faces would mean contracting, in
+every block of it, the four edges running across the column — and those edges are shared with blocks
+outside it, which would be left degenerate. Folding is the only construction that closes the gap
+while touching nothing but the column: each cross-section folds onto one of its two diagonals, the
+two corners off that diagonal meeting in the middle, and the four side faces closing in *adjacent*
+pairs. The two blocks that were only edge-neighbours across the fold end up sharing a face, and each
+edge of the hinge loses one of the blocks around it — a valence-4 edge comes out with valence 3,
+which is what the operation is for.
+
+Which corner you aim at therefore matters: the two diagonals give two different structures.
+
+It is refused when the chord runs back through a block it has already been through, when the two
+corners that would meet are classified on two *different* model vertices — the same information loss
+a sheet collapse refuses — when they are already joined by an edge, or when a block outside the
+column has both of them as its own corners.
+
+## Opening a chord
+
+**Open** mode is the inverse: it puts a column back. Click a block edge, then the two faces round it
+to cut its fan at. Cutting there leaves the fan in two arcs, the edge comes apart into two, and a
+block is inserted in the gap. `Escape` clears what has been picked.
+
+Where the edge is on the boundary of the blocking its fan is already open at both ends, so one of the
+two faces you pick is a boundary face and cutting at it costs nothing.
+
+How far the column runs is not asked: the walk carries the two cuts from one edge to the next and
+stops when nothing carries them further. Finding **more than one way to carry on** is reported rather
+than guessed at, and that refusal is worth knowing about — an edge in the middle of a plain grid
+genuinely offers three different columns, and which one you meant is not the viewer's to decide.
+
+The two operations are not inverses cell for cell, and cannot be: a fold takes with it the corners
+that belonged only to the column it closed, so an opening builds a column on the corners it now
+finds. It puts a column back, not that column.
 
 ## Deleting blocks
 

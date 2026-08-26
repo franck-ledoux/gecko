@@ -30,7 +30,10 @@ namespace gecko::biy {
         Edit,     ///< Navigation off; dragging picks up and moves a block corner.
         Cut,      ///< Navigation off; hovering an edge previews a sheet cut, clicking performs it.
         Collapse, ///< Navigation off; hovering an edge lights its sheet, clicking collapses it away.
-        Delete    ///< Navigation off; hovering a block highlights it, clicking deletes it.
+        Delete,   ///< Navigation off; hovering a block highlights it, clicking deletes it.
+        Pillow,   ///< Navigation off; clicking block faces gathers a nappe, Space inserts a layer along it.
+        Chord,    ///< Navigation off; hovering a face shows the fold, clicking folds its chord away.
+        Open      ///< Navigation off; an edge then 2 faces round it, and a column opens along the chain.
     };
 
     /**
@@ -206,6 +209,54 @@ namespace gecko::biy {
         /** @brief Tracks which block the cursor is over in Delete mode, highlighting it, and deletes
          * it on a click or on space. */
         void handle_delete();
+
+        /** @brief Gathers block faces into a nappe in Pillow mode — a click adds one or takes it
+         * back — and inserts the layer along it on space. */
+        void handle_pillow();
+        /** @brief Inserts a layer of blocks along the nappe gathered so far, reporting what happened
+         * both in the status line and on the terminal.
+         * @param trigger How it was asked for, for the terminal line. */
+        void perform_pillow(const char *trigger);
+        /** @brief Tracks which face the cursor is over in Chord mode, and which of its corners the
+         * fold would run through, folding its chord away on a click or on space. */
+        void handle_chord();
+        /** @brief Folds the chord the preview is currently showing.
+         * @param trigger How it was asked for, for the terminal line. */
+        void perform_chord(const char *trigger);
+        /** @brief Collects an edge and then the 2 faces its fan is cut at, in Open mode, and opens
+         * the chord along them as soon as the second is picked. */
+        void handle_open();
+        /** @brief Opens the chord along what has been picked.
+         * @param trigger How it was asked for, for the terminal line. */
+        void perform_open(const char *trigger);
+        /** @brief Re-reads which face the cursor is over, and which of its corners is nearest the
+         * point picked — the 2 things a fold is named by.
+         * @param screen_coords Current mouse position.
+         * @return The face's id and that corner's node id, or nothing when the cursor is over no
+         *         block face. */
+        std::optional<std::pair<int, int>> pick_face(glm::vec2 screen_coords);
+        /** @brief Which block edge a point in space is nearest, and how far along it.
+         * @param target The point, as Polyscope reports it for a pick.
+         * @return That edge's *position* in the display order and the parameter along it, or nothing
+         *         when the blocking has no edge to measure against. */
+        std::optional<std::pair<int, double>> nearest_edge(const glm::vec3 &target) const;
+        /**
+         * @brief Colours whichever faces are currently spoken for — the nappe being gathered, the
+         * face a fold is aimed at, or the cuts an opening has so far.
+         *
+         * Painted onto the faces themselves rather than drawn as a second surface over them. A
+         * highlight laid on top would sit in exactly the same plane as what it marks, and 2 coplanar
+         * surfaces fight over the depth buffer: the mark shows in patches or not at all, which is
+         * what the first version of this did. Colouring the face is also what "selected" is expected
+         * to look like.
+         */
+        void refresh_face_preview();
+        /** @brief The mean of one block's 8 corners.
+         * @param block_id The block.
+         * @return Its centre, or nothing when no block carries that id. */
+        std::optional<glm::vec3> block_centre(int block_id);
+        /** @brief Forgets every face, edge and corner picked for an operation in progress. */
+        void clear_selection();
         /** @brief Re-reads which block the cursor is over.
          * @param screen_coords Current mouse position. */
         void update_delete_hover(glm::vec2 screen_coords);
@@ -272,6 +323,32 @@ namespace gecko::biy {
         std::optional<int> m_hover_block;
         /** @copydoc m_last_cut_mouse */
         glm::vec2 m_last_delete_mouse{-1.0f, -1.0f};
+        /** @brief The nappe gathered so far in Pillow mode, as face *ids*: it is held across frames
+         * and acted on later. @see m_hover_edge */
+        std::vector<int> m_nappe;
+        /** @brief Face the cursor is over in Chord mode, as its id, or unset when over none. */
+        std::optional<int> m_hover_face;
+        /** @brief Which corner of that face the fold would run through — the one nearest the point
+         * picked, so aiming at a corner of a face is what names the diagonal. */
+        std::optional<int> m_hinge_node;
+        /** @brief Edge picked in Open mode, as its id, before its 2 cut faces are. */
+        std::optional<int> m_open_edge;
+        /** @brief The faces picked so far to cut that edge's fan at, as ids; 2 of them and the
+         * opening runs. */
+        std::vector<int> m_open_faces;
+        /** @copydoc m_last_cut_mouse */
+        glm::vec2 m_last_face_mouse{-1.0f, -1.0f};
+        /** @brief Whether what is marked on the block faces still matches what is selected.
+         *
+         * The mark is repainted once a frame rather than at each place that changes it, so that a
+         * rebuild of the Polyscope structures — which drops the mark with them — needs no one to
+         * remember to put it back. This is what stops that costing a full pass over the face grid on
+         * every frame in which nothing happened. */
+        bool m_selection_dirty = true;
+        /** @brief How far a pillow's inside, or an opening's 2 halves, move — as a fraction of the
+         * mean length of the edges at each corner that moves, so a layer follows the size of the
+         * blocks it is inserted between. */
+        float m_thickness = 0.25f;
         /** @brief Subdivisions used when displaying the blocking (1 = raw block structure). */
         int m_subdivisions = 1;
         /** @brief Whether the block structure's own edges are currently drawn. */

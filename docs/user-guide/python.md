@@ -133,6 +133,69 @@ blocking.cut_sheet(target, 0.5)                 # False, changing nothing, if th
 # one of those vertices with no corner on it — or when the sheet cannot be collapsed at all.
 blocking.delete_sheet(target, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
+# Pillowing: insert a layer of blocks along a *nappe* — a sheet of block faces cutting the blocking
+# in two. It may close back on itself, isolating a set of blocks from everything around them, or run
+# clean through the structure and out on its boundary. block_faces() and face_blocks() are what a
+# nappe is named with: the faces of a block, and the 1 or 2 blocks either side of a face.
+block = blocking.block_ids()[0]
+nappe = blocking.block_faces(block)              # its 6 faces: the smallest closed nappe there is
+sides = blocking.face_blocks(nappe[0])           # 2 blocks, or 1 where the face is on the boundary
+
+# The second argument names the side that shrinks; the other one does not move at all. It has to be
+# named — a nappe through the middle of a structure has 2 block sides and nothing tells them apart —
+# and where the nappe lies on the boundary of the blocking, the side that stays *is* the model's own
+# boundary. The thickness is a fraction of the mean edge length at each corner that moves, so the
+# layer follows the size of the blocks it is inserted between. A corner the nappe cuts through
+# becomes 2: the outside one keeps its classification, the inside one keeps only what it is still on
+# after moving, so a blocking nobody classified stays unclassified. Returns False, changing nothing,
+# when what was given is not a nappe: a face named twice, a standalone quad block, a nappe that does
+# not separate the named side from the rest, or one that is not manifold along its own edges.
+blocking.pillow(nappe, block, thickness=0.25, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
+# Collapsing a chord: a *chord* is the column of blocks strung together through opposite faces — the
+# dual curve of the structure, where a sheet is its dual surface. Taking it out means folding it:
+# each cross-section folds onto one of its 2 diagonals, the 2 corners off that diagonal meeting in
+# the middle, so the 2 blocks that were only edge-neighbours across the fold end up sharing a face.
+# Each edge of the hinge itself loses one of the blocks around it: a valence-4 edge comes out with
+# valence 3, which is what the operation is for. Folding is the only way out that leaves a
+# blocking behind — merging each block's 2 opposite side faces instead would contract edges shared
+# with blocks *outside* the column and leave those degenerate.
+#
+# face_corners() runs the face's 4 corners round its perimeter, so [0]/[2] and [1]/[3] are its 2
+# diagonals: the hinge is a corner, and the fold runs along the diagonal through it.
+face = blocking.face_ids()[0]
+hinge = blocking.face_corners(face)[0]
+
+# Where 2 corners meet, the more constrained classification wins, exactly as for delete_sheet().
+# Returns False, changing nothing, when the chord runs back through a block it has already been
+# through — a chord closing into a ring or crossing itself has no single fold — when the 2 corners
+# meeting are on 2 *different* model vertices, when they are already joined by an edge (folding
+# would leave it a loop), or when a block outside the column has both of them as its own corners
+# (folding would leave it degenerate).
+blocking.collapse_chord(face, hinge, tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
+
+# And the inverse: opening a chord puts a column back. The 2 named faces, from edge_faces(), are
+# where the fan of blocks around the edge is cut — the fan comes apart in 2 arcs, the edge comes
+# apart in 2, and a block is inserted in the gap. Where the edge is on the boundary of the blocking
+# its fan is already open at both ends, so one of the 2 is a boundary face and cutting at it costs
+# nothing. edge_corners() and face_corners() are how a caller holding positions finds the cells it
+# means.
+edge = blocking.edge_ids()[0]
+fan = blocking.edge_faces(edge)
+
+# How far the column runs is not said: the walk carries the 2 cuts from one edge to the next and
+# stops when nothing carries them further. Returns False, changing nothing, when the 2 faces are the
+# same or do not both carry the edge, when the chain runs back into itself, when it stops somewhere
+# the cuts do not leave the blocks around a corner in exactly 2 groups, or when the walk finds more
+# than one way to carry on — the structure offering several columns from that start, which is the
+# caller's to choose between rather than the operation's to guess.
+blocking.open_chord(edge, fan[0], fan[1], thickness=0.25, tol_vertex=1e-6, tol_curve=1e-3,
+                    tol_surface=1e-2)
+
+# The 2 are not inverses cell for cell, and cannot be: a fold takes with it the corners that belonged
+# only to the column it closed, so an opening builds a column on the corners it now finds. It puts a
+# column back, not that column.
+
 # Undo. Every operation that changes the blocking snapshots it first, so taking an edit back is
 # putting that snapshot in place — not a stack of inverse operations, because these operations have
 # no inverses (collapsing the layer a cut just made does not restore the block). Ids survive an undo,
