@@ -952,15 +952,22 @@ TEST_CASE("an_edge_on_a_surface_lies_in_one_plane_and_not_just_somewhere_on_it",
     REQUIRE(checked == 4);
 }
 
-TEST_CASE("an_edge_along_a_ruling_of_a_surface_stays_straight", "[BlockTestSuite]") {
-    // The trap the section fit fell into twice, and the reason it is fitted the way it is. These 4
-    // edges run along the cylinder's axis, where the surface is ruled: the right answer is a
-    // straight line, so any bow at all is the fit's own invention.
+TEST_CASE("an_edge_along_a_ruling_of_a_surface_keeps_a_straight_control_net", "[BlockTestSuite]") {
+    // The trap the section fit fell into twice. These 4 edges run along the cylinder's axis, where
+    // the surface is ruled: the right answer is a straight line, so anything else is the fit's own
+    // invention.
     //
-    // Constraining the end tangents bowed them by 5e-02 — solving for 2 tangent magnitudes on data
-    // that is nearly straight is nearly singular, and the control points came out oscillating.
-    // Interpolating the section at uniform parameters bowed them by 2e-02 at degree 6, which is
-    // Runge's phenomenon. Least squares with the 2 ends pinned does neither.
+    // Measured on the *control net*, not on the curve, and that distinction is the point. A Bezier
+    // stays inside its control points' convex hull, so an oscillating net barely moves the curve —
+    // measured over 200 samples, the 2 fits below differ by 1.05e-03 against 1.5e-03, which no
+    // honest threshold separates. The net itself separates cleanly, and it is what matters: an
+    // oscillating net is an ill-conditioned representation, and every later subdivision and refit
+    // inherits it.
+    //
+    // The 2 fits this rules out, at degree 6: constraining the end tangents on nearly-straight data
+    // is nearly singular and wandered 5e-02; interpolating the section at uniform parameters is
+    // Runge's phenomenon and wandered 1.4e-02. Least squares with the 2 ends pinned stays at
+    // 7.1e-03 or below.
     std::string dir(TEST_SAMPLES_DIR);
     const FacetedGeometry geom(dir + "/cylinder.msh");
 
@@ -975,7 +982,10 @@ TEST_CASE("an_edge_along_a_ruling_of_a_surface_stays_straight", "[BlockTestSuite
         }
     }
 
-    for (const std::size_t degree : {std::size_t{2}, std::size_t{3}, std::size_t{5}, std::size_t{7}}) {
+    // Stopping at 7 is not arbitrary: past it the Bernstein normal equations this fit solves are
+    // themselves too ill-conditioned to trust, and the net wanders 3.3e-02 at degree 8 and 7.2e-02
+    // at degree 10 whatever the data. See `fitted_curve()`.
+    for (const std::size_t degree : {std::size_t{2}, std::size_t{3}, std::size_t{5}, std::size_t{6}, std::size_t{7}}) {
         Blocking<FacetedGeometry> blocking(geom, degree);
         blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
                                    Point3d(hi[0], lo[1], lo[2]),
@@ -989,26 +999,25 @@ TEST_CASE("an_edge_along_a_ruling_of_a_surface_stays_straight", "[BlockTestSuite
 
         auto &map = blocking.cmap();
         double worst = 0.0;
+        int checked = 0;
         for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
             const auto &targets = it->info().geom_targets;
             if (targets.empty() || targets.front().first != GroupDim::Dim2) continue;
+            ++checked;
 
-            const auto &curve = it->info().curve;
-            const Point3d p0 = curve.value(0.0);
-            const Point3d p1 = curve.value(1.0);
-            const Vector3d chord(p0, p1);
-            const double length = chord.norm();
-            if (length <= 0.0) continue;
-            const Vector3d along = chord.normalized();
-            for (int i = 1; i < 24; ++i) {
-                const Point3d at = curve.value(i / 24.0);
-                const Vector3d from_start(p0, at);
-                const Vector3d across = from_start - along * from_start.dot(along);
-                worst = std::max(worst, across.norm());
+            const auto &points = it->info().curve.control_points();
+            const Point3d &first = points.front();
+            const Point3d &last = points.back();
+            const Vector3d chord(first, last);
+            const double length2 = chord.dot(chord);
+            for (std::size_t k = 1; k + 1 < points.size(); ++k) {
+                const Vector3d offset(first, points[k]);
+                const double t = (length2 > 0.0) ? offset.dot(chord) / length2 : 0.0;
+                worst = std::max(worst, (offset - chord * t).norm());
             }
         }
-        // A hundredth of the fixture's own faceting away from straight, at every degree. It is not
-        // 0 because the surface it is cut from is a prism, not a cylinder.
+        REQUIRE(checked == 4);
+        INFO("degree " << degree << " worst control wander " << worst);
         REQUIRE(worst < 1e-2);
     }
 }

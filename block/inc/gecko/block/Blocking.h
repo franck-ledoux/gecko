@@ -3196,6 +3196,12 @@ namespace gecko {
          * 5e-02 of radial wander on the same straight ruling — while a fit that only has to pass near
          * the points has no such freedom to misuse.
          *
+         * **Its own limit is the degree.** These are the normal equations of a Bernstein basis,
+         * whose conditioning falls away as the degree rises, and no amount of data compensates.
+         * Measured on a cylinder's straight ruling, where the answer is known: the control net stays
+         * within 7.1e-03 up to degree 7, then wanders 3.3e-02 at degree 8 and 7.2e-02 at degree 10.
+         * Degrees past 7 are reachable — `biy` offers up to 10 — and are not to be trusted here.
+         *
          * @param ADegree The curve's degree.
          * @param AStart Where it must start.
          * @param AEnd Where it must end.
