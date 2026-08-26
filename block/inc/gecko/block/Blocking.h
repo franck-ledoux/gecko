@@ -2937,63 +2937,134 @@ namespace gecko {
             ends[n - 1] = ASamples.back();
             if (n < 3) {
                 return interpolating_curve(ends);
-            } else {
-                if (AStartTangent.norm_sq() < 1e-24 || AEndTangent.norm_sq() < 1e-24) {
-                    return interpolating_curve(ends);
-                }
+            }
+            if (AStartTangent.norm_sq() < 1e-24 || AEndTangent.norm_sq() < 1e-24) {
+                return interpolating_curve(ends);
+            }
 
-                const Point3d &p0 = ASamples.front();
-                const Point3d &pn = ASamples.back();
+            const Point3d &p0 = ASamples.front();
+            const Point3d &pn = ASamples.back();
 
-                // Least squares over the interior samples for the 2 tangent lengths. Each sample
-                // contributes its 3 coordinates, so even degree 3 (2 unknowns) is overdetermined.
-                double ata[2][2] = {{0.0, 0.0}, {0.0, 0.0}};
-                double atb[2] = {0.0, 0.0};
+            // Degree 2 has exactly 1 interior control point — 1 degree of freedom, not the 2 that
+            // matching both endpoint tangents at once would need. Rather than silently keep one of
+            // the 2 and discard the other, which a shared array slot used to do without anyone
+            // asking it to, the point is fit directly against the interior samples: what #48 asks
+            // for first is that the curve's own sampled points sit on the geometry, and at this
+            // degree there is no room left over to also chase a tangent.
+            if (n == 3) {
+                Vector3d numerator(0.0, 0.0, 0.0);
+                double denominator = 0.0;
                 for (std::size_t i = 1; i + 1 < ASamples.size(); ++i) {
                     const double t = AParameters[i];
-                    // B(t) = base(t) + a * B_1(t) * start - b * B_(n-2)(t) * end, with everything
-                    // that does not depend on a or b gathered into base(t).
-                    const double ca = bernstein(degree, 1, t);
-                    const double cb = -bernstein(degree, degree - 1, t);
-                    Vector3d base = Vector3d(Point3d(0, 0, 0), p0) * (bernstein(degree, 0, t) + ca) +
-                                    Vector3d(Point3d(0, 0, 0), pn) * (bernstein(degree, degree, t) - cb);
-                    // Degree 4 and up keep middle control points of their own; leaving them on the
-                    // chord keeps this a 2-unknown fit while the ends stay exact.
-                    for (std::size_t j = 2; j + 2 < n; ++j) {
-                        const double s = static_cast<double>(j) / static_cast<double>(degree);
-                        const Point3d mid = p0 + Vector3d(p0, pn) * s;
-                        base += Vector3d(Point3d(0, 0, 0), mid) * bernstein(degree, j, t);
-                    }
-
-                    const Vector3d residual = Vector3d(Point3d(0, 0, 0), ASamples[i]) - base;
-                    const Vector3d da = AStartTangent * ca;
-                    const Vector3d db = AEndTangent * cb;
-                    ata[0][0] += da.dot(da);
-                    ata[0][1] += da.dot(db);
-                    ata[1][0] += db.dot(da);
-                    ata[1][1] += db.dot(db);
-                    atb[0] += da.dot(residual);
-                    atb[1] += db.dot(residual);
+                    const double w = bernstein(degree, 1, t);
+                    const Vector3d base = Vector3d(Point3d(0, 0, 0), p0) * bernstein(degree, 0, t) +
+                                          Vector3d(Point3d(0, 0, 0), pn) * bernstein(degree, 2, t);
+                    numerator += (Vector3d(Point3d(0, 0, 0), ASamples[i]) - base) * w;
+                    denominator += w * w;
                 }
-
-                const double det = ata[0][0] * ata[1][1] - ata[0][1] * ata[1][0];
-                if (std::abs(det) < 1e-18) {
-                    return interpolating_curve(ends);
-                }
-                const double a = (atb[0] * ata[1][1] - ata[0][1] * atb[1]) / det;
-                const double b = (ata[0][0] * atb[1] - atb[0] * ata[1][0]) / det;
-
                 TEdgeCurve fitted(degree);
                 fitted[0] = p0;
-                fitted[n - 1] = pn;
-                fitted[1] = p0 + AStartTangent * a;
-                fitted[n - 2] = pn - AEndTangent * b;
-                for (std::size_t j = 2; j + 2 < n; ++j) {
-                    const double s = static_cast<double>(j) / static_cast<double>(degree);
-                    fitted[j] = p0 + Vector3d(p0, pn) * s;
-                }
+                fitted[2] = pn;
+                fitted[1] =
+                    (denominator > 1e-18) ? Point3d(0, 0, 0) + numerator / denominator : p0 + Vector3d(p0, pn) * 0.5;
                 return fitted;
             }
+
+            // Degree 3 and up: a joint least-squares solve over every degree of freedom there is,
+            // not only the 2 tangent lengths. The 2 tangent-adjacent control points move along a
+            // fixed direction only — `a`/`b` below, 1 unknown each — while degree 4 and up have
+            // genuine interior control points besides, free to move in 3D — 3 unknowns each. Both
+            // kinds are handled the same way: as a scalar unknown with its own per-sample
+            // "sensitivity" (how much moving it by 1 shifts the curve at that sample), which is what
+            // lets them share one system instead of needing 2 different solvers stitched together.
+            //
+            // Those interior control points used to be pinned to the straight chord regardless of
+            // what the curve actually did, on the reasoning that fitting them needed a bigger solve
+            // than 2 unknowns — which is exactly what this now is. A degree-3 edge (no such points)
+            // reduces to precisely the 2-unknown system this replaces, so nothing changes there.
+            const std::size_t middle = (n > 4) ? n - 4 : 0;
+            const std::size_t unknowns = 2 + 3 * middle;
+
+            const auto sensitivity = [&](std::size_t AUnknown, double AT) -> Vector3d {
+                if (AUnknown == 0) return AStartTangent * bernstein(degree, 1, AT);
+                if (AUnknown == 1) return -AEndTangent * bernstein(degree, degree - 1, AT);
+                const std::size_t local = AUnknown - 2;
+                const std::size_t axis = local % 3;
+                const double w = bernstein(degree, local / 3 + 2, AT);
+                return Vector3d(axis == 0 ? w : 0.0, axis == 1 ? w : 0.0, axis == 2 ? w : 0.0);
+            };
+
+            std::vector<std::vector<double>> sys(unknowns, std::vector<double>(unknowns + 1, 0.0));
+            for (std::size_t i = 1; i + 1 < ASamples.size(); ++i) {
+                const double t = AParameters[i];
+                // What the 2 pinned endpoints already contribute; every other control point is one
+                // of the unknowns solved for below, so nothing else is folded in here.
+                const Vector3d base =
+                    Vector3d(Point3d(0, 0, 0), p0) * (bernstein(degree, 0, t) + bernstein(degree, 1, t)) +
+                    Vector3d(Point3d(0, 0, 0), pn) * (bernstein(degree, degree, t) + bernstein(degree, degree - 1, t));
+                const Vector3d residual = Vector3d(Point3d(0, 0, 0), ASamples[i]) - base;
+
+                std::vector<Vector3d> sens(unknowns);
+                for (std::size_t u = 0; u < unknowns; ++u) {
+                    sens[u] = sensitivity(u, t);
+                }
+                for (std::size_t row = 0; row < unknowns; ++row) {
+                    for (std::size_t col = 0; col < unknowns; ++col) {
+                        sys[row][col] += sens[row].dot(sens[col]);
+                    }
+                    sys[row][unknowns] += sens[row].dot(residual);
+                }
+            }
+
+            const auto solved = solve_scalar_system(sys);
+            if (!solved.has_value()) {
+                return interpolating_curve(ends);
+            }
+
+            TEdgeCurve fitted(degree);
+            fitted[0] = p0;
+            fitted[degree] = pn;
+            fitted[1] = p0 + AStartTangent * (*solved)[0];
+            fitted[degree - 1] = pn - AEndTangent * (*solved)[1];
+            for (std::size_t j = 0; j < middle; ++j) {
+                fitted[j + 2] = Point3d((*solved)[2 + 3 * j], (*solved)[2 + 3 * j + 1], (*solved)[2 + 3 * j + 2]);
+            }
+            return fitted;
+        }
+
+        /**
+         * @brief Solves one square linear system, Gauss-Jordan with partial pivoting, in place.
+         *
+         * The single-right-hand-side counterpart of `solve_for_points()`: used where an unknown is
+         * a plain scalar (a tangent length, or one coordinate of a control point handled on its
+         * own) rather than a point shared across 3 coordinates, so there is nothing to carry 3
+         * right-hand sides for.
+         *
+         * @param ASystem The augmented system, `n` rows of `n + 1`; consumed.
+         * @return One value per row: the solution. `std::nullopt` when the system is singular.
+         */
+        static std::optional<std::vector<double>> solve_scalar_system(std::vector<std::vector<double>> &ASystem) {
+            const std::size_t n = ASystem.size();
+            for (std::size_t col = 0; col < n; ++col) {
+                std::size_t pivot = col;
+                for (std::size_t r = col + 1; r < n; ++r) {
+                    if (std::abs(ASystem[r][col]) > std::abs(ASystem[pivot][col])) pivot = r;
+                }
+                std::swap(ASystem[col], ASystem[pivot]);
+                if (std::abs(ASystem[col][col]) < 1e-18) return std::nullopt;
+                for (std::size_t r = 0; r < n; ++r) {
+                    if (r == col) continue;
+                    const double factor = ASystem[r][col] / ASystem[col][col];
+                    for (std::size_t c = col; c < n + 1; ++c) {
+                        ASystem[r][c] -= factor * ASystem[col][c];
+                    }
+                }
+            }
+            std::vector<double> solution(n);
+            for (std::size_t r = 0; r < n; ++r) {
+                solution[r] = ASystem[r][n] / ASystem[r][r];
+            }
+            return solution;
         }
 
         /**

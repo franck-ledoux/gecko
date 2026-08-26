@@ -819,3 +819,66 @@ TEST_CASE("a_classified_face_follows_its_surface_as_closely_as_its_own_edges_do"
     // Interpolating instead left it at 1.05e-02 here, half again as far.
     REQUIRE(worst_face < 1.5 * worst_edge);
 }
+
+TEST_CASE("a_curve_classified_edge_follows_its_curve_at_every_degree", "[BlockTestSuite]") {
+    // The regression case for issue #48: an edge classified on a model curve has to have its own
+    // sampled points sit close to that curve, not only its 2 endpoints. Measured across every degree
+    // rather than at just one, because the defect this covers was invisible at degree 3 alone —
+    // degree 2 collapsed a shared array slot onto itself and threw away half a least-squares solve,
+    // and degree 4 and up quietly pinned their extra control points to the straight chord instead of
+    // fitting them, both of which left the worst-followed degree *further* from the curve than the
+    // straight-edge (degree 1) case it was supposed to improve on.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+    const double extent = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+
+    double previous = 0.0;
+    for (const std::size_t degree : {std::size_t{2}, std::size_t{3}, std::size_t{4}, std::size_t{5}, std::size_t{7}}) {
+        Blocking<FacetedGeometry> blocking(geom, degree);
+        blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                                   Point3d(hi[0], lo[1], lo[2]),
+                                   Point3d(hi[0], hi[1], lo[2]),
+                                   Point3d(lo[0], hi[1], lo[2]),
+                                   Point3d(lo[0], lo[1], hi[2]),
+                                   Point3d(hi[0], lo[1], hi[2]),
+                                   Point3d(hi[0], hi[1], hi[2]),
+                                   Point3d(lo[0], hi[1], hi[2])});
+        blocking.classify(0.3);
+
+        double worst = 0.0;
+        int checked = 0;
+        auto &map = blocking.cmap();
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            if (it->info().geom_targets.empty() || it->info().geom_targets.front().first != GroupDim::Dim1) continue;
+            const auto *curve = geom.curve_by_tag(it->info().geom_targets.front().second);
+            REQUIRE(curve != nullptr);
+            ++checked;
+            for (int i = 1; i < 16; ++i) {
+                worst = std::max(worst, curve->distance(it->info().curve.value(i / 16.0)));
+            }
+        }
+        REQUIRE(checked > 0);
+
+        // Loose in absolute terms — this is a coarse faceted cylinder, not a smooth analytic one —
+        // but tight enough to catch either defect: both used to push a curve *off* the model by
+        // several percent of its own extent, well past what any of these degrees now reaches.
+        REQUIRE(worst < 0.01 * extent);
+        INFO("degree " << degree << " worst deviation " << worst << " (" << 100.0 * worst / extent << "% of extent)");
+        // Not strictly monotone — a coarse facet can favour one degree over its neighbour by chance
+        // — but a fit that keeps adding control points should not be getting *worse* by an order of
+        // magnitude, which is what the bug did between degree 2 and degree 3 before this fix.
+        if (previous > 0.0) REQUIRE(worst < 5.0 * previous);
+        previous = worst;
+    }
+}
