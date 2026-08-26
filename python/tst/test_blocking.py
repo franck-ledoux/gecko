@@ -255,6 +255,31 @@ def test_snap_node_unknown_id_raises(geom_model_path):
         blocking.snap_node(99, 0.1)
 
 
+def test_project_onto_classification_pulls_onto_a_nodes_own_target(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    blocking.classify(1e-6)
+
+    # Node 0 sits on the fixture's only model vertex, the origin. Wherever the trial point is,
+    # pulling it onto node 0's own classification lands it there.
+    assert blocking.node_classification_dims()[0] == 0
+    assert blocking.project_onto_classification(0, 5.0, -3.0, 2.0) == [0.0, 0.0, 0.0]
+
+    # A node with nothing to be classified on gives the trial point straight back.
+    ids, dims = blocking.node_ids(), blocking.node_classification_dims()
+    unclassified = next(i for i, d in zip(ids, dims) if d == -1)
+    assert blocking.project_onto_classification(unclassified, 5.0, -3.0, 2.0) == [5.0, -3.0, 2.0]
+
+
+def test_project_onto_classification_rejects_unknown_id(geom_model_path):
+    model = gecko.GeomModel(geom_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block(_QUAD_A)
+    with pytest.raises(IndexError):
+        blocking.project_onto_classification(99, 0.0, 0.0, 0.0)
+
+
 def test_nb_cells_invalid_dim_raises(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model)

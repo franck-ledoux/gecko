@@ -158,6 +158,17 @@ namespace gecko::app {
                  &BlockingFacade::node_position,
                  py::arg("node_id"),
                  "(x,y,z) position of the corner node with this id.")
+            .def("project_onto_classification",
+                 &BlockingFacade::project_onto_classification,
+                 py::arg("node_id"),
+                 py::arg("x"),
+                 py::arg("y"),
+                 py::arg("z"),
+                 "Where (x,y,z) would land if pulled onto whatever node_id is *currently* classified on, read-only "
+                 "and answered from that classification rather than by searching for one. What a corner "
+                 "constrained to stay on its own entity while it moves needs at every trial position: unlike "
+                 "snap_node's proximity search, this cannot make it hop onto a different, nearby entity mid-move. "
+                 "Returns (x,y,z) unchanged when the node is unclassified.")
             .def("move_node",
                  &BlockingFacade::move_node,
                  py::arg("node_id"),

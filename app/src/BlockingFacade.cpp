@@ -460,6 +460,12 @@ namespace gecko::app {
         return std::array<double, 3>{p.x(), p.y(), p.z()};
     }
 
+    std::array<double, 3> BlockingFacade::project_onto_classification(int node_id, double x, double y, double z) {
+        const auto node = cell_or_throw<0>(m_impl, node_id, "node");
+        const Point3d p = m_impl.blocking.project_onto_classification(node, Point3d(x, y, z));
+        return {p.x(), p.y(), p.z()};
+    }
+
     void BlockingFacade::move_node(int node_id, double x, double y, double z) {
         const Checkpoint checkpoint(*this);
         m_impl.blocking.move_node(find_node(m_impl, node_id), Point3d(x, y, z));

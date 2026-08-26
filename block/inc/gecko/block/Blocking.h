@@ -2299,6 +2299,30 @@ namespace gecko {
         }
 
         /**
+         * @brief Where @p APoint would land if pulled onto whatever @p ANode is currently classified
+         * on — read-only, and answered from the classification already stored rather than by
+         * searching for one.
+         *
+         * What `snap_node()`'s own search feeds into, offered on its own for a caller that already
+         * knows what a node is on and only wants a trial point pulled onto it. A corner constrained
+         * to stay on its own entity while it is dragged is exactly that caller: sliding it along a
+         * curve must not let each trial position re-search and hop onto a nearby surface instead,
+         * which is what asking `classify_position()` afresh at every frame would do.
+         *
+         * @param ANode The node whose current classification decides the target.
+         * @param APoint The point to pull onto it.
+         * @return @p APoint projected onto the nearest of @p ANode's targets, or @p APoint unchanged
+         *         when it is unclassified.
+         */
+        Point3d project_onto_classification(Node ANode, const Point3d &APoint) const {
+            if (ANode->info().geom_targets.empty()) return APoint;
+            const auto result = nearest_of(ANode->info().geom_targets, APoint);
+            Point3d p = APoint;
+            if (result.any()) project_onto(result.nearest_dim, result.nearest_tag, p);
+            return p;
+        }
+
+        /**
          * @brief Resolves `classify()`/`snap_node()`'s defaulted tolerance arguments: an omitted
          * (negative) curve tolerance falls back to the vertex one, and an omitted surface tolerance
          * to the curve one.

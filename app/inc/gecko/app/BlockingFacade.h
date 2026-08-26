@@ -263,6 +263,27 @@ namespace gecko::app {
         void move_node(int node_id, double x, double y, double z);
 
         /**
+         * @brief Where a point would land if pulled onto whatever `node_id` is currently classified
+         * on — read-only, and answered from the classification already stored rather than by
+         * searching for one (see `Blocking::project_onto_classification()`).
+         *
+         * What a caller sliding a corner along its own entity wants at every trial position:
+         * re-searching by proximity there — the way snap_node() does, once, on release — would let
+         * it hop onto a nearby entity mid-drag instead of staying on the one it started on.
+         *
+         * @param node_id The node whose current classification decides the target.
+         * @param x, y, z The point to pull onto it.
+         * @return That point, projected — unchanged when the node is unclassified.
+         * @throw std::out_of_range if no node carries `node_id`.
+         *
+         * Not `const`, despite touching nothing: CGAL hands back a different (const) descriptor type
+         * from a const map, and the kernel primitive this calls is written against the mutable one —
+         * the same reason `block_faces()`, `face_blocks()`, `face_corners()`, `edge_corners()` and
+         * `edge_faces()` are not `const` either.
+         */
+        [[nodiscard]] std::array<double, 3> project_onto_classification(int node_id, double x, double y, double z);
+
+        /**
          * @brief Gets what each corner node is classified on, in node_ids() order.
          * @return One entry per node: the dimension of the geometric entity it is classified on
          *         (0 vertex, 1 curve, 2 surface, 3 volume), or -1 if it is unclassified. Every
