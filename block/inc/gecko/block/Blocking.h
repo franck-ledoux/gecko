@@ -2398,6 +2398,19 @@ namespace gecko {
          * falling back to a proximity search at its midpoint when they can't decide (an
          * unclassified corner, or corners with no common containing entity).
          *
+         * **On a surface, which curve?** Projecting says only that a point lands somewhere on the
+         * surface, and a surface holds infinitely many curves between one pair of its points — so
+         * projecting sample by sample gives whichever one the projection happens to trace, and 2
+         * edges meeting at a corner need not agree about it. The edge is pinned instead to the
+         * surface's *section* by one definite plane: the plane through its 2 ends containing the
+         * surface's own normal. Issue #48 asks for the plane bisecting the 2 adjacent block faces,
+         * and this is that plane wherever those 2 faces are what a smooth surface makes them — the
+         * dihedral between them tends to 180 degrees as one closes in on the edge (measured: 165,
+         * 170, 174 degrees at closing probe distances), and the bisector of a straight angle is the
+         * perpendicular. Taking it from the surface rather than from the faces also makes it the
+         * same plane whether the edge is on the boundary of the block structure or inside it, which
+         * the 2 cases of #48 otherwise have to be told apart for.
+         *
          * The fit **interpolates points sampled on the geometry** rather than projecting the control
          * points onto it. Projecting the control points is the tempting shortcut, and it is wrong: a
          * Bezier curve passes through its 2 endpoints but *not* through its interior control points,
@@ -2446,11 +2459,17 @@ namespace gecko {
             samples[0] = p0;
             samples[n - 1] = p1;
 
+            // A surface holds infinitely many curves between the edge's 2 ends. One plane picks
+            // one out of them, and the edge is fitted to that section rather than to whatever
+            // projecting each sample separately happens to trace.
+            if (result.nearest_dim == GroupDim::Dim2 && fit_to_section(AEdge, result.nearest_tag, n0, n1)) {
+                return;
+            }
+
             // On a curve the geometry also dictates which *direction* the edge must leave its ends
             // in, and honouring that matters as much as passing through the right points — a fit
             // free to choose its end tangents picks badly wrong ones (~30 degrees out on a plain
-            // circular arc). On a surface there is no single such direction, so plain interpolation
-            // stands.
+            // circular arc).
             if (result.nearest_dim == GroupDim::Dim1) {
                 const auto *curve = m_geom_model->curve_by_tag(result.nearest_tag);
                 if (curve != nullptr) {
@@ -2480,6 +2499,65 @@ namespace gecko {
                 }
             }
             store_curve(AEdge, interpolating_curve(samples), n0);
+        }
+
+        /**
+         * @brief Fits one edge to the section of a surface by the plane through its 2 ends containing
+         * the surface's normal — the answer to "which curve on the surface".
+         *
+         * The plane is taken from the surface rather than from the 2 block faces meeting at the edge,
+         * and `refit()`'s own note says why: on a smooth surface those 2 faces are tangent-continuous
+         * there, so the bisector of their directions cancels and the plane it defines is whatever the
+         * cancellation leaves. The perpendicular is what that bisector tends to, and it is defined
+         * everywhere.
+         *
+         * The end tangents come out exact rather than estimated. The section runs in the cutting
+         * plane and along the surface at the same time, so its direction at either end is the one
+         * both tangent planes share — their cross product, and nothing to fit.
+         *
+         * @param AEdge The edge to fit; its 2 ends are left exactly where they are.
+         * @param ATag The surface's entity tag.
+         * @param AStart The corner the curve is stored from.
+         * @param AEnd Its other corner.
+         * @return false when the surface has no such tag, when the plane is degenerate, or when the
+         *         section misses the surface anywhere along the edge — a plane through 2 points of a
+         *         surface being free to leave it in between. The caller then falls back on projecting
+         *         the samples one by one, which always lands somewhere.
+         */
+        bool fit_to_section(Edge AEdge, Int ATag, Node AStart, Node AEnd) {
+            const auto *surface = m_geom_model->surface_by_tag(ATag);
+            if (surface == nullptr) return false;
+
+            const Point3d &p0 = AStart->info().point;
+            const Point3d &p1 = AEnd->info().point;
+            const Vector3d chord(p0, p1);
+            if (chord.norm() <= 0.0) return false;
+
+            // The plane: through both ends, standing along the surface's normal at the middle.
+            Point3d middle = p0 + chord * 0.5;
+            surface->project(middle);
+            const Vector3d up = surface->normal(middle);
+            if (up.norm() <= 0.0) return false;
+            const Vector3d plane_normal = chord.cross(up);
+            if (plane_normal.norm() <= 0.0) return false;
+
+            // Far more samples than there are unknowns, parameterized by their own spacing: a
+            // point taken from the chord at parameter `t` does not sit at parameter `t` along the
+            // section, and assuming it does biases the fit.
+            const std::size_t steps = 4 * (m_degree + 1);
+            std::vector<Point3d> dense;
+            dense.reserve(steps);
+            for (std::size_t i = 0; i < steps; ++i) {
+                const double t = static_cast<double>(i) / static_cast<double>(steps - 1);
+                const auto on = surface->closest_point_on_section(p0 + chord * t, p0, plane_normal);
+                if (!on.has_value()) return false;
+                dense.push_back(*on);
+            }
+            dense.front() = p0;
+            dense.back() = p1;
+
+            store_curve(AEdge, fitted_curve(m_degree, p0, p1, chord_length_parameters(dense), dense), AStart);
+            return true;
         }
 
         /**
@@ -3100,6 +3178,68 @@ namespace gecko {
                 solution[r] = ASystem[r][n] / ASystem[r][r];
             }
             return solution;
+        }
+
+        /**
+         * @brief The curve of degree @p ADegree that follows @p APoints as closely as a curve of that
+         * degree can, with its 2 ends pinned exactly where they are.
+         *
+         * Least squares over far more points than there are unknowns — the curve counterpart of
+         * `fitted_interior()`, and the same reasoning: interpolation pins the curve at `degree + 1`
+         * parameters and says nothing about what happens between them. On near-straight data it says
+         * something worse than nothing: uniform interpolation at degree 6 bowed a cylinder's own
+         * straight ruling by 2e-02, which is Runge's phenomenon and not a property of the data (the
+         * points themselves stray 7e-04).
+         *
+         * Nothing here constrains the end tangents, deliberately. Solving for their 2 magnitudes on
+         * data that is nearly straight is nearly singular — the control points came out oscillating,
+         * 5e-02 of radial wander on the same straight ruling — while a fit that only has to pass near
+         * the points has no such freedom to misuse.
+         *
+         * @param ADegree The curve's degree.
+         * @param AStart Where it must start.
+         * @param AEnd Where it must end.
+         * @param AParams The parameters @p APoints were taken at, in [0,1].
+         * @param APoints The points to follow.
+         * @return The fitted curve, straight when its degree leaves no interior control point to move.
+         */
+        static TEdgeCurve fitted_curve(std::size_t ADegree,
+                                       const Point3d &AStart,
+                                       const Point3d &AEnd,
+                                       const std::vector<double> &AParams,
+                                       const std::vector<Point3d> &APoints) {
+            TEdgeCurve fitted(ADegree);
+            fitted[0] = AStart;
+            fitted[ADegree] = AEnd;
+            const std::size_t unknowns = (ADegree > 1) ? ADegree - 1 : 0;
+            if (unknowns == 0) return fitted;
+
+            std::vector<std::vector<double>> sys(unknowns, std::vector<double>(unknowns + 3, 0.0));
+            for (std::size_t k = 0; k < AParams.size() && k < APoints.size(); ++k) {
+                const double t = AParams[k];
+                // What the 2 pinned ends already contribute at this parameter, moved to the right.
+                const Vector3d residual = Vector3d(Point3d(0, 0, 0), APoints[k]) -
+                                          Vector3d(Point3d(0, 0, 0), AStart) * bernstein(ADegree, 0, t) -
+                                          Vector3d(Point3d(0, 0, 0), AEnd) * bernstein(ADegree, ADegree, t);
+                std::vector<double> weight(unknowns);
+                for (std::size_t i = 0; i < unknowns; ++i) {
+                    weight[i] = bernstein(ADegree, i + 1, t);
+                }
+                for (std::size_t r = 0; r < unknowns; ++r) {
+                    for (std::size_t c = 0; c < unknowns; ++c) {
+                        sys[r][c] += weight[r] * weight[c];
+                    }
+                    sys[r][unknowns] += weight[r] * residual.x();
+                    sys[r][unknowns + 1] += weight[r] * residual.y();
+                    sys[r][unknowns + 2] += weight[r] * residual.z();
+                }
+            }
+
+            const auto solved = solve_for_points(sys);
+            for (std::size_t r = 0; r < unknowns; ++r) {
+                fitted[r + 1] = solved[r];
+            }
+            return fitted;
         }
 
         /**

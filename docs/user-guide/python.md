@@ -76,6 +76,12 @@ blocking.build_connectivity()  # sews the shared edge between face_a and face_b
 # Snap onto the model. Corners are projected onto it, and every edge, face and block is then
 # fitted to what it landed on — including the *inside* of each face, which is pulled onto its model
 # surface rather than left as a blend of the 4 boundary curves.
+#
+# An edge classified on a *surface* is pinned to one definite curve of it rather than to whichever
+# one projecting each sample separately happens to trace: the surface's section by the plane through
+# the edge's 2 ends containing the surface's own normal. A surface holds infinitely many curves
+# between one pair of its points, and without that, 2 edges meeting at a corner need not agree on
+# which of them they take.
 blocking.classify(tol_vertex=1e-6, tol_curve=1e-3, tol_surface=1e-2)
 
 # The degree is carried by the geometry, not by its C++ type, so it can be raised or lowered on a

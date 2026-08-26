@@ -882,3 +882,133 @@ TEST_CASE("a_curve_classified_edge_follows_its_curve_at_every_degree", "[BlockTe
         previous = worst;
     }
 }
+
+TEST_CASE("an_edge_on_a_surface_lies_in_one_plane_and_not_just_somewhere_on_it", "[BlockTestSuite]") {
+    // The half of #48 about edges. A surface holds infinitely many curves between one pair of its
+    // points, so "classified on a surface" says where the edge lands but not which way it goes —
+    // and projecting each sample separately traces whichever curve the projection happens to give.
+    //
+    // The edge is pinned instead to the surface's section by the plane through its 2 ends containing
+    // the surface's normal. What that buys is measured here: the edge lies in that plane, rather
+    // than wandering a quarter of a percent of the model out of it as it did before.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+
+    Blocking<FacetedGeometry> blocking(geom, 3);
+    blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                               Point3d(hi[0], lo[1], lo[2]),
+                               Point3d(hi[0], hi[1], lo[2]),
+                               Point3d(lo[0], hi[1], lo[2]),
+                               Point3d(lo[0], lo[1], hi[2]),
+                               Point3d(hi[0], lo[1], hi[2]),
+                               Point3d(hi[0], hi[1], hi[2]),
+                               Point3d(lo[0], hi[1], hi[2])});
+    blocking.classify(0.3);
+
+    auto &map = blocking.cmap();
+    int checked = 0;
+    for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+        const auto &targets = it->info().geom_targets;
+        if (targets.empty() || targets.front().first != GroupDim::Dim2) continue;
+        const auto *surface = geom.surface_by_tag(targets.front().second);
+        REQUIRE(surface != nullptr);
+        ++checked;
+
+        const auto &curve = it->info().curve;
+        const Point3d p0 = curve.value(0.0);
+        const Point3d p1 = curve.value(1.0);
+        const Vector3d chord(p0, p1);
+
+        // The very plane the fit is pinned to: through both ends, along the surface's own normal.
+        Point3d middle = p0 + chord * 0.5;
+        surface->project(middle);
+        const Vector3d plane_normal = chord.cross(surface->normal(middle)).normalized();
+
+        double off_plane = 0.0;
+        double off_surface = 0.0;
+        for (int i = 0; i <= 24; ++i) {
+            const Point3d at = curve.value(i / 24.0);
+            off_plane = std::max(off_plane, std::abs(Vector3d(p0, at).dot(plane_normal)));
+            off_surface = std::max(off_surface, surface->distance(at));
+        }
+
+        // In the plane, to rounding. Projecting sample by sample left it 5.7e-03 out of it — a
+        // quarter of a percent of a model 2 units across.
+        REQUIRE(off_plane < 1e-6);
+        // And still on the surface: the fixture's own faceting is the floor, and this stays at it.
+        REQUIRE(off_surface < 1e-2);
+    }
+    REQUIRE(checked == 4);
+}
+
+TEST_CASE("an_edge_along_a_ruling_of_a_surface_stays_straight", "[BlockTestSuite]") {
+    // The trap the section fit fell into twice, and the reason it is fitted the way it is. These 4
+    // edges run along the cylinder's axis, where the surface is ruled: the right answer is a
+    // straight line, so any bow at all is the fit's own invention.
+    //
+    // Constraining the end tangents bowed them by 5e-02 — solving for 2 tangent magnitudes on data
+    // that is nearly straight is nearly singular, and the control points came out oscillating.
+    // Interpolating the section at uniform parameters bowed them by 2e-02 at degree 6, which is
+    // Runge's phenomenon. Least squares with the 2 ends pinned does neither.
+    std::string dir(TEST_SAMPLES_DIR);
+    const FacetedGeometry geom(dir + "/cylinder.msh");
+
+    double lo[3] = {1e30, 1e30, 1e30};
+    double hi[3] = {-1e30, -1e30, -1e30};
+    for (UInt i = 0; i < geom.mesh().nb_nodes(); ++i) {
+        const Point3d &p = geom.mesh().node(NodeId{i});
+        const std::array<double, 3> c{p.x(), p.y(), p.z()};
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], c[k]);
+            hi[k] = std::max(hi[k], c[k]);
+        }
+    }
+
+    for (const std::size_t degree : {std::size_t{2}, std::size_t{3}, std::size_t{5}, std::size_t{7}}) {
+        Blocking<FacetedGeometry> blocking(geom, degree);
+        blocking.create_hex_block({Point3d(lo[0], lo[1], lo[2]),
+                                   Point3d(hi[0], lo[1], lo[2]),
+                                   Point3d(hi[0], hi[1], lo[2]),
+                                   Point3d(lo[0], hi[1], lo[2]),
+                                   Point3d(lo[0], lo[1], hi[2]),
+                                   Point3d(hi[0], lo[1], hi[2]),
+                                   Point3d(hi[0], hi[1], hi[2]),
+                                   Point3d(lo[0], hi[1], hi[2])});
+        blocking.classify(0.3);
+
+        auto &map = blocking.cmap();
+        double worst = 0.0;
+        for (auto it = map.attributes<1>().begin(), end = map.attributes<1>().end(); it != end; ++it) {
+            const auto &targets = it->info().geom_targets;
+            if (targets.empty() || targets.front().first != GroupDim::Dim2) continue;
+
+            const auto &curve = it->info().curve;
+            const Point3d p0 = curve.value(0.0);
+            const Point3d p1 = curve.value(1.0);
+            const Vector3d chord(p0, p1);
+            const double length = chord.norm();
+            if (length <= 0.0) continue;
+            const Vector3d along = chord.normalized();
+            for (int i = 1; i < 24; ++i) {
+                const Point3d at = curve.value(i / 24.0);
+                const Vector3d from_start(p0, at);
+                const Vector3d across = from_start - along * from_start.dot(along);
+                worst = std::max(worst, across.norm());
+            }
+        }
+        // A hundredth of the fixture's own faceting away from straight, at every degree. It is not
+        // 0 because the surface it is cut from is a prism, not a cylinder.
+        REQUIRE(worst < 1e-2);
+    }
+}

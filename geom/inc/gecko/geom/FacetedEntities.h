@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cassert>
 #include <limits>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -235,6 +237,90 @@ namespace gecko {
          * @return The Euclidean distance between @p p and its closest point on the surface.
          */
         [[nodiscard]] double distance(const Point3d &p) const { return Vector3d(closest_point(p), p).norm(); }
+
+        /**
+         * @brief The surface's normal where it is nearest to a query point.
+         *
+         * Read off the facet the closest point lands on, so it is piecewise constant — a faceted
+         * surface has no other normal to give. Callers wanting a direction rather than a plane
+         * should expect it to step from facet to facet.
+         *
+         * @param p Query point.
+         * @return The unit normal of the facet carrying the closest point, or the null vector if
+         *         that facet is degenerate.
+         */
+        [[nodiscard]] Vector3d normal(const Point3d &p) const {
+            const Triangle *best = nullptr;
+            double best_dist_sq = std::numeric_limits<double>::max();
+            for (const auto &triangle : m_triangles) {
+                const Point3d candidate = closest_point_on_triangle(p, triangle.a, triangle.b, triangle.c);
+                if (const double dist_sq = Vector3d(p, candidate).norm_sq(); dist_sq < best_dist_sq) {
+                    best_dist_sq = dist_sq;
+                    best = &triangle;
+                }
+            }
+            if (best == nullptr) return {};
+            const Vector3d n = Vector3d(best->a, best->b).cross(Vector3d(best->a, best->c));
+            return (n.norm() > 0.0) ? n.normalized() : Vector3d{};
+        }
+
+        /**
+         * @brief The closest point to @p p on this surface's *section* by a plane — the curve the
+         * plane cuts out of it.
+         *
+         * What pins down which curve on a surface an edge classified on it should follow. Projecting
+         * a point onto a surface says only that it lands somewhere on it; asking for the closest
+         * point of a plane section says where along one definite curve, and the whole edge asking
+         * against one plane comes back as one curve rather than as whatever the projection happened
+         * to give point by point.
+         *
+         * Every facet is tested against the plane and each crossing yields a segment, exactly as
+         * `closest_point()` tests every facet — no acceleration structure, for the reason this class
+         * gives.
+         *
+         * @param p Query point.
+         * @param origin A point of the cutting plane.
+         * @param normal The cutting plane's normal; need not be unit, but must not be null.
+         * @return The closest point of the section, or nothing when the plane misses the surface
+         *         altogether — which a caller has to be ready for, a plane through 2 points of a
+         *         surface being free to leave it in between.
+         */
+        [[nodiscard]] std::optional<Point3d>
+        closest_point_on_section(const Point3d &p, const Point3d &origin, const Vector3d &normal) const {
+            if (normal.norm() <= 0.0) return std::nullopt;
+            const Vector3d unit_normal = normal.normalized();
+            const auto height = [&](const Point3d &q) { return Vector3d(origin, q).dot(unit_normal); };
+
+            std::optional<Point3d> best;
+            double best_dist_sq = std::numeric_limits<double>::max();
+            for (const auto &[a, b, c] : m_triangles) {
+                const std::array<Point3d, 3> corners{a, b, c};
+                const std::array<double, 3> at{height(a), height(b), height(c)};
+
+                // Where the plane crosses this facet's own edges: 0 crossings when it is wholly to
+                // one side, 2 when it cuts through. A facet lying *in* the plane contributes its
+                // corners, which is enough to find the closest point on it.
+                std::vector<Point3d> crossings;
+                for (std::size_t k = 0; k < 3; ++k) {
+                    const std::size_t next = (k + 1) % 3;
+                    if (at[k] == 0.0) crossings.push_back(corners[k]);
+                    if ((at[k] < 0.0) != (at[next] < 0.0) && at[k] != 0.0 && at[next] != 0.0) {
+                        const double t = at[k] / (at[k] - at[next]);
+                        crossings.push_back(corners[k] + Vector3d(corners[k], corners[next]) * t);
+                    }
+                }
+                if (crossings.size() < 2) continue;
+
+                for (std::size_t i = 0; i + 1 < crossings.size(); ++i) {
+                    const Point3d candidate = closest_point_on_segment(p, crossings[i], crossings[i + 1]);
+                    if (const double dist_sq = Vector3d(p, candidate).norm_sq(); dist_sq < best_dist_sq) {
+                        best_dist_sq = dist_sq;
+                        best = candidate;
+                    }
+                }
+            }
+            return best;
+        }
 
         /** @brief Gets the topological dimension of this entity. @return GroupDim::Dim2. */
         [[nodiscard]] constexpr GroupDim dimension() const noexcept { return GroupDim::Dim2; }
