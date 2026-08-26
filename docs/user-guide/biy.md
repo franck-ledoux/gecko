@@ -422,14 +422,19 @@ and bend them there.
 
 ## Pillowing
 
+All three of the operations below aim at **block faces**, so `Blocking ▸ faces` has to be shown in
+the Scene panel: Polyscope picks nothing from a structure that is not drawn, and with it off these
+modes do nothing at all. Switching into one of them says so if it is off.
+
 **Pillow** mode inserts a layer of blocks along a *nappe*: a sheet of block faces that cuts the
 blocking in two. It may close back on itself, isolating a set of blocks from everything around them,
 or run clean through the structure and come out on its boundary.
 
-Click block faces to gather the nappe; the ones taken so far are washed in the sheet colour. The
-selection survives a trip through **Camera** mode, and only that — reaching the faces on the far side
-of a nappe means rotating the view — while anything that changes the blocking clears it. Clicking a
-face again takes it back — the highlight is drawn over the faces it marks, and the pick reads through
+Click block faces to gather the nappe; each one taken turns the sheet colour, painted onto the face
+itself rather than drawn over it — a mark laid on top would sit in exactly the same plane as what it
+marks, and two coplanar surfaces fight over the depth buffer. The selection survives a trip through
+**Camera** mode, and only that — reaching the faces on the far side of a nappe means rotating the
+view — while anything that changes the blocking clears it. Clicking a face again takes it back — the highlight is drawn over the faces it marks, and the pick reads through
 it precisely so that a face can be taken back. Press `Space` to insert the layer.
 
 **Which side shrinks** is the one you are looking *through* the first face you picked at: click a

@@ -240,9 +240,16 @@ namespace gecko::biy {
          * @return That edge's *position* in the display order and the parameter along it, or nothing
          *         when the blocking has no edge to measure against. */
         std::optional<std::pair<int, double>> nearest_edge(const glm::vec3 &target) const;
-        /** @brief Registers (or removes) the highlight over whichever faces are currently spoken
-         * for: the nappe being gathered, the face a fold is aimed at, or the cuts an opening has so
-         * far. */
+        /**
+         * @brief Colours whichever faces are currently spoken for — the nappe being gathered, the
+         * face a fold is aimed at, or the cuts an opening has so far.
+         *
+         * Painted onto the faces themselves rather than drawn as a second surface over them. A
+         * highlight laid on top would sit in exactly the same plane as what it marks, and 2 coplanar
+         * surfaces fight over the depth buffer: the mark shows in patches or not at all, which is
+         * what the first version of this did. Colouring the face is also what "selected" is expected
+         * to look like.
+         */
         void refresh_face_preview();
         /** @brief The mean of one block's 8 corners.
          * @param block_id The block.
@@ -331,13 +338,13 @@ namespace gecko::biy {
         std::vector<int> m_open_faces;
         /** @copydoc m_last_cut_mouse */
         glm::vec2 m_last_face_mouse{-1.0f, -1.0f};
-        /** @brief Which face each quad of the highlight came from, as an id, so that a pick landing
-         * on the highlight still says which face it is.
+        /** @brief Whether what is marked on the block faces still matches what is selected.
          *
-         * It has to. The highlight is drawn over the faces it marks, so the moment a face is picked
-         * it is no longer what the cursor is on — and without this, clicking a face a second time to
-         * take it back out of a nappe could never reach it. */
-        std::vector<int> m_preview_owner;
+         * The mark is repainted once a frame rather than at each place that changes it, so that a
+         * rebuild of the Polyscope structures — which drops the mark with them — needs no one to
+         * remember to put it back. This is what stops that costing a full pass over the face grid on
+         * every frame in which nothing happened. */
+        bool m_selection_dirty = true;
         /** @brief How far a pillow's inside, or an opening's 2 halves, move — as a fraction of the
          * mean length of the edges at each corner that moves, so a layer follows the size of the
          * blocks it is inserted between. */

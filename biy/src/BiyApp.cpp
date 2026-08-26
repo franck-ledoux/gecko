@@ -77,9 +77,14 @@ namespace gecko::biy {
         /** @brief Delete-mode preview: the one block a click would remove. */
         constexpr const char *DELETE_PREVIEW = "to delete";
 
-        /** @brief The highlight over whatever faces an operation in progress has spoken for: a
-         * nappe being gathered, a fold being aimed, or the cuts of an opening. */
-        constexpr const char *FACE_PREVIEW = "selected faces";
+        /** @brief The colour quantity marking whatever faces an operation in progress has spoken
+         * for: a nappe being gathered, a fold being aimed, or the cuts of an opening. */
+        constexpr const char *FACE_SELECTION = "selection";
+
+        /** @brief The colour quantity the block faces otherwise carry, put back when a selection is
+         * done with — enabling one dominant quantity disables the other, and Polyscope does not
+         * remember which was on before. */
+        constexpr const char *FACE_CLASSIFICATION = "classification";
 
         glm::vec3 to_glm(const std::array<float, 3> &c) { return {c[0], c[1], c[2]}; }
 
@@ -226,7 +231,18 @@ namespace gecko::biy {
             mode == MouseMode::Delete) {
             clear_selection();
         }
-        refresh_face_preview();
+        m_selection_dirty = true;
+
+        // All 3 of these aim at block faces, and Polyscope picks nothing from a structure that is
+        // not shown — so with that display off they do nothing at all, silently. Said here rather
+        // than left to be discovered by clicking and getting no answer.
+        if (mode == MouseMode::Pillow || mode == MouseMode::Chord || mode == MouseMode::Open) {
+            const bool showing =
+                polyscope::hasSurfaceMesh(BLOCK_FACES) && polyscope::getSurfaceMesh(BLOCK_FACES)->isEnabled();
+            if (!showing) {
+                m_status = "Turn on Blocking > faces in the Scene panel: this mode aims at block faces";
+            }
+        }
     }
 
     void BiyApp::clear_selection() {
@@ -236,7 +252,7 @@ namespace gecko::biy {
         m_open_edge.reset();
         m_open_faces.clear();
         m_last_face_mouse = glm::vec2(-1.0f, -1.0f);
-        refresh_face_preview();
+        m_selection_dirty = true;
     }
 
     void BiyApp::register_model() {
@@ -628,6 +644,9 @@ namespace gecko::biy {
         handle_pillow();
         handle_chord();
         handle_open();
+        // After everything, because a rebuild of the Polyscope structures — this frame's, or one the
+        // console asked for — registers the block faces afresh and takes the mark with them.
+        refresh_face_preview();
     }
 
     void BiyApp::draw_operations_panel() {
@@ -1444,35 +1463,24 @@ namespace gecko::biy {
     std::optional<std::pair<int, int>> BiyApp::pick_face(glm::vec2 screen_coords) {
         if (!m_blocking || !polyscope::hasSurfaceMesh(BLOCK_FACES)) return std::nullopt;
 
+        // Always the faces themselves: a selected face is *coloured* rather than covered, so
+        // nothing of ours ever comes between the cursor and it — which is also what lets a face be
+        // clicked a second time to take it back out of a nappe.
         const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
-        if (!pick.isHit) return std::nullopt;
+        if (!pick.isHit || pick.structureName != BLOCK_FACES) return std::nullopt;
 
-        // Through the highlight as readily as through the faces themselves. It is drawn over the
-        // faces it marks, so the moment one is picked it is no longer what the cursor is on —
-        // reading that as "nothing there" would leave a face impossible to take back out of a nappe,
-        // and make a fold's preview flicker as the cursor crossed it.
-        int face_id = -1;
-        if (pick.structureName == FACE_PREVIEW && polyscope::hasSurfaceMesh(FACE_PREVIEW)) {
-            const auto hit = polyscope::getSurfaceMesh(FACE_PREVIEW)->interpretPickResult(pick);
-            if (hit.elementType != polyscope::MeshElement::FACE) return std::nullopt;
-            if (hit.index >= m_preview_owner.size()) return std::nullopt;
-            face_id = m_preview_owner[hit.index];
-        } else if (pick.structureName == BLOCK_FACES) {
-            const auto hit = polyscope::getSurfaceMesh(BLOCK_FACES)->interpretPickResult(pick);
-            if (hit.elementType != polyscope::MeshElement::FACE) return std::nullopt;
+        const auto hit = polyscope::getSurfaceMesh(BLOCK_FACES)->interpretPickResult(pick);
+        if (hit.elementType != polyscope::MeshElement::FACE) return std::nullopt;
 
-            // The faces are drawn as a grid of quads per 2-cell, and `face_grid_owners()` says which
-            // 2-cell each quad came from — as a position, turned into an id here for the reason
-            // `m_hover_edge` gives.
-            const auto owners = m_blocking->face_grid_owners(m_edge_samples);
-            if (hit.index >= owners.size()) return std::nullopt;
-            const auto ids = m_blocking->face_ids();
-            const auto owner = static_cast<std::size_t>(owners[hit.index]);
-            if (owner >= ids.size()) return std::nullopt;
-            face_id = ids[owner];
-        } else {
-            return std::nullopt;
-        }
+        // The faces are drawn as a grid of quads per 2-cell, and `face_grid_owners()` says which
+        // 2-cell each quad came from — as a position, turned into an id here for the reason
+        // `m_hover_edge` gives.
+        const auto owners = m_blocking->face_grid_owners(m_edge_samples);
+        if (hit.index >= owners.size()) return std::nullopt;
+        const auto ids = m_blocking->face_ids();
+        const auto owner = static_cast<std::size_t>(owners[hit.index]);
+        if (owner >= ids.size()) return std::nullopt;
+        const int face_id = ids[owner];
 
         // And which of its 4 corners the pick landed nearest, which is what names a fold's diagonal:
         // aiming at a corner of a face is the whole of the interface for it.
@@ -1508,6 +1516,11 @@ namespace gecko::biy {
     }
 
     void BiyApp::refresh_face_preview() {
+        if (!m_selection_dirty) return;
+        if (!m_blocking || !polyscope::hasSurfaceMesh(BLOCK_FACES)) return;
+        m_selection_dirty = false;
+        auto *faces = polyscope::getSurfaceMesh(BLOCK_FACES);
+
         std::vector<int> wanted;
         if (m_mode == MouseMode::Pillow) {
             wanted = m_nappe;
@@ -1517,14 +1530,13 @@ namespace gecko::biy {
             wanted = m_open_faces;
         }
 
-        const auto drop = [this] {
-            m_preview_owner.clear();
-            if (polyscope::hasSurfaceMesh(FACE_PREVIEW)) {
-                polyscope::removeStructure(polyscope::getSurfaceMesh(FACE_PREVIEW));
+        if (wanted.empty()) {
+            faces->removeQuantity(FACE_SELECTION);
+            // Whatever the faces were showing before comes back: enabling one dominant quantity
+            // disabled it, and Polyscope keeps no memory of which that was.
+            if (auto *classification = faces->getQuantity(FACE_CLASSIFICATION)) {
+                classification->setEnabled(true);
             }
-        };
-        if (!m_blocking || wanted.empty()) {
-            drop();
             return;
         }
 
@@ -1535,28 +1547,23 @@ namespace gecko::biy {
             if (found != ids.end()) positions.insert(static_cast<int>(found - ids.begin()));
         }
 
+        // One colour per drawn quad: the selection colour for the faces spoken for, and for every
+        // other one the colour it would have had anyway, so that marking a face changes that face
+        // and nothing else about the picture.
         const auto owners = m_blocking->face_grid_owners(m_edge_samples);
-        const auto quads = m_blocking->face_grid_quads(m_edge_samples);
-        std::vector<std::array<int, 4>> chosen;
-        m_preview_owner.clear();
-        for (std::size_t q = 0; q < quads.size() && q < owners.size(); ++q) {
-            if (positions.count(owners[q]) == 0) continue;
-            chosen.push_back(quads[q]);
-            m_preview_owner.push_back(ids[static_cast<std::size_t>(owners[q])]);
+        const auto dims = m_blocking->face_classification_dims();
+        const glm::vec3 marked = to_glm(m_config.sheet_color);
+        std::vector<glm::vec3> colors;
+        colors.reserve(owners.size());
+        for (const int owner : owners) {
+            const auto position = static_cast<std::size_t>(owner);
+            if (positions.count(owner) > 0) {
+                colors.push_back(marked);
+            } else {
+                colors.push_back(to_glm(m_config.color_for(position < dims.size() ? dims[position] : -1)));
+            }
         }
-        if (chosen.empty()) {
-            drop();
-            return;
-        }
-
-        // The whole vertex list rather than only the corners of the chosen quads: the indices are
-        // the ones the facade already handed out, and re-numbering them would be one more thing to
-        // keep in step for no gain.
-        auto *preview =
-            polyscope::registerSurfaceMesh(FACE_PREVIEW, m_blocking->face_grid_vertices(m_edge_samples), chosen);
-        preview->setSurfaceColor(glm::vec3(m_config.sheet_color[0], m_config.sheet_color[1], m_config.sheet_color[2]));
-        preview->setEdgeWidth(0.0);
-        preview->setTransparency(0.6f);
+        faces->addFaceColorQuantity(FACE_SELECTION, colors)->setEnabled(true);
     }
 
     void BiyApp::handle_pillow() {
@@ -1583,7 +1590,7 @@ namespace gecko::biy {
             } else {
                 m_nappe.push_back(picked->first);
             }
-            refresh_face_preview();
+            m_selection_dirty = true;
             m_status = std::to_string(m_nappe.size()) + " face(s) in the nappe — Space to insert the layer";
         }
     }
@@ -1669,7 +1676,7 @@ namespace gecko::biy {
             const auto picked = pick_face(mouse);
             m_hover_face = picked ? std::optional<int>{picked->first} : std::nullopt;
             m_hinge_node = picked ? std::optional<int>{picked->second} : std::nullopt;
-            refresh_face_preview();
+            m_selection_dirty = true;
             if (m_hover_face != previous) {
                 m_status = m_hover_face ? "Face " + std::to_string(*m_hover_face) + ", folding through corner " +
                                               std::to_string(*m_hinge_node) + " — click or Space"
@@ -1765,7 +1772,7 @@ namespace gecko::biy {
         } else {
             m_open_faces.push_back(picked->first);
         }
-        refresh_face_preview();
+        m_selection_dirty = true;
 
         if (m_open_faces.size() < 2) {
             m_status = "Edge " + std::to_string(*m_open_edge) + ", 1 face of 2 — pick the other";
