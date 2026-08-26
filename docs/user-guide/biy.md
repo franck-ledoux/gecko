@@ -256,6 +256,25 @@ release. Every edge, face and block touching the corner is refitted live, so the
 deforms as you drag. Releasing snaps it onto the model and reclassifies everything it touches — see
 [Snapping](#snapping) above.
 
+### Constraining a corner
+
+A corner is normally **Free**: it goes wherever you drag it, and the tolerance snap on release is
+the only thing pulling it onto the model. Two other levels are available, and both are biy's own
+state — the kernel knows nothing of them, and taking an edit back with undo never changes one:
+
+- **Constrained** (a sphere becomes a small cube): stays on whatever it is *already* classified on
+  for the whole drag, not only when the button comes up. Sliding a corner along a curve, say, keeps
+  it on that curve the entire time rather than snapping onto it only at the end — and it never
+  re-searches for something else nearby the way the release-time snap does, so it cannot hop onto a
+  different entity mid-drag.
+- **Frozen** (a black sphere): does not move at all. Clicking it in Edit mode does nothing, and the
+  panel says why. This is also what a future smoothing pass will be told to leave alone.
+
+Point at a corner — no need to click it — and press **`G`** to toggle Constrained, or **`F`** to
+toggle Frozen. Unfreezing always goes back to Free, whatever the corner was constrained to before
+being frozen; the 2 toggles are independent otherwise. Both work while a corner is mid-drag too, in
+case you want to lock it down without letting go of the mouse first.
+
 The scene itself stays put while you edit. Polyscope normally recomputes the scene's bounding box
 and length scale whenever a structure changes, which drags the ground plane along with it — so biy
 freezes both to the model once it's loaded (`options::automaticallyComputeSceneExtents`). Growing a
