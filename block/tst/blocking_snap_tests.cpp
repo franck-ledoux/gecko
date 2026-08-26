@@ -385,3 +385,26 @@ TEST_CASE("snap_node_leaves_cells_it_does_not_touch_alone", "[BlockTestSuite]") 
 
     REQUIRE(untouched->info().geom_targets == before);
 }
+
+TEST_CASE("a_tolerance_below_the_true_distance_excludes_that_whole_dimension_from_snapping", "[BlockTestSuite]") {
+    // #48 asks for a way to snap onto some kinds of entity but not others (vertices and curves,
+    // say, but not surfaces) — which the existing 3-way tolerance already gives, without needing a
+    // separate on/off switch: pass a tolerance below the true distance (0, if nothing is ever meant
+    // to reach that dimension) and classify_position()'s `<=` search simply never matches there.
+    const FacetedGeometry geom = make_square_geom_model();
+    Blocking<FacetedGeometry> blocking(geom);
+    blocking.create_quad_block({Point3d(0, 0, 0), Point3d(1, 0, 0), Point3d(1, 1, 0), Point3d(0, 1, 0)});
+    blocking.classify(1e-6);
+
+    // Above the surface's interior, 0.5 from every vertex and every curve (so those 2 dimensions
+    // are never candidates here) and a known 0.01 above the surface itself.
+    auto n = node_at(blocking, Point3d(0, 0, 0));
+    blocking.move_node(n, Point3d(0.5, 0.5, 0.01));
+
+    blocking.snap_node(n, 1e-6, 1e-6, 0.001);
+    REQUIRE(n->info().geom_targets.empty());
+
+    blocking.snap_node(n, 1e-6, 1e-6, 0.02);
+    REQUIRE(n->info().geom_targets.size() == 1);
+    REQUIRE(n->info().geom_targets[0].first == GroupDim::Dim2);
+}

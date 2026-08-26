@@ -247,6 +247,26 @@ def test_snap_node(geom_model_path):
     assert blocking.node_classification_dims()[0] == 0
 
 
+def test_a_tolerance_below_the_true_distance_excludes_that_dimension(square_model_path):
+    # #48 asks for a way to snap onto some kinds of entity but not others — already there, without
+    # a separate switch: passing a tolerance below the true distance excludes that whole dimension,
+    # since classify()/snap_node() only ever keep what is <= their tolerance.
+    model = gecko.GeomModel(square_model_path)
+    blocking = gecko.Blocking(model)
+    blocking.create_quad_block([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)])
+    blocking.classify(1e-6)
+
+    # Above the surface's interior, 0.5 from every vertex and every curve, a known 0.01 above the
+    # surface itself.
+    blocking.move_node(0, 0.5, 0.5, 0.01)
+
+    blocking.snap_node(0, 1e-6, 1e-6, 0.001)
+    assert blocking.node_classification_dims()[0] == -1
+
+    blocking.snap_node(0, 1e-6, 1e-6, 0.02)
+    assert blocking.node_classification_dims()[0] == 2
+
+
 def test_snap_node_unknown_id_raises(geom_model_path):
     model = gecko.GeomModel(geom_model_path)
     blocking = gecko.Blocking(model)

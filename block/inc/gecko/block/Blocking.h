@@ -137,6 +137,17 @@ namespace gecko {
          * Three separate values rather than one because the scales genuinely differ: 2 distinct
          * vertices are typically far closer to each other than to any curve, so a tolerance loose
          * enough to catch a surface would snap a corner to the wrong vertex.
+         *
+         * Setting one of the 3 below the true distance is also how a caller excludes that whole
+         * dimension from classification for a given corner, rather than merely tightening it:
+         * `classify_position()`'s search keeps everything within `<=` that tolerance, so `0`
+         * excludes a dimension outright unless a corner sits at an exact geometric coincidence with
+         * it — see
+         * `a_tolerance_below_the_true_distance_excludes_that_whole_dimension_from_snapping` for the
+         * measured case, including the flat-model pitfall that first version of this note glossed
+         * over: a corner sitting exactly *in the plane* of a flat surface is 0 away from it in
+         * floating point too, so `0` alone does not exclude a surface a corner already lies on —
+         * only one it does not.
          */
         struct Tolerances {
             /** @brief Threshold for snapping onto a vertex (dimension 0). */
