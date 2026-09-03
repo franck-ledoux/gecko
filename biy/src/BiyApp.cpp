@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <sstream>
 
 #include <imgui.h>
@@ -133,6 +134,58 @@ namespace gecko::biy {
         polyscope::Structure *curves_or_null(const char *name) {
             return polyscope::hasCurveNetwork(name) ? polyscope::getCurveNetwork(name) : nullptr;
         }
+        /**
+         * @brief Drops from Polyscope's pick-range table every entry naming a structure that no
+         * longer exists.
+         *
+         * Working around a defect in the vendored Polyscope, not a subtlety of our own. Every
+         * structure that is picked at all claims a range of pick-buffer indices, recorded in
+         * `state::globalContext.structureRanges` under its own address — and *nothing ever removes
+         * that entry*: `removeStructure()` destroys the structure and leaves the entry behind, and
+         * `Structure::~Structure()` is empty. `pick::globalIndexToLocal()` then walks that table
+         * looking for the range holding the index it read, and an index belonging to none of the
+         * live structures can land in a dead one's range. What comes back is a pointer into freed
+         * memory, which `pickAtBufferInds()` immediately dereferences.
+         *
+         * biy re-registers all of its structures on every `refresh_view()` — every classify, cut,
+         * undo, order change, corner freeze — so the table fills with dead entries fast, and a
+         * session long enough eventually picks one and dies inside Polyscope, before any code of
+         * ours gets a say. Pruning here is the missing `erase`, applied from outside: with no dead
+         * entry left in the table, an index nothing owns resolves to `nullptr`, which is exactly
+         * what "clicked on nothing" already means everywhere below.
+         *
+         * Called from both ends: before every pick of ours, and once at the end of each frame —
+         * because Polyscope picks on its own too, on mouse release in `processInputEvents()`, which
+         * runs *before* our callback. Leaving the table clean when the frame ends is what covers
+         * that pick; pruning before our own covers the structures dropped earlier in this one.
+         *
+         * `quantityRanges` has the same hole and is deliberately left alone: only render-image
+         * quantities ever claim a pick range, biy registers none, and pruning it would need the
+         * list of live quantities, which a `Structure*` does not expose. Should biy ever add one,
+         * this needs to grow a second half.
+         *
+         */
+        void prune_dead_pick_ranges() {
+            auto &ranges = polyscope::state::globalContext.structureRanges;
+            if (ranges.empty()) return;
+            std::set<const polyscope::Structure *> live;
+            for (const auto &[type, by_name] : polyscope::state::structures) {
+                for (const auto &[name, structure] : by_name) {
+                    live.insert(structure.get());
+                }
+            }
+            std::erase_if(ranges, [&live](const auto &entry) { return !live.contains(entry.first); });
+        }
+
+        /** @brief Picks whatever is under @p screen_coords, having first pruned the pick-range table
+         * (see `prune_dead_pick_ranges()`).
+         * @param screen_coords Where to pick.
+         * @return What Polyscope found there. */
+        polyscope::PickResult pick_at(glm::vec2 screen_coords) {
+            prune_dead_pick_ranges();
+            return polyscope::pickAtScreenCoords(screen_coords);
+        }
+
         polyscope::Structure *points_or_null(const char *name) {
             return polyscope::hasPointCloud(name) ? polyscope::getPointCloud(name) : nullptr;
         }
@@ -675,6 +728,10 @@ namespace gecko::biy {
         // After everything, because a rebuild of the Polyscope structures — this frame's, or one the
         // console asked for — registers the block faces afresh and takes the mark with them.
         refresh_face_preview();
+
+        // Last of all, so the table is clean for the pick Polyscope itself runs on mouse release,
+        // before this callback is reached again next frame.
+        prune_dead_pick_ranges();
     }
 
     void BiyApp::draw_operations_panel() {
@@ -1238,7 +1295,7 @@ namespace gecko::biy {
             m_sheet.clear();
         };
 
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit) {
             clear();
             return;
@@ -1445,6 +1502,12 @@ namespace gecko::biy {
         m_hover_edge.reset();
         m_sheet.clear();
         m_hover_block.reset();
+        // The 2 corner ids go the same way, and for a sharper reason than the others: a drag in
+        // progress reads its corner every frame, so a redo that takes that corner away leaves
+        // node_position() throwing on an id nothing carries any more.
+        m_hover_node.reset();
+        m_dragged_node.reset();
+        show_highlight(std::nullopt);
         m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
         m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
         refresh_cut_preview();
@@ -1532,7 +1595,7 @@ namespace gecko::biy {
         // Always the faces themselves: a selected face is *coloured* rather than covered, so
         // nothing of ours ever comes between the cursor and it — which is also what lets a face be
         // clicked a second time to take it back out of a nappe.
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit || pick.structureName != BLOCK_FACES) return std::nullopt;
 
         const auto hit = polyscope::getSurfaceMesh(BLOCK_FACES)->interpretPickResult(pick);
@@ -1804,7 +1867,7 @@ namespace gecko::biy {
 
         const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
         if (!m_open_edge) {
-            const polyscope::PickResult pick = polyscope::pickAtScreenCoords(mouse);
+            const polyscope::PickResult pick = pick_at(mouse);
             if (!pick.isHit || pick.structureName != BLOCK_EDGES) {
                 m_status = "No block edge under the cursor";
                 return;
@@ -1892,7 +1955,7 @@ namespace gecko::biy {
     void BiyApp::update_delete_hover(glm::vec2 screen_coords) {
         const auto clear = [this] { m_hover_block.reset(); };
 
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit) {
             clear();
             return;
@@ -2150,7 +2213,7 @@ namespace gecko::biy {
 
     std::optional<int> BiyApp::pick_vertex(glm::vec2 screen_coords) {
         if (!m_blocking) return std::nullopt;
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit) return std::nullopt;
 
         if (pick.structureName == BLOCK_VERTICES && polyscope::hasPointCloud(BLOCK_VERTICES)) {
