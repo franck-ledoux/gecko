@@ -99,6 +99,25 @@ print(blocking.node_classification_dims(), blocking.edge_classification_dims())
 blocking.move_node(0, 0.01, 0.01, 0.0)
 blocking.snap_node(0, tol_vertex=0.1)
 
+# Smoothing. Corner positions only — never a control point moved by hand, never a change to what a
+# cell is classified on. Classification is what holds the result in place: a corner on a model vertex
+# does not move, one on a curve slides along that curve, one on a surface stays on that surface, and
+# only the interior is free. An *unclassified* blocking has nothing holding its boundary and will
+# shrink, so classify() first, or name its boundary corners in locked_node_ids.
+#
+# Two kinds of pass, and `strategy` picks which run. The smart Laplacian offers each corner the
+# average of its neighbours and takes it only where the worst cell around that corner improves; the
+# optimization pass then searches for the position leaving that worst cell as good as it can be,
+# which is how it gets past what a single candidate position cannot reach. Neither can lower the
+# worst cell in the blocking, so the report's worst_quality is never below what it started at.
+report = blocking.smooth(iterations=10, locked_node_ids=[], strategy="both")
+print(report.moves, report.laplacian_passes, report.optimization_passes, report.worst_quality)
+
+# The same number on its own, without changing anything. It is the worst cell's *mean ratio*: 1 where
+# every cell is a cube or a square, less as they skew or stretch, 0 where one has collapsed, negative
+# where one has turned inside out.
+print(blocking.worst_quality())
+
 print(blocking.nb_cells(2), blocking.is_valid_topology())
 
 if blocking.can_delete_face(face_a):

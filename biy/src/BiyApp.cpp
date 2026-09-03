@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <sstream>
 
 #include <imgui.h>
@@ -52,7 +53,8 @@ namespace gecko::biy {
         /** @brief Constrained corners, drawn as cube glyphs (see `BiyApp::build_cube_glyphs()`) —
          * Polyscope's point cloud has no cube of its own to ask for. */
         constexpr const char *BLOCK_VERTICES_CONSTRAINED = "vertices (constrained)";
-        /** @brief Frozen corners, drawn as a fixed-color point cloud. */
+        /** @brief Frozen corners, drawn as fixed-color cube glyphs — the same glyph a constrained
+         * corner gets, the colour being what tells the 2 apart. */
         constexpr const char *BLOCK_VERTICES_FROZEN = "vertices (frozen)";
         /** @brief The block faces themselves, sampled into quads — not the generated mesh's quads,
          * which exist only for standalone 2D blocks (see `refresh_view()`). */
@@ -132,6 +134,58 @@ namespace gecko::biy {
         polyscope::Structure *curves_or_null(const char *name) {
             return polyscope::hasCurveNetwork(name) ? polyscope::getCurveNetwork(name) : nullptr;
         }
+        /**
+         * @brief Drops from Polyscope's pick-range table every entry naming a structure that no
+         * longer exists.
+         *
+         * Working around a defect in the vendored Polyscope, not a subtlety of our own. Every
+         * structure that is picked at all claims a range of pick-buffer indices, recorded in
+         * `state::globalContext.structureRanges` under its own address — and *nothing ever removes
+         * that entry*: `removeStructure()` destroys the structure and leaves the entry behind, and
+         * `Structure::~Structure()` is empty. `pick::globalIndexToLocal()` then walks that table
+         * looking for the range holding the index it read, and an index belonging to none of the
+         * live structures can land in a dead one's range. What comes back is a pointer into freed
+         * memory, which `pickAtBufferInds()` immediately dereferences.
+         *
+         * biy re-registers all of its structures on every `refresh_view()` — every classify, cut,
+         * undo, order change, corner freeze — so the table fills with dead entries fast, and a
+         * session long enough eventually picks one and dies inside Polyscope, before any code of
+         * ours gets a say. Pruning here is the missing `erase`, applied from outside: with no dead
+         * entry left in the table, an index nothing owns resolves to `nullptr`, which is exactly
+         * what "clicked on nothing" already means everywhere below.
+         *
+         * Called from both ends: before every pick of ours, and once at the end of each frame —
+         * because Polyscope picks on its own too, on mouse release in `processInputEvents()`, which
+         * runs *before* our callback. Leaving the table clean when the frame ends is what covers
+         * that pick; pruning before our own covers the structures dropped earlier in this one.
+         *
+         * `quantityRanges` has the same hole and is deliberately left alone: only render-image
+         * quantities ever claim a pick range, biy registers none, and pruning it would need the
+         * list of live quantities, which a `Structure*` does not expose. Should biy ever add one,
+         * this needs to grow a second half.
+         *
+         */
+        void prune_dead_pick_ranges() {
+            auto &ranges = polyscope::state::globalContext.structureRanges;
+            if (ranges.empty()) return;
+            std::set<const polyscope::Structure *> live;
+            for (const auto &[type, by_name] : polyscope::state::structures) {
+                for (const auto &[name, structure] : by_name) {
+                    live.insert(structure.get());
+                }
+            }
+            std::erase_if(ranges, [&live](const auto &entry) { return !live.contains(entry.first); });
+        }
+
+        /** @brief Picks whatever is under @p screen_coords, having first pruned the pick-range table
+         * (see `prune_dead_pick_ranges()`).
+         * @param screen_coords Where to pick.
+         * @return What Polyscope found there. */
+        polyscope::PickResult pick_at(glm::vec2 screen_coords) {
+            prune_dead_pick_ranges();
+            return polyscope::pickAtScreenCoords(screen_coords);
+        }
+
         polyscope::Structure *points_or_null(const char *name) {
             return polyscope::hasPointCloud(name) ? polyscope::getPointCloud(name) : nullptr;
         }
@@ -674,6 +728,10 @@ namespace gecko::biy {
         // After everything, because a rebuild of the Polyscope structures — this frame's, or one the
         // console asked for — registers the block faces afresh and takes the mark with them.
         refresh_face_preview();
+
+        // Last of all, so the table is clean for the pick Polyscope itself runs on mouse release,
+        // before this callback is reached again next frame.
+        prune_dead_pick_ranges();
     }
 
     void BiyApp::draw_operations_panel() {
@@ -749,7 +807,7 @@ namespace gecko::biy {
             draw_scene_entry("edges", curves_or_null(BLOCK_EDGES));
             draw_scene_entry("vertices", points_or_null(BLOCK_VERTICES));
             draw_scene_entry("vertices (constrained)", surface_or_null(BLOCK_VERTICES_CONSTRAINED));
-            draw_scene_entry("vertices (frozen)", points_or_null(BLOCK_VERTICES_FROZEN));
+            draw_scene_entry("vertices (frozen)", surface_or_null(BLOCK_VERTICES_FROZEN));
         }
 
         if (ImGui::CollapsingHeader("Mesh")) {
@@ -1062,6 +1120,37 @@ namespace gecko::biy {
         }
 
         ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("smooth passes", &m_smooth_passes, 1, 5)) {
+            m_smooth_passes = std::clamp(m_smooth_passes, 1, MAX_SMOOTH_PASSES);
+        }
+        if (ImGui::Button("Smooth")) {
+            // Frozen corners, and only those. Constrained is about what a *drag* may do to a corner
+            // and says nothing about smoothing: a corner told to stay on its curve is one the
+            // smoother keeps on that curve anyway, from the classification itself.
+            std::vector<int> locked;
+            for (const auto &[id, state] : m_node_constraint) {
+                if (state == NodeConstraint::Frozen) locked.push_back(id);
+            }
+            const auto report = m_blocking->smooth(m_smooth_passes, locked);
+            refresh_view();
+            if (report.moves == 0) {
+                m_status = "Nothing left to smooth";
+            } else {
+                m_status = "Smoothed " + std::to_string(report.moves) + " corner moves, worst cell " +
+                           std::to_string(report.worst_quality);
+            }
+            std::cout << "biy [smooth]: " << report.moves << " corner moves over " << report.laplacian_passes
+                      << " laplacian and " << report.optimization_passes << " optimization passes; worst cell "
+                      << report.worst_quality << "." << std::endl;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Moves corners, never control points, and never changes what a cell is classified "
+                              "on: a corner on a model vertex stays put, one on a curve slides along it, one on a "
+                              "surface stays on it. Frozen corners (F) are left alone. An unclassified blocking "
+                              "has nothing holding its boundary and will shrink \u2014 classify first, or freeze it.");
+        }
+
+        ImGui::SetNextItemWidth(120.0f);
         // The step sizes are given explicitly because InputInt's own default fast step is 100 —
         // meaningless over a 1..20 range, and reachable without meaning to: ImGui applies it when
         // io.KeyCtrl is set, which on macOS means Cmd (ConfigMacOSXBehaviors swaps the two). With
@@ -1206,7 +1295,7 @@ namespace gecko::biy {
             m_sheet.clear();
         };
 
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit) {
             clear();
             return;
@@ -1413,6 +1502,12 @@ namespace gecko::biy {
         m_hover_edge.reset();
         m_sheet.clear();
         m_hover_block.reset();
+        // The 2 corner ids go the same way, and for a sharper reason than the others: a drag in
+        // progress reads its corner every frame, so a redo that takes that corner away leaves
+        // node_position() throwing on an id nothing carries any more.
+        m_hover_node.reset();
+        m_dragged_node.reset();
+        show_highlight(std::nullopt);
         m_last_cut_mouse = glm::vec2(-1.0f, -1.0f);
         m_last_delete_mouse = glm::vec2(-1.0f, -1.0f);
         refresh_cut_preview();
@@ -1500,7 +1595,7 @@ namespace gecko::biy {
         // Always the faces themselves: a selected face is *coloured* rather than covered, so
         // nothing of ours ever comes between the cursor and it — which is also what lets a face be
         // clicked a second time to take it back out of a nappe.
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit || pick.structureName != BLOCK_FACES) return std::nullopt;
 
         const auto hit = polyscope::getSurfaceMesh(BLOCK_FACES)->interpretPickResult(pick);
@@ -1772,7 +1867,7 @@ namespace gecko::biy {
 
         const glm::vec2 mouse{io.MousePos.x, io.MousePos.y};
         if (!m_open_edge) {
-            const polyscope::PickResult pick = polyscope::pickAtScreenCoords(mouse);
+            const polyscope::PickResult pick = pick_at(mouse);
             if (!pick.isHit || pick.structureName != BLOCK_EDGES) {
                 m_status = "No block edge under the cursor";
                 return;
@@ -1860,7 +1955,7 @@ namespace gecko::biy {
     void BiyApp::update_delete_hover(glm::vec2 screen_coords) {
         const auto clear = [this] { m_hover_block.reset(); };
 
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit) {
             clear();
             return;
@@ -2045,7 +2140,7 @@ namespace gecko::biy {
 
         if (!m_blocking) {
             drop_surface(BLOCK_VERTICES_CONSTRAINED);
-            drop_points(BLOCK_VERTICES_FROZEN);
+            drop_surface(BLOCK_VERTICES_FROZEN);
             m_vertex_owner_constrained.clear();
             m_vertex_owner_frozen.clear();
             return;
@@ -2088,8 +2183,7 @@ namespace gecko::biy {
         if (constrained_points.empty()) {
             drop_surface(BLOCK_VERTICES_CONSTRAINED);
         } else {
-            const auto [glyph_vertices, glyph_quads] =
-                build_cube_glyphs(constrained_points, m_config.corner_constrained_size);
+            const auto [glyph_vertices, glyph_quads] = build_cube_glyphs(constrained_points, m_config.corner_cube_size);
             const auto shown = enabled_state(surface_or_null(BLOCK_VERTICES_CONSTRAINED));
             auto *mesh = polyscope::registerSurfaceMesh(BLOCK_VERTICES_CONSTRAINED, glyph_vertices, glyph_quads);
             std::vector<glm::vec3> colors;
@@ -2104,24 +2198,22 @@ namespace gecko::biy {
         }
 
         if (frozen_points.empty()) {
-            drop_points(BLOCK_VERTICES_FROZEN);
+            drop_surface(BLOCK_VERTICES_FROZEN);
         } else {
-            std::vector<glm::vec3> pts;
-            pts.reserve(frozen_points.size());
-            for (const auto &p : frozen_points) {
-                pts.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
-            }
-            const auto shown = enabled_state(points_or_null(BLOCK_VERTICES_FROZEN));
-            auto *cloud = polyscope::registerPointCloud(BLOCK_VERTICES_FROZEN, pts);
-            cloud->setPointRadius(m_config.corner_radius);
-            cloud->setPointColor(to_glm(m_config.corner_color_frozen));
-            restore_enabled(cloud, shown, true);
+            // A cube like a constrained corner, and one fixed colour rather than the classification
+            // convention: what a frozen corner has stopped doing is changing, so the colour that
+            // says what it is classified on has nothing left to report about it.
+            const auto [glyph_vertices, glyph_quads] = build_cube_glyphs(frozen_points, m_config.corner_cube_size);
+            const auto shown = enabled_state(surface_or_null(BLOCK_VERTICES_FROZEN));
+            auto *mesh = polyscope::registerSurfaceMesh(BLOCK_VERTICES_FROZEN, glyph_vertices, glyph_quads);
+            mesh->setSurfaceColor(to_glm(m_config.corner_color_frozen));
+            restore_enabled(mesh, shown, true);
         }
     }
 
     std::optional<int> BiyApp::pick_vertex(glm::vec2 screen_coords) {
         if (!m_blocking) return std::nullopt;
-        const polyscope::PickResult pick = polyscope::pickAtScreenCoords(screen_coords);
+        const polyscope::PickResult pick = pick_at(screen_coords);
         if (!pick.isHit) return std::nullopt;
 
         if (pick.structureName == BLOCK_VERTICES && polyscope::hasPointCloud(BLOCK_VERTICES)) {
@@ -2133,8 +2225,12 @@ namespace gecko::biy {
                 const std::size_t glyph = hit.index / 6;
                 if (glyph < m_vertex_owner_constrained.size()) return m_vertex_owner_constrained[glyph];
             }
-        } else if (pick.structureName == BLOCK_VERTICES_FROZEN && polyscope::hasPointCloud(BLOCK_VERTICES_FROZEN)) {
-            if (pick.localIndex < m_vertex_owner_frozen.size()) return m_vertex_owner_frozen[pick.localIndex];
+        } else if (pick.structureName == BLOCK_VERTICES_FROZEN && polyscope::hasSurfaceMesh(BLOCK_VERTICES_FROZEN)) {
+            const auto hit = polyscope::getSurfaceMesh(BLOCK_VERTICES_FROZEN)->interpretPickResult(pick);
+            if (hit.elementType == polyscope::MeshElement::FACE) {
+                const std::size_t glyph = hit.index / 6;
+                if (glyph < m_vertex_owner_frozen.size()) return m_vertex_owner_frozen[glyph];
+            }
         }
         return std::nullopt;
     }

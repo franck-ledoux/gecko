@@ -63,6 +63,24 @@ namespace gecko::app {
                  &GeomModelFacade::vertex_positions,
                  "(x,y,z) position of each of the model's vertices, in vertex_tags() order.");
 
+        py::class_<BlockingFacade::SmoothReport>(m, "SmoothReport", "What one Blocking.smooth() call did.")
+            .def_readonly("laplacian_passes",
+                          &BlockingFacade::SmoothReport::laplacian_passes,
+                          "Laplacian passes run; fewer than asked for when the blocking settled.")
+            .def_readonly("optimization_passes",
+                          &BlockingFacade::SmoothReport::optimization_passes,
+                          "Optimization passes run, likewise.")
+            .def_readonly("moves", &BlockingFacade::SmoothReport::moves, "Corners moved, summed over every pass.")
+            .def_readonly("worst_quality",
+                          &BlockingFacade::SmoothReport::worst_quality,
+                          "The worst cell quality in the blocking afterwards, in (-inf, 1].")
+            .def("__repr__", [](const BlockingFacade::SmoothReport &AReport) {
+                return "<SmoothReport laplacian_passes=" + std::to_string(AReport.laplacian_passes) +
+                       " optimization_passes=" + std::to_string(AReport.optimization_passes) +
+                       " moves=" + std::to_string(AReport.moves) +
+                       " worst_quality=" + std::to_string(AReport.worst_quality) + ">";
+            });
+
         py::class_<BlockingFacade>(m, "Blocking", "A structured (quad/hex) blocking of a GeomModel.")
             .def(py::init<const GeomModelFacade &, int>(),
                  py::arg("model"),
@@ -108,6 +126,21 @@ namespace gecko::app {
                  py::arg("tol_curve") = -1.0,
                  py::arg("tol_surface") = -1.0,
                  "Snaps one corner onto the model, reclassifying and refitting only the cells touching it.")
+            .def("smooth",
+                 &BlockingFacade::smooth,
+                 py::arg("iterations"),
+                 py::arg("locked_node_ids") = std::vector<int>{},
+                 py::arg("strategy") = "both",
+                 "Smooths the blocking: corners are pulled towards their neighbours and settled where the cells "
+                 "around them come out best. Corner positions only, never control points by hand and never what a "
+                 "cell is classified on: a corner on a model vertex stays put, one on a curve stays on that curve, "
+                 "one on a surface on that surface. An unclassified blocking has nothing holding its boundary and "
+                 "will shrink, so classify() first or lock the boundary. strategy is \"laplacian\", "
+                 "\"optimization\" or \"both\". Returns a SmoothReport.")
+            .def("worst_quality",
+                 &BlockingFacade::worst_quality,
+                 "The worst cell quality in the blocking (mean ratio): 1 where every cell is a cube or a square, "
+                 "less as they skew or stretch, negative where one has turned inside out. What smooth() raises.")
             .def("nb_cells",
                  &BlockingFacade::nb_cells,
                  py::arg("dim"),

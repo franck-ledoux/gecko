@@ -637,6 +637,25 @@ namespace gecko {
         bool is_purely_2d() const { return nb_cells<3>() == 0; }
 
         /**
+         * @brief Whether @p AFace bounds a block, rather than being a standalone 2D block's own face.
+         *
+         * The 2 are told apart by the map itself: every dart of a block carries that block's 3-cell,
+         * so a face bounding one has a 3-attribute and a lone quad has none. That distinction decides
+         * which faces `build_connectivity()` may sew at dimension 3, and which ones `to_mesh()` emits
+         * a quad for — a quad being what a standalone 2D block is made of.
+         *
+         * Asked of the map each time rather than kept in a list alongside it. A list has to be
+         * refreshed by every operation that changes which faces belong to a block — a cut splitting
+         * a face in 2, a deletion taking faces away with the block that owned them — and forgetting
+         * one leaves it holding handles to attributes CGAL has already collected. It also cannot
+         * survive the blocking being copied, which snapshot-based undo needs it to.
+         *
+         * @param AFace The face to inspect.
+         * @return true if some block has it on its boundary.
+         */
+        bool belongs_to_block(Face AFace) const { return m_cmap.template attribute<3>(AFace->dart()) != nullptr; }
+
+        /**
          * @brief Checks whether `AFace` can be deleted: currently only requires the blocking to
          * be purely 2D (see `is_purely_2d()`) — face deletion itself has no further
          * classification/topology constraint of its own (every face is unconditionally removable
@@ -909,6 +928,182 @@ namespace gecko {
                 volumes.push_back(block_volume(it, ASubdivisions));
             }
             return volumes;
+        }
+
+        /**
+         * @brief The scaled Jacobian of a hexahedron at its worst corner: a shape quality measure
+         * in `(-inf, 1]`, blind to the block's size, position and orientation.
+         *
+         * At each of the 8 corners the 3 edge vectors leaving it are taken in the parametric `+u`,
+         * `+v` and `+w` directions and their determinant is divided by their 3 lengths — the
+         * Jacobian of the trilinear map at that corner, normalized. A cube measures 1 at every
+         * corner whatever its size and however it is rotated, a block flattened onto a plane tends
+         * to 0, and a corner turned inside out is negative.
+         *
+         * Worth having next to `block_volume()` rather than instead of it: a volume is a size and
+         * this is a shape, and the 2 disagree exactly where it matters. One folded corner reports
+         * here immediately, while the total volume stays positive until enough of the block has
+         * turned over to outweigh the part that has not.
+         *
+         * Read off the 8 corner *positions* and not the stored `volume`, so it can be asked of a
+         * block whose corners have moved but whose geometry has not been rebuilt yet — which is
+         * what a smoothing pass needs, between iterations it would be wasteful to rebuild after.
+         *
+         * @param ACorners The block's 8 corners in `HEX_CORNER_UVW` order, as `frame_of()` gives
+         *        them — one of the cube's 24 rotations, never a mirror image, so the sign here
+         *        means what it says.
+         * @return The smallest of the 8 corner values, or 0 for a corner with a zero-length edge.
+         */
+        static double hex_scaled_jacobian(const std::array<Point3d, 8> &ACorners) {
+            double worst = std::numeric_limits<double>::max();
+            for (std::size_t c = 0; c < 8; ++c) {
+                const std::array<Vector3d, 3> e = hex_corner_edges(ACorners, c);
+                const double lengths = e[0].norm() * e[1].norm() * e[2].norm();
+                worst = std::min(worst, (lengths > 0.0) ? e[0].cross(e[1]).dot(e[2]) / lengths : 0.0);
+            }
+            return worst;
+        }
+
+        /**
+         * @brief The scaled Jacobian of a quadrilateral at its worst corner, the 2D counterpart of
+         * `hex_scaled_jacobian()`: 1 for a square of any size in any plane, 0 for a degenerate
+         * corner, negative for one folded back over the quad.
+         *
+         * Measured against the quad's own average normal rather than against a fixed axis, which is
+         * what lets a warped quad — whose 4 corner normals no longer agree — be measured at all,
+         * and what makes the answer independent of the frame the corners arrive in. A face's frame,
+         * unlike a block's, is settled up to a *reflection* (see `frame_of(Face)`), so a quad read
+         * from the mirrored one has all 4 of its corner normals flipped: taken against a reference
+         * that flips with them, every ratio is unchanged.
+         *
+         * @param ACorners The quad's 4 corners in `QUAD_CORNER_IJ` order, as `frame_of()` gives them.
+         * @return The smallest of the 4 corner values, or 0 for a corner with a zero-length edge —
+         *         and 0 for a quad so degenerate it has no normal to measure against at all.
+         */
+        static double quad_scaled_jacobian(const std::array<Point3d, 4> &ACorners) {
+            std::array<std::array<Vector3d, 2>, 4> e{};
+            Vector3d sum;
+            for (std::size_t c = 0; c < 4; ++c) {
+                e[c] = quad_corner_edges(ACorners, c);
+                sum += e[c][0].cross(e[c][1]);
+            }
+
+            const Vector3d normal = sum.normalized();
+            if (normal.norm_sq() == 0.0) return 0.0;
+
+            double worst = std::numeric_limits<double>::max();
+            for (std::size_t c = 0; c < 4; ++c) {
+                const double lengths = e[c][0].norm() * e[c][1].norm();
+                worst = std::min(worst, (lengths > 0.0) ? e[c][0].cross(e[c][1]).dot(normal) / lengths : 0.0);
+            }
+            return worst;
+        }
+
+        /**
+         * @brief The mean ratio of a hexahedron at its worst corner: a shape quality measure in
+         * `(-inf, 1]` that reaches 1 for a cube and for nothing else.
+         *
+         * The same 3 edge vectors per corner as `hex_scaled_jacobian()`, but their determinant is
+         * divided by the sum of their squared lengths rather than by their product — which is the
+         * whole difference between the 2 measures. A scaled Jacobian is blind to how *long* those
+         * edges are relative to each other, so a sliver 1000 times wider than it is tall scores a
+         * perfect 1; a mean ratio is not, and scores it near 0.
+         *
+         * That is why this, and not the scaled Jacobian, is what `block_quality()` reports and what
+         * a smoother maximizes. Maximizing a measure that cannot see anisotropy gets exactly what it
+         * asks for: cells with beautiful angles and wildly unequal sizes. Measured here rather than
+         * assumed — a smoothing pass driven by the scaled Jacobian pulled a regular grid of squares
+         * *away* from regular while reporting a perfect score throughout.
+         *
+         * Still blind to the cell's own size, which is right: an element is well shaped or badly
+         * shaped whatever its scale, and a blocking of small cells here and large cells there is a
+         * question of grading, which no per-cell measure can answer.
+         *
+         * @param ACorners The block's 8 corners, in `HEX_CORNER_UVW` order (see
+         *        `hex_scaled_jacobian()` on why the sign is trustworthy).
+         * @return The smallest of the 8 corner values, or 0 for a corner with a zero-length edge.
+         */
+        static double hex_mean_ratio(const std::array<Point3d, 8> &ACorners) {
+            double worst = std::numeric_limits<double>::max();
+            for (std::size_t c = 0; c < 8; ++c) {
+                const std::array<Vector3d, 3> e = hex_corner_edges(ACorners, c);
+                const double squares = e[0].norm_sq() + e[1].norm_sq() + e[2].norm_sq();
+                const double det = e[0].cross(e[1]).dot(e[2]);
+                // The cube root of the squared determinant carries the same units as the sum of
+                // squares below it, which is what makes the ratio a pure number; the sign is put
+                // back afterwards, an inverted corner having lost it to the squaring.
+                const double scaled = (squares > 0.0) ? 3.0 * std::cbrt(det * det) / squares : 0.0;
+                worst = std::min(worst, (det < 0.0) ? -scaled : scaled);
+            }
+            return worst;
+        }
+
+        /**
+         * @brief The mean ratio of a quadrilateral at its worst corner, the 2D counterpart of
+         * `hex_mean_ratio()`: 1 for a square of any size in any plane, less for any other shape,
+         * negative for a corner folded back over the quad.
+         *
+         * Measured against the quad's own average normal, for the reason `quad_scaled_jacobian()`
+         * gives.
+         *
+         * @param ACorners The quad's 4 corners, in `QUAD_CORNER_IJ` order.
+         * @return The smallest of the 4 corner values, or 0 for a corner with a zero-length edge —
+         *         and 0 for a quad with no normal to measure against at all.
+         */
+        static double quad_mean_ratio(const std::array<Point3d, 4> &ACorners) {
+            std::array<std::array<Vector3d, 2>, 4> e{};
+            Vector3d sum;
+            for (std::size_t c = 0; c < 4; ++c) {
+                e[c] = quad_corner_edges(ACorners, c);
+                sum += e[c][0].cross(e[c][1]);
+            }
+            const Vector3d normal = sum.normalized();
+            if (normal.norm_sq() == 0.0) return 0.0;
+
+            double worst = std::numeric_limits<double>::max();
+            for (std::size_t c = 0; c < 4; ++c) {
+                const double squares = e[c][0].norm_sq() + e[c][1].norm_sq();
+                const double det = e[c][0].cross(e[c][1]).dot(normal);
+                worst = std::min(worst, (squares > 0.0) ? 2.0 * det / squares : 0.0);
+            }
+            return worst;
+        }
+
+        /**
+         * @brief Measures the shape of one block, from where its corners currently sit.
+         *
+         * Its `hex_mean_ratio()` and not its `hex_scaled_jacobian()` — see the former for why a
+         * single number called "quality" here has to be the one that can see anisotropy.
+         *
+         * @param ABlock The block to measure.
+         * @return Its mean ratio, read in the block's own frame.
+         */
+        double block_quality(Block ABlock) {
+            const std::array<Node, 8> corners = frame_of(ABlock);
+            std::array<Point3d, 8> points{};
+            for (std::size_t c = 0; c < 8; ++c) {
+                points[c] = corners[c]->info().point;
+            }
+            return hex_mean_ratio(points);
+        }
+
+        /**
+         * @brief Measures the shape of one face, from where its corners currently sit.
+         *
+         * What a purely 2D (quad) blocking is measured by, its blocks being faces. Asked of a face
+         * bounding a hex block it answers about that face alone, which is a weaker statement than
+         * `block_quality()` makes: a block can be badly shaped with all 6 of its faces square.
+         *
+         * @param AFace The face to measure.
+         * @return Its `quad_mean_ratio()`, read in the face's own frame.
+         */
+        double face_quality(Face AFace) {
+            const std::array<Node, 4> corners = frame_of(AFace);
+            std::array<Point3d, 4> points{};
+            for (std::size_t c = 0; c < 4; ++c) {
+                points[c] = corners[c]->info().point;
+            }
+            return quad_mean_ratio(points);
         }
 
         /**
@@ -2750,6 +2945,62 @@ namespace gecko {
                                                           face_surfaces[5]);
         }
 
+        /**
+         * @brief Refits every cell touching one of @p APoints, and nothing else.
+         *
+         * Deliberately local. Sweeping the whole blocking would also rebuild cells nowhere near the
+         * edit, and rebuilding a cell means re-deriving it from its boundary — which throws away the
+         * exact subdivision geometry a `cut_sheet()` was careful to keep, the same trap `classify()`
+         * documents.
+         *
+         * Nothing here classifies anything by proximity. Corners keep the classification the caller
+         * decided for them, and every cell around them takes what its own boundary agrees on or
+         * nothing at all — never what it happens to be near. A blocking nobody classified stays
+         * unclassified, which is the whole reason an unclassified grid can be taken apart sheet by
+         * sheet: the fallback search would classify its edges onto whatever geometry the merged plane
+         * had drifted onto, and then bend them there.
+         *
+         * @param APoints Where the corners that moved now sit.
+         * @param ATol The per-dimension snapping tolerances, for cells that have to fall back on a
+         *        proximity search.
+         */
+        void refit_around(const std::vector<Point3d> &APoints, const Tolerances &ATol) {
+            const auto moved = [&APoints](Node ANode) {
+                return std::ranges::find(APoints, ANode->info().point) != APoints.end();
+            };
+
+            // Swept exhaustively for the reason `move_node()` documents: a corner's own dart orbit
+            // does not reach every cell that touches it on a still-unsewn block.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                const Dart d = it->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (!moved(n0) && !moved(n1)) continue;
+                // Straightened before being refitted, the same 2 steps in the same order
+                // `move_node()` and `snap_node()` use between them — and for the same reason. A
+                // corner that moves leaves every curve through it describing where that corner *was*,
+                // and `refit()` falls back on the stored curve's own midpoint to decide what the
+                // edge is classified on. Fed a stale curve it can classify the edge onto whatever
+                // that curve used to pass through and then project its interior there: collapsing a
+                // grid whose merged plane used to sit on a model surface bent one edge a quarter of
+                // its own length, pulled back onto a face it no longer touches.
+                store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
+                refit(it, ATol, true);
+            }
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (face_has_moved_node(it, moved)) refit(it, ATol, true);
+            }
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                if (block_has_moved_node(it, moved)) refit(it, ATol, true);
+            }
+        }
+
         /// @}
     private:
         /** @brief The (u,v) grid coordinates (unscaled, in `{0,1}`) of a quad's 4 local corners
@@ -2770,6 +3021,72 @@ namespace gecko {
                                                                              std::array{1, 0, 1},
                                                                              std::array{1, 1, 1},
                                                                              std::array{0, 1, 1}};
+
+        /**
+         * @brief The 3 edge vectors leaving one corner of a hexahedron, along `+u`, `+v` and `+w`.
+         *
+         * Along the parametric direction whichever side of each axis the corner sits on, and not
+         * simply away from the corner: the determinant of 3 vectors that all point inwards flips
+         * sign at every other corner, and a perfect cube would read -1 at 4 of its 8.
+         *
+         * @param ACorners The block's 8 corners, in `HEX_CORNER_UVW` order.
+         * @param ACorner Which corner.
+         * @return Its 3 edge vectors, in axis order.
+         */
+        static std::array<Vector3d, 3> hex_corner_edges(const std::array<Point3d, 8> &ACorners, std::size_t ACorner) {
+            std::array<Vector3d, 3> e{};
+            for (std::size_t a = 0; a < 3; ++a) {
+                const std::size_t n = corner_across(HEX_CORNER_UVW, ACorner, a);
+                e[a] = (HEX_CORNER_UVW[ACorner][a] == 0) ? Vector3d(ACorners[ACorner], ACorners[n])
+                                                         : Vector3d(ACorners[n], ACorners[ACorner]);
+            }
+            return e;
+        }
+
+        /**
+         * @brief The 2 edge vectors leaving one corner of a quadrilateral, along `+u` and `+v` —
+         * `hex_corner_edges()` one dimension down, and oriented for the same reason.
+         * @param ACorners The quad's 4 corners, in `QUAD_CORNER_IJ` order.
+         * @param ACorner Which corner.
+         * @return Its 2 edge vectors, in axis order.
+         */
+        static std::array<Vector3d, 2> quad_corner_edges(const std::array<Point3d, 4> &ACorners, std::size_t ACorner) {
+            std::array<Vector3d, 2> e{};
+            for (std::size_t a = 0; a < 2; ++a) {
+                const std::size_t n = corner_across(QUAD_CORNER_IJ, ACorner, a);
+                e[a] = (QUAD_CORNER_IJ[ACorner][a] == 0) ? Vector3d(ACorners[ACorner], ACorners[n])
+                                                         : Vector3d(ACorners[n], ACorners[ACorner]);
+            }
+            return e;
+        }
+
+        /**
+         * @brief The corner reached from @p ACorner by crossing one axis of a quad's or a hex's
+         * grid: the one whose coordinates differ from it in @p AAxis and agree in every other.
+         *
+         * Looked up in the corner table rather than computed from the index, so the 2 layouts stay
+         * the single place that says what a corner index means. Both are unit grids, so exactly one
+         * corner qualifies at every axis.
+         *
+         * @tparam TN The number of corners (4 for a quad, 8 for a hex).
+         * @tparam TD The number of axes (2 or 3), deduced.
+         * @param ATable `QUAD_CORNER_IJ` or `HEX_CORNER_UVW`.
+         * @param ACorner The corner to start from.
+         * @param AAxis The axis to cross.
+         * @return The corner across that axis.
+         */
+        template<std::size_t TN, std::size_t TD>
+        static constexpr std::size_t
+        corner_across(const std::array<std::array<int, TD>, TN> &ATable, std::size_t ACorner, std::size_t AAxis) {
+            for (std::size_t n = 0; n < TN; ++n) {
+                bool match = true;
+                for (std::size_t a = 0; a < TD; ++a) {
+                    if ((ATable[n][a] != ATable[ACorner][a]) != (a == AAxis)) match = false;
+                }
+                if (match) return n;
+            }
+            return ACorner;
+        }
 
         /** @brief A `to_mesh()`-generated node-id chain along one edge attribute's own curve,
          * parameter `t=i/S` at index `i`, plus which physical `Node` corresponds to index 0 — since
@@ -3419,62 +3736,6 @@ namespace gecko {
             if (!best.empty()) return best;
             if (AA.empty() || AB.empty()) return {};
             return infer_targets({&AA, &AB}, GroupDim::Dim0);
-        }
-
-        /**
-         * @brief Refits every cell touching one of @p APoints, and nothing else.
-         *
-         * Deliberately local. Sweeping the whole blocking would also rebuild cells nowhere near the
-         * edit, and rebuilding a cell means re-deriving it from its boundary — which throws away the
-         * exact subdivision geometry a `cut_sheet()` was careful to keep, the same trap `classify()`
-         * documents.
-         *
-         * Nothing here classifies anything by proximity. Corners keep the classification the caller
-         * decided for them, and every cell around them takes what its own boundary agrees on or
-         * nothing at all — never what it happens to be near. A blocking nobody classified stays
-         * unclassified, which is the whole reason an unclassified grid can be taken apart sheet by
-         * sheet: the fallback search would classify its edges onto whatever geometry the merged plane
-         * had drifted onto, and then bend them there.
-         *
-         * @param APoints Where the corners that moved now sit.
-         * @param ATol The per-dimension snapping tolerances, for cells that have to fall back on a
-         *        proximity search.
-         */
-        void refit_around(const std::vector<Point3d> &APoints, const Tolerances &ATol) {
-            const auto moved = [&APoints](Node ANode) {
-                return std::ranges::find(APoints, ANode->info().point) != APoints.end();
-            };
-
-            // Swept exhaustively for the reason `move_node()` documents: a corner's own dart orbit
-            // does not reach every cell that touches it on a still-unsewn block.
-            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
-                 it != itend;
-                 ++it) {
-                const Dart d = it->dart();
-                const Node n0 = m_cmap.template attribute<0>(d);
-                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-                if (!moved(n0) && !moved(n1)) continue;
-                // Straightened before being refitted, the same 2 steps in the same order
-                // `move_node()` and `snap_node()` use between them — and for the same reason. A
-                // corner that moves leaves every curve through it describing where that corner *was*,
-                // and `refit()` falls back on the stored curve's own midpoint to decide what the
-                // edge is classified on. Fed a stale curve it can classify the edge onto whatever
-                // that curve used to pass through and then project its interior there: collapsing a
-                // grid whose merged plane used to sit on a model surface bent one edge a quarter of
-                // its own length, pulled back onto a face it no longer touches.
-                store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
-                refit(it, ATol, true);
-            }
-            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
-                 it != itend;
-                 ++it) {
-                if (face_has_moved_node(it, moved)) refit(it, ATol, true);
-            }
-            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
-                 it != itend;
-                 ++it) {
-                if (block_has_moved_node(it, moved)) refit(it, ATol, true);
-            }
         }
 
         /**
@@ -5900,25 +6161,6 @@ namespace gecko {
             }
             return layer;
         }
-
-        /**
-         * @brief Whether @p AFace bounds a block, rather than being a standalone 2D block's own face.
-         *
-         * The 2 are told apart by the map itself: every dart of a block carries that block's 3-cell,
-         * so a face bounding one has a 3-attribute and a lone quad has none. That distinction decides
-         * which faces `build_connectivity()` may sew at dimension 3, and which ones `to_mesh()` emits
-         * a quad for — a quad being what a standalone 2D block is made of.
-         *
-         * Asked of the map each time rather than kept in a list alongside it. A list has to be
-         * refreshed by every operation that changes which faces belong to a block — a cut splitting
-         * a face in 2, a deletion taking faces away with the block that owned them — and forgetting
-         * one leaves it holding handles to attributes CGAL has already collected. It also cannot
-         * survive the blocking being copied, which snapshot-based undo needs it to.
-         *
-         * @param AFace The face to inspect.
-         * @return true if some block has it on its boundary.
-         */
-        bool belongs_to_block(Face AFace) const { return m_cmap.template attribute<3>(AFace->dart()) != nullptr; }
 
         /** @brief The degree every cell's geometry is built at — see `set_degree()`. */
         std::size_t m_degree = 1;

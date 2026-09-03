@@ -35,9 +35,9 @@ namespace gecko::biy {
          * silently drawn as unclassified. */
         std::array<float, 3> corner_color_on_volume{0.2f, 0.75f, 0.3f};
 
-        /** @brief Half-width of a constrained corner's cube glyph — the counterpart of
-         * `corner_radius` for a shape Polyscope's point cloud cannot draw on its own. */
-        double corner_constrained_size = 0.012;
+        /** @brief Half-width of a held corner's cube glyph, constrained or frozen — the counterpart
+         * of `corner_radius` for a shape Polyscope's point cloud cannot draw on its own. */
+        double corner_cube_size = 0.012;
         /** @brief Color of a frozen corner. Fixed rather than following classification — a frozen
          * node's whole point is that it stopped changing, so its color should not either. */
         std::array<float, 3> corner_color_frozen{0.05f, 0.05f, 0.05f};

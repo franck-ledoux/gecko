@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include <gecko/block/Smoother.h>
 #include <gecko/io/VtkMeshWriter.h>
 
 namespace gecko::app {
@@ -484,6 +485,47 @@ namespace gecko::app {
             return ATargets.empty() ? -1 : static_cast<int>(ATargets.front().first);
         }
     } // namespace
+
+    BlockingFacade::SmoothReport
+    BlockingFacade::smooth(int iterations, const std::vector<int> &locked_node_ids, const std::string &strategy) {
+        if (iterations < 1) {
+            throw std::invalid_argument("Blocking.smooth: iterations must be >= 1, got " + std::to_string(iterations));
+        }
+        using SmootherT = Smoother<FacetedGeometry>;
+        SmootherT::Strategy mode{};
+        if (strategy == "both") {
+            mode = SmootherT::Strategy::Both;
+        } else if (strategy == "laplacian") {
+            mode = SmootherT::Strategy::Laplacian;
+        } else if (strategy == "optimization") {
+            mode = SmootherT::Strategy::Optimization;
+        } else {
+            throw std::invalid_argument("Blocking.smooth: strategy must be one of \"laplacian\", \"optimization\" or "
+                                        "\"both\", got \"" +
+                                        strategy + "\"");
+        }
+
+        Checkpoint checkpoint(*this);
+        SmootherT smoother(m_impl.blocking);
+        std::vector<Int> locked;
+        locked.reserve(locked_node_ids.size());
+        for (const int id : locked_node_ids) {
+            locked.push_back(static_cast<Int>(id));
+        }
+        smoother.set_locked(locked);
+
+        const auto report = smoother.smooth(static_cast<std::size_t>(iterations), mode);
+        // A pass that moved nothing changed nothing, so it should not cost an undo step that takes
+        // back the edit before it — the same rule a refused cut follows.
+        if (report.moves == 0) checkpoint.discard();
+
+        return {static_cast<int>(report.laplacian_passes),
+                static_cast<int>(report.optimization_passes),
+                static_cast<int>(report.moves),
+                report.worst_quality};
+    }
+
+    double BlockingFacade::worst_quality() { return Smoother<FacetedGeometry>(m_impl.blocking).worst_quality(); }
 
     std::vector<int> BlockingFacade::node_classification_dims() const {
         const auto &map = m_impl.blocking.cmap();

@@ -68,7 +68,7 @@ namespace gecko::biy {
             read_color(j, "corner_color_on_curve", config.corner_color_on_curve);
             read_color(j, "corner_color_on_surface", config.corner_color_on_surface);
             read_color(j, "corner_color_on_volume", config.corner_color_on_volume);
-            read_double(j, "corner_constrained_size", config.corner_constrained_size);
+            read_double(j, "corner_cube_size", config.corner_cube_size);
             read_color(j, "corner_color_frozen", config.corner_color_frozen);
             read_double(j, "model_transparency", config.model_transparency);
             read_double(j, "panel_width", config.panel_width);
