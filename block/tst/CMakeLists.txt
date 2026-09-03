@@ -9,6 +9,7 @@ add_executable(test_block
         blocking_pillow_tests.cpp
         blocking_quality_tests.cpp
         blocking_sheet_cut_tests.cpp
+        blocking_smooth_tests.cpp
         blocking_snap_tests.cpp
         cell_data_tests.cpp)
 target_link_libraries(test_block PRIVATE

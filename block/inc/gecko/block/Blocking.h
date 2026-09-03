@@ -637,6 +637,25 @@ namespace gecko {
         bool is_purely_2d() const { return nb_cells<3>() == 0; }
 
         /**
+         * @brief Whether @p AFace bounds a block, rather than being a standalone 2D block's own face.
+         *
+         * The 2 are told apart by the map itself: every dart of a block carries that block's 3-cell,
+         * so a face bounding one has a 3-attribute and a lone quad has none. That distinction decides
+         * which faces `build_connectivity()` may sew at dimension 3, and which ones `to_mesh()` emits
+         * a quad for — a quad being what a standalone 2D block is made of.
+         *
+         * Asked of the map each time rather than kept in a list alongside it. A list has to be
+         * refreshed by every operation that changes which faces belong to a block — a cut splitting
+         * a face in 2, a deletion taking faces away with the block that owned them — and forgetting
+         * one leaves it holding handles to attributes CGAL has already collected. It also cannot
+         * survive the blocking being copied, which snapshot-based undo needs it to.
+         *
+         * @param AFace The face to inspect.
+         * @return true if some block has it on its boundary.
+         */
+        bool belongs_to_block(Face AFace) const { return m_cmap.template attribute<3>(AFace->dart()) != nullptr; }
+
+        /**
          * @brief Checks whether `AFace` can be deleted: currently only requires the blocking to
          * be purely 2D (see `is_purely_2d()`) — face deletion itself has no further
          * classification/topology constraint of its own (every face is unconditionally removable
@@ -2926,6 +2945,62 @@ namespace gecko {
                                                           face_surfaces[5]);
         }
 
+        /**
+         * @brief Refits every cell touching one of @p APoints, and nothing else.
+         *
+         * Deliberately local. Sweeping the whole blocking would also rebuild cells nowhere near the
+         * edit, and rebuilding a cell means re-deriving it from its boundary — which throws away the
+         * exact subdivision geometry a `cut_sheet()` was careful to keep, the same trap `classify()`
+         * documents.
+         *
+         * Nothing here classifies anything by proximity. Corners keep the classification the caller
+         * decided for them, and every cell around them takes what its own boundary agrees on or
+         * nothing at all — never what it happens to be near. A blocking nobody classified stays
+         * unclassified, which is the whole reason an unclassified grid can be taken apart sheet by
+         * sheet: the fallback search would classify its edges onto whatever geometry the merged plane
+         * had drifted onto, and then bend them there.
+         *
+         * @param APoints Where the corners that moved now sit.
+         * @param ATol The per-dimension snapping tolerances, for cells that have to fall back on a
+         *        proximity search.
+         */
+        void refit_around(const std::vector<Point3d> &APoints, const Tolerances &ATol) {
+            const auto moved = [&APoints](Node ANode) {
+                return std::ranges::find(APoints, ANode->info().point) != APoints.end();
+            };
+
+            // Swept exhaustively for the reason `move_node()` documents: a corner's own dart orbit
+            // does not reach every cell that touches it on a still-unsewn block.
+            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
+                 it != itend;
+                 ++it) {
+                const Dart d = it->dart();
+                const Node n0 = m_cmap.template attribute<0>(d);
+                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
+                if (!moved(n0) && !moved(n1)) continue;
+                // Straightened before being refitted, the same 2 steps in the same order
+                // `move_node()` and `snap_node()` use between them — and for the same reason. A
+                // corner that moves leaves every curve through it describing where that corner *was*,
+                // and `refit()` falls back on the stored curve's own midpoint to decide what the
+                // edge is classified on. Fed a stale curve it can classify the edge onto whatever
+                // that curve used to pass through and then project its interior there: collapsing a
+                // grid whose merged plane used to sit on a model surface bent one edge a quarter of
+                // its own length, pulled back onto a face it no longer touches.
+                store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
+                refit(it, ATol, true);
+            }
+            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
+                 it != itend;
+                 ++it) {
+                if (face_has_moved_node(it, moved)) refit(it, ATol, true);
+            }
+            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
+                 it != itend;
+                 ++it) {
+                if (block_has_moved_node(it, moved)) refit(it, ATol, true);
+            }
+        }
+
         /// @}
     private:
         /** @brief The (u,v) grid coordinates (unscaled, in `{0,1}`) of a quad's 4 local corners
@@ -3661,62 +3736,6 @@ namespace gecko {
             if (!best.empty()) return best;
             if (AA.empty() || AB.empty()) return {};
             return infer_targets({&AA, &AB}, GroupDim::Dim0);
-        }
-
-        /**
-         * @brief Refits every cell touching one of @p APoints, and nothing else.
-         *
-         * Deliberately local. Sweeping the whole blocking would also rebuild cells nowhere near the
-         * edit, and rebuilding a cell means re-deriving it from its boundary — which throws away the
-         * exact subdivision geometry a `cut_sheet()` was careful to keep, the same trap `classify()`
-         * documents.
-         *
-         * Nothing here classifies anything by proximity. Corners keep the classification the caller
-         * decided for them, and every cell around them takes what its own boundary agrees on or
-         * nothing at all — never what it happens to be near. A blocking nobody classified stays
-         * unclassified, which is the whole reason an unclassified grid can be taken apart sheet by
-         * sheet: the fallback search would classify its edges onto whatever geometry the merged plane
-         * had drifted onto, and then bend them there.
-         *
-         * @param APoints Where the corners that moved now sit.
-         * @param ATol The per-dimension snapping tolerances, for cells that have to fall back on a
-         *        proximity search.
-         */
-        void refit_around(const std::vector<Point3d> &APoints, const Tolerances &ATol) {
-            const auto moved = [&APoints](Node ANode) {
-                return std::ranges::find(APoints, ANode->info().point) != APoints.end();
-            };
-
-            // Swept exhaustively for the reason `move_node()` documents: a corner's own dart orbit
-            // does not reach every cell that touches it on a still-unsewn block.
-            for (auto it = m_cmap.template attributes<1>().begin(), itend = m_cmap.template attributes<1>().end();
-                 it != itend;
-                 ++it) {
-                const Dart d = it->dart();
-                const Node n0 = m_cmap.template attribute<0>(d);
-                const Node n1 = m_cmap.template attribute<0>(m_cmap.template beta<1>(d));
-                if (!moved(n0) && !moved(n1)) continue;
-                // Straightened before being refitted, the same 2 steps in the same order
-                // `move_node()` and `snap_node()` use between them — and for the same reason. A
-                // corner that moves leaves every curve through it describing where that corner *was*,
-                // and `refit()` falls back on the stored curve's own midpoint to decide what the
-                // edge is classified on. Fed a stale curve it can classify the edge onto whatever
-                // that curve used to pass through and then project its interior there: collapsing a
-                // grid whose merged plane used to sit on a model surface bent one edge a quarter of
-                // its own length, pulled back onto a face it no longer touches.
-                store_curve(it, straight_curve(n0->info().point, n1->info().point), n0);
-                refit(it, ATol, true);
-            }
-            for (auto it = m_cmap.template attributes<2>().begin(), itend = m_cmap.template attributes<2>().end();
-                 it != itend;
-                 ++it) {
-                if (face_has_moved_node(it, moved)) refit(it, ATol, true);
-            }
-            for (auto it = m_cmap.template attributes<3>().begin(), itend = m_cmap.template attributes<3>().end();
-                 it != itend;
-                 ++it) {
-                if (block_has_moved_node(it, moved)) refit(it, ATol, true);
-            }
         }
 
         /**
@@ -6142,25 +6161,6 @@ namespace gecko {
             }
             return layer;
         }
-
-        /**
-         * @brief Whether @p AFace bounds a block, rather than being a standalone 2D block's own face.
-         *
-         * The 2 are told apart by the map itself: every dart of a block carries that block's 3-cell,
-         * so a face bounding one has a 3-attribute and a lone quad has none. That distinction decides
-         * which faces `build_connectivity()` may sew at dimension 3, and which ones `to_mesh()` emits
-         * a quad for — a quad being what a standalone 2D block is made of.
-         *
-         * Asked of the map each time rather than kept in a list alongside it. A list has to be
-         * refreshed by every operation that changes which faces belong to a block — a cut splitting
-         * a face in 2, a deletion taking faces away with the block that owned them — and forgetting
-         * one leaves it holding handles to attributes CGAL has already collected. It also cannot
-         * survive the blocking being copied, which snapshot-based undo needs it to.
-         *
-         * @param AFace The face to inspect.
-         * @return true if some block has it on its boundary.
-         */
-        bool belongs_to_block(Face AFace) const { return m_cmap.template attribute<3>(AFace->dart()) != nullptr; }
 
         /** @brief The degree every cell's geometry is built at — see `set_degree()`. */
         std::size_t m_degree = 1;

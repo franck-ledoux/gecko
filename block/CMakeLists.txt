@@ -17,6 +17,7 @@ target_sources(gecko_block_lib INTERFACE
         FILES
         inc/gecko/block/Blocking.h
         inc/gecko/block/CellData.h
+        inc/gecko/block/Smoother.h
 )
 
 # Dependency to other Gecko modules
