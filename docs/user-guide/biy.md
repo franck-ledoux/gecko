@@ -59,6 +59,7 @@ controls, rebuilt here from its public builders, followed by biy's own:
 | Create bounding box | Creates a hex block spanning the model's bounding box, with a 10% margin                                     |
 | Build connectivity  | Sews coincident blocks together (see `Blocking::build_connectivity`)                                         |
 | Classify            | Snaps the whole blocking onto the model, within the 3 tolerances below                                       |
+| Smooth              | Rearranges the corners so the blocks come out better shaped, leaving frozen ones alone (see below)           |
 | Export VTK          | Writes the generated mesh to `biy_blocking.vtk`, with `classification_dim`/`classification_tag` node scalars |
 
 Polyscope's *Debug* section is dropped — it is an internal texture inspector, and unlike the others
@@ -188,6 +189,31 @@ The status line reports what it snapped onto. That update is local rather than a
 pass — sound precisely because edges and faces infer from their boundary, so no cell the corner
 doesn't touch can have changed.
 
+## Smoothing
+
+**Smooth** rearranges the corners so the blocks come out better shaped. It moves corner positions
+and nothing else: no control point is placed by hand — they are all re-derived at the end, at the
+current order and onto each cell's existing classification — and nothing changes what a cell is
+classified on.
+
+Classification is what holds the result in place, so **classify first**. A corner on a model vertex
+does not move at all; one on a curve slides along that curve; one on a surface stays on that
+surface; only the interior is free. A blocking nobody has classified has nothing holding its
+boundary, and smoothing one pulls it inwards — freeze its boundary corners (`F`) if that is what you
+have.
+
+Two things run in turn, and the panel's **smooth passes** caps each of them. First a *smart
+Laplacian*: every corner is offered the average of its neighbours and moves there only if the worst
+block around it comes out better. Then a search: for each corner in turn, the position that leaves
+the worst block around it as good as it can be — which is what gets past the places a single
+candidate position cannot reach, and where the Laplacian alone would stop. Neither can make the
+worst block in the structure worse than it was, so the number the status line reports only ever goes
+up.
+
+That number is the worst cell's **mean ratio**: 1 where every block is a cube (or every quad a
+square), less as they skew or stretch, and negative for one turned inside out. A pass that moves
+nothing says so and costs no undo step.
+
 ## Control points
 
 **Control points** has one checkbox per kind, drawing the handles that actually drive each curved
@@ -267,8 +293,13 @@ state — the kernel knows nothing of them, and taking an edit back with undo ne
   it on that curve the entire time rather than snapping onto it only at the end — and it never
   re-searches for something else nearby the way the release-time snap does, so it cannot hop onto a
   different entity mid-drag.
-- **Frozen** (a black sphere): does not move at all. Clicking it in Edit mode does nothing, and the
-  panel says why. This is also what a future smoothing pass will be told to leave alone.
+- **Frozen** (a black cube): does not move at all. Clicking it in Edit mode does nothing, and the
+  panel says why, and [Smooth](#smoothing) is told to leave it where it is.
+
+The 2 held states share the cube and are told apart by colour — the constrained one keeps the
+classification colours below, the frozen one is always the same near-black, because what a frozen
+corner has stopped doing is changing and the colour that says what it lies on has nothing left to
+report about it.
 
 Point at a corner — no need to click it — and press **`G`** to toggle Constrained, or **`F`** to
 toggle Frozen. Unfreezing always goes back to Free, whatever the corner was constrained to before

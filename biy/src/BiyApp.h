@@ -67,7 +67,7 @@ namespace gecko::biy {
     enum class NodeConstraint {
         Free = 1,    ///< Moves wherever dragged; the release-time tolerance snap is its only constraint.
         Constrained, ///< Stays on whatever it is already classified on for the whole drag, not only at release.
-        Frozen       ///< Does not move at all — and, later, is what a smoothing pass is asked to leave alone.
+        Frozen       ///< Does not move at all, by hand or under the "Smooth" button, which is told to leave it.
     };
 
     /**
@@ -92,6 +92,12 @@ namespace gecko::biy {
          * extra control points crowd together without following the model any closer, and each one
          * costs on every face and block that touches the edge. */
         static constexpr int MAX_ORDER = 10;
+
+        /** @brief Highest number of smoothing passes the panel offers. Each pass walks every corner
+         * and each of the 2 kinds gets that many, so the cost is linear — but a pass that moves
+         * nothing ends the run early, and by this many nothing is still moving on any blocking
+         * small enough to be built by hand. */
+        static constexpr int MAX_SMOOTH_PASSES = 50;
 
         /**
          * @brief Constructor. Loads the geometric model and registers it for display.
@@ -217,15 +223,15 @@ namespace gecko::biy {
         /** @brief The constraint @p node_id is currently under. @return `NodeConstraint::Free` for
          * a node `m_node_constraint` says nothing about. */
         NodeConstraint constraint_of(int node_id) const;
-        /** @brief Registers (or removes) the 3 constraint displays — free corners as spheres,
-         * constrained ones as cube glyphs, frozen ones as black spheres — colored by classification
-         * except frozen, which is a fixed color by design (see `NodeConstraint`). Drops from
+        /** @brief Registers (or removes) the 3 constraint displays — free corners as spheres, and
+         * both kinds of held corner as cube glyphs, the constrained one colored by classification
+         * and the frozen one a fixed color by design (see `NodeConstraint`). Drops from
          * `m_node_constraint` any id no longer in the blocking, so it cannot grow across a session
          * that keeps deleting and rebuilding the corners it names. */
         void refresh_constraint_displays();
         /** @brief The `(vertices, quads)` of one disjoint axis-aligned cube per point in @p points,
-         * each `2 * half_size` across — what draws a `Constrained` corner, since Polyscope's point
-         * cloud has no cube glyph of its own to ask for.
+         * each `2 * half_size` across — what draws a held corner, constrained or frozen, since
+         * Polyscope's point cloud has no cube glyph of its own to ask for.
          * @param points Where to centre each cube.
          * @param half_size Half the length of a cube's edge.
          * @return Vertex positions and the quads joining them, 8 and 6 per point respectively. */
@@ -357,7 +363,7 @@ namespace gecko::biy {
         std::vector<int> m_vertex_owner;
         /** @copydoc m_vertex_owner but for `BLOCK_VERTICES_CONSTRAINED`'s cube glyphs. */
         std::vector<int> m_vertex_owner_constrained;
-        /** @copydoc m_vertex_owner but for `BLOCK_VERTICES_FROZEN`. */
+        /** @copydoc m_vertex_owner but for `BLOCK_VERTICES_FROZEN`'s cube glyphs. */
         std::vector<int> m_vertex_owner_frozen;
         /** @brief Edge the cursor is currently over in Cut or Collapse mode, as its *id*, or unset
          * when the cursor is over no edge.
@@ -428,6 +434,8 @@ namespace gecko::biy {
          * degree is carried by the geometry rather than by its C++ type, so raising or lowering it
          * refits the structure in place instead of needing a new one. */
         int m_order = 3;
+        /** @brief Passes of each kind one press of "Smooth" is allowed — see `BlockingFacade::smooth()`. */
+        int m_smooth_passes = 10;
         /** @brief Per-dimension snapping tolerances, shared by the "Classify" button and by the
          * snap that runs when a dragged corner is released. Separate values because the scales
          * differ: one loose enough to catch a surface would snap corners to the wrong vertex. */

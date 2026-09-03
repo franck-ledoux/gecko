@@ -52,7 +52,8 @@ namespace gecko::biy {
         /** @brief Constrained corners, drawn as cube glyphs (see `BiyApp::build_cube_glyphs()`) —
          * Polyscope's point cloud has no cube of its own to ask for. */
         constexpr const char *BLOCK_VERTICES_CONSTRAINED = "vertices (constrained)";
-        /** @brief Frozen corners, drawn as a fixed-color point cloud. */
+        /** @brief Frozen corners, drawn as fixed-color cube glyphs — the same glyph a constrained
+         * corner gets, the colour being what tells the 2 apart. */
         constexpr const char *BLOCK_VERTICES_FROZEN = "vertices (frozen)";
         /** @brief The block faces themselves, sampled into quads — not the generated mesh's quads,
          * which exist only for standalone 2D blocks (see `refresh_view()`). */
@@ -749,7 +750,7 @@ namespace gecko::biy {
             draw_scene_entry("edges", curves_or_null(BLOCK_EDGES));
             draw_scene_entry("vertices", points_or_null(BLOCK_VERTICES));
             draw_scene_entry("vertices (constrained)", surface_or_null(BLOCK_VERTICES_CONSTRAINED));
-            draw_scene_entry("vertices (frozen)", points_or_null(BLOCK_VERTICES_FROZEN));
+            draw_scene_entry("vertices (frozen)", surface_or_null(BLOCK_VERTICES_FROZEN));
         }
 
         if (ImGui::CollapsingHeader("Mesh")) {
@@ -1059,6 +1060,37 @@ namespace gecko::biy {
             m_blocking->classify(m_tol_vertex, m_tol_curve, m_tol_surface);
             refresh_view();
             m_status = "Classified onto the model";
+        }
+
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("smooth passes", &m_smooth_passes, 1, 5)) {
+            m_smooth_passes = std::clamp(m_smooth_passes, 1, MAX_SMOOTH_PASSES);
+        }
+        if (ImGui::Button("Smooth")) {
+            // Frozen corners, and only those. Constrained is about what a *drag* may do to a corner
+            // and says nothing about smoothing: a corner told to stay on its curve is one the
+            // smoother keeps on that curve anyway, from the classification itself.
+            std::vector<int> locked;
+            for (const auto &[id, state] : m_node_constraint) {
+                if (state == NodeConstraint::Frozen) locked.push_back(id);
+            }
+            const auto report = m_blocking->smooth(m_smooth_passes, locked);
+            refresh_view();
+            if (report.moves == 0) {
+                m_status = "Nothing left to smooth";
+            } else {
+                m_status = "Smoothed " + std::to_string(report.moves) + " corner moves, worst cell " +
+                           std::to_string(report.worst_quality);
+            }
+            std::cout << "biy [smooth]: " << report.moves << " corner moves over " << report.laplacian_passes
+                      << " laplacian and " << report.optimization_passes << " optimization passes; worst cell "
+                      << report.worst_quality << "." << std::endl;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Moves corners, never control points, and never changes what a cell is classified "
+                              "on: a corner on a model vertex stays put, one on a curve slides along it, one on a "
+                              "surface stays on it. Frozen corners (F) are left alone. An unclassified blocking "
+                              "has nothing holding its boundary and will shrink \u2014 classify first, or freeze it.");
         }
 
         ImGui::SetNextItemWidth(120.0f);
@@ -2045,7 +2077,7 @@ namespace gecko::biy {
 
         if (!m_blocking) {
             drop_surface(BLOCK_VERTICES_CONSTRAINED);
-            drop_points(BLOCK_VERTICES_FROZEN);
+            drop_surface(BLOCK_VERTICES_FROZEN);
             m_vertex_owner_constrained.clear();
             m_vertex_owner_frozen.clear();
             return;
@@ -2088,8 +2120,7 @@ namespace gecko::biy {
         if (constrained_points.empty()) {
             drop_surface(BLOCK_VERTICES_CONSTRAINED);
         } else {
-            const auto [glyph_vertices, glyph_quads] =
-                build_cube_glyphs(constrained_points, m_config.corner_constrained_size);
+            const auto [glyph_vertices, glyph_quads] = build_cube_glyphs(constrained_points, m_config.corner_cube_size);
             const auto shown = enabled_state(surface_or_null(BLOCK_VERTICES_CONSTRAINED));
             auto *mesh = polyscope::registerSurfaceMesh(BLOCK_VERTICES_CONSTRAINED, glyph_vertices, glyph_quads);
             std::vector<glm::vec3> colors;
@@ -2104,18 +2135,16 @@ namespace gecko::biy {
         }
 
         if (frozen_points.empty()) {
-            drop_points(BLOCK_VERTICES_FROZEN);
+            drop_surface(BLOCK_VERTICES_FROZEN);
         } else {
-            std::vector<glm::vec3> pts;
-            pts.reserve(frozen_points.size());
-            for (const auto &p : frozen_points) {
-                pts.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
-            }
-            const auto shown = enabled_state(points_or_null(BLOCK_VERTICES_FROZEN));
-            auto *cloud = polyscope::registerPointCloud(BLOCK_VERTICES_FROZEN, pts);
-            cloud->setPointRadius(m_config.corner_radius);
-            cloud->setPointColor(to_glm(m_config.corner_color_frozen));
-            restore_enabled(cloud, shown, true);
+            // A cube like a constrained corner, and one fixed colour rather than the classification
+            // convention: what a frozen corner has stopped doing is changing, so the colour that
+            // says what it is classified on has nothing left to report about it.
+            const auto [glyph_vertices, glyph_quads] = build_cube_glyphs(frozen_points, m_config.corner_cube_size);
+            const auto shown = enabled_state(surface_or_null(BLOCK_VERTICES_FROZEN));
+            auto *mesh = polyscope::registerSurfaceMesh(BLOCK_VERTICES_FROZEN, glyph_vertices, glyph_quads);
+            mesh->setSurfaceColor(to_glm(m_config.corner_color_frozen));
+            restore_enabled(mesh, shown, true);
         }
     }
 
@@ -2133,8 +2162,12 @@ namespace gecko::biy {
                 const std::size_t glyph = hit.index / 6;
                 if (glyph < m_vertex_owner_constrained.size()) return m_vertex_owner_constrained[glyph];
             }
-        } else if (pick.structureName == BLOCK_VERTICES_FROZEN && polyscope::hasPointCloud(BLOCK_VERTICES_FROZEN)) {
-            if (pick.localIndex < m_vertex_owner_frozen.size()) return m_vertex_owner_frozen[pick.localIndex];
+        } else if (pick.structureName == BLOCK_VERTICES_FROZEN && polyscope::hasSurfaceMesh(BLOCK_VERTICES_FROZEN)) {
+            const auto hit = polyscope::getSurfaceMesh(BLOCK_VERTICES_FROZEN)->interpretPickResult(pick);
+            if (hit.elementType == polyscope::MeshElement::FACE) {
+                const std::size_t glyph = hit.index / 6;
+                if (glyph < m_vertex_owner_frozen.size()) return m_vertex_owner_frozen[glyph];
+            }
         }
         return std::nullopt;
     }
