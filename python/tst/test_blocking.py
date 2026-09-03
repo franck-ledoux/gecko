@@ -1502,3 +1502,155 @@ def test_an_edge_along_a_cylinder_ruling_keeps_a_straight_control_net():
         on_surface = [bends[i] for i, d in enumerate(dims) if d == 2]
         assert len(on_surface) == 4
         assert max(on_surface) < 1e-2
+
+
+_GRID_2X2 = [
+    [(x, y, 0.0), (x + 0.5, y, 0.0), (x + 0.5, y + 0.5, 0.0), (x, y + 0.5, 0.0)]
+    for x in (0.0, 0.5)
+    for y in (0.0, 0.5)
+]
+
+
+def _square_grid(square_model_path, degree=1):
+    """A 2x2 grid of quad blocks tiling the unit square, sewn and classified onto it."""
+    model = gecko.GeomModel(square_model_path)
+    blocking = gecko.Blocking(model, degree)
+    for corners in _GRID_2X2:
+        blocking.create_quad_block(corners)
+    blocking.build_connectivity()
+    blocking.classify(0.05)
+    return model, blocking
+
+
+def _node_at(blocking, point, tol=1e-9):
+    """The id of the corner sitting at point."""
+    for node_id in blocking.node_ids():
+        if all(abs(a - b) <= tol for a, b in zip(blocking.node_position(node_id), point)):
+            return node_id
+    raise AssertionError(f"no node at {point}")
+
+
+def test_smooth_pulls_a_displaced_corner_back_and_reports_what_it_did(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    centre = _node_at(blocking, (0.5, 0.5, 0.0))
+    blocking.move_node(centre, 0.35, 0.6, 0.0)
+
+    report = blocking.smooth(10)
+
+    assert report.moves == 1
+    assert report.laplacian_passes >= 1
+    assert report.worst_quality == pytest.approx(1.0)
+    assert blocking.node_position(centre) == pytest.approx((0.5, 0.5, 0.0))
+
+
+def test_smooth_leaves_a_locked_corner_where_it_is(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    centre = _node_at(blocking, (0.5, 0.5, 0.0))
+    blocking.move_node(centre, 0.35, 0.6, 0.0)
+
+    blocking.smooth(10, locked_node_ids=[centre])
+
+    assert blocking.node_position(centre) == pytest.approx((0.35, 0.6, 0.0))
+
+
+def test_smooth_keeps_a_corner_on_the_curve_it_is_classified_on(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    # This corner is classified on the square's bottom curve, y = 0.
+    bottom = _node_at(blocking, (0.5, 0.0, 0.0))
+    assert blocking.node_classification_dims()[blocking.node_ids().index(bottom)] == 1
+    blocking.move_node(bottom, 0.15, 0.0, 0.0)
+
+    blocking.smooth(20)
+
+    x, y, z = blocking.node_position(bottom)
+    assert y == pytest.approx(0.0, abs=1e-12)
+    assert z == pytest.approx(0.0, abs=1e-12)
+    assert x == pytest.approx(0.5)
+
+
+def test_smooth_never_moves_a_corner_pinned_to_a_model_vertex(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    corners = [_node_at(blocking, p) for p in [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)]]
+    blocking.move_node(_node_at(blocking, (0.5, 0.5, 0.0)), 0.2, 0.75, 0.0)
+
+    blocking.smooth(20)
+
+    for node_id, expected in zip(corners, [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)]):
+        assert blocking.node_position(node_id) == pytest.approx(expected)
+
+
+def test_worst_quality_is_1_for_a_regular_grid_and_rises_when_smoothing(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    assert blocking.worst_quality() == pytest.approx(1.0)
+
+    blocking.move_node(_node_at(blocking, (0.5, 0.5, 0.0)), 0.15, 0.85, 0.0)
+    before = blocking.worst_quality()
+    assert before < 1.0
+
+    report = blocking.smooth(30)
+
+    assert report.worst_quality >= before
+    assert blocking.worst_quality() == pytest.approx(report.worst_quality)
+
+
+def test_smoothing_a_regular_grid_moves_nothing_and_costs_no_undo_step(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    could_undo = blocking.can_undo()
+
+    report = blocking.smooth(10)
+
+    assert report.moves == 0
+    # A pass that changed nothing must not spend an undo step undoing nothing — the same rule a
+    # refused cut follows.
+    assert blocking.can_undo() == could_undo
+
+
+def test_smooth_is_undoable(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    centre = _node_at(blocking, (0.5, 0.5, 0.0))
+    blocking.move_node(centre, 0.35, 0.6, 0.0)
+
+    blocking.smooth(10)
+    assert blocking.node_position(centre) == pytest.approx((0.5, 0.5, 0.0))
+
+    blocking.undo()
+    assert blocking.node_position(centre) == pytest.approx((0.35, 0.6, 0.0))
+
+
+def test_smooth_ignores_a_locked_id_naming_no_node(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    centre = _node_at(blocking, (0.5, 0.5, 0.0))
+    blocking.move_node(centre, 0.35, 0.6, 0.0)
+
+    # A caller keeping a set of locked corners across edits is not made to prune it.
+    blocking.smooth(10, locked_node_ids=[9999])
+
+    assert blocking.node_position(centre) == pytest.approx((0.5, 0.5, 0.0))
+
+
+def test_the_optimization_pass_improves_on_where_the_laplacian_stops(square_model_path):
+    def run(strategy):
+        _model, blocking = _square_grid(square_model_path)
+        bottom = _node_at(blocking, (0.5, 0.0, 0.0))
+        blocking.move_node(bottom, 0.15, 0.0, 0.0)
+        return blocking.smooth(60, locked_node_ids=[bottom], strategy=strategy)
+
+    laplacian = run("laplacian")
+    both = run("both")
+
+    assert laplacian.optimization_passes == 0
+    assert both.optimization_passes > 0
+    assert both.worst_quality > laplacian.worst_quality
+
+
+@pytest.mark.parametrize("iterations", [0, -1])
+def test_smooth_rejects_a_useless_iteration_count(square_model_path, iterations):
+    _model, blocking = _square_grid(square_model_path)
+    with pytest.raises(ValueError):
+        blocking.smooth(iterations)
+
+
+def test_smooth_rejects_an_unknown_strategy(square_model_path):
+    _model, blocking = _square_grid(square_model_path)
+    with pytest.raises(ValueError):
+        blocking.smooth(10, strategy="annealing")

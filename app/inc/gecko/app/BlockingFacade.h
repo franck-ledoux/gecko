@@ -283,6 +283,60 @@ namespace gecko::app {
          */
         [[nodiscard]] std::array<double, 3> project_onto_classification(int node_id, double x, double y, double z);
 
+        /** @brief What one smooth() call did — see gecko::Smoother::Report, which this mirrors. */
+        struct SmoothReport {
+            /** @brief Laplacian passes run; fewer than asked for when the blocking settled. */
+            int laplacian_passes = 0;
+            /** @brief Optimization passes run, likewise. */
+            int optimization_passes = 0;
+            /** @brief Corners moved, summed over every pass. */
+            int moves = 0;
+            /** @brief The worst cell quality in the blocking afterwards, in (-inf, 1]. */
+            double worst_quality = 0.0;
+        };
+
+        /**
+         * @brief Smooths the blocking: corners are pulled towards their neighbours and settled where
+         * the cells around them come out best, without moving a single control point by hand and
+         * without changing what anything is classified on.
+         *
+         * Classification does the holding. A corner on a model vertex does not move; one on a curve
+         * stays on that curve, one on a surface on that surface; only the interior is free. An
+         * *unclassified* blocking has nothing holding its boundary, so smoothing one shrinks it —
+         * classify() first, or lock the boundary through @p locked_node_ids.
+         *
+         * Runs in 2 kinds of pass, and @p strategy picks which: the smart Laplacian offers each
+         * corner the average of its neighbours and takes it only if the worst cell around the corner
+         * improves; the optimization pass then searches for the position that leaves that worst cell
+         * as good as it can be, which is how it gets past the positions a single candidate cannot
+         * reach. Neither can lower the worst cell in the blocking, ever.
+         *
+         * Control points are re-derived once at the end, around the corners that actually moved, at
+         * the blocking's current degree and onto each cell's existing classification.
+         *
+         * @param iterations Maximum passes of each kind, at least 1.
+         * @param locked_node_ids Corners no pass may move, from node_ids(). An id naming no node is
+         *        simply never matched — a caller keeping a set of locked corners across edits is not
+         *        made to prune it (see gecko::Smoother::lock()).
+         * @param strategy "laplacian", "optimization", or "both" (the default).
+         * @return What the call did.
+         * @throw std::invalid_argument if @p iterations is below 1, or @p strategy is none of those.
+         */
+        SmoothReport
+        smooth(int iterations, const std::vector<int> &locked_node_ids = {}, const std::string &strategy = "both");
+
+        /**
+         * @brief The worst cell quality anywhere in the blocking, without changing anything.
+         *
+         * The mean ratio of the worst-shaped cell (see Blocking::block_quality()): 1 where every
+         * cell is a cube or a square, less as they skew or stretch, 0 where one has collapsed, and
+         * negative where one has turned inside out. What smooth() raises, and what says whether it
+         * still has anything to raise.
+         *
+         * @return That minimum, or 1 for a blocking with no cell in it yet.
+         */
+        [[nodiscard]] double worst_quality();
+
         /**
          * @brief Gets what each corner node is classified on, in node_ids() order.
          * @return One entry per node: the dimension of the geometric entity it is classified on
